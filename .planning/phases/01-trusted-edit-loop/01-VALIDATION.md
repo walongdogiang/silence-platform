@@ -62,7 +62,7 @@ updated: "2026-11-05"
 - [ ] Unit tests for permission remember + workspace persistence load/save
 - [ ] UTF-8 Vietnamese + long-path shell/file fixtures under `crates/tools`
 - [ ] Bind-address guard test for TCP serve
-- [ ] Optional: 1–2 `evals/v0` shell reliability tasks (not full suite)
+- [ ] Mandatory: ≥1 `evals/v0` task definition for shell UTF and/or staged-edit path (live `npm run evals` may skip without keys; not full 20-suite gate)
 - [ ] Framework install: none — use existing cargo/npm
 
 ---
