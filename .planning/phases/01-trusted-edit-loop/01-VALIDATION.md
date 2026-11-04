@@ -49,7 +49,7 @@ updated: "2026-11-05"
 | 01-03-T3 | 01-03 | 3 | PERM-01 | T-01-07 | Remember checkbox + Ask banner | cargo + human-check | `cargo test -p silence-engine` | ✅ UI | ⬜ pending |
 | 01-04-T1 | 01-04 | 3 | WIN-01, METR-04 | T-01-12 | Shell UTF + long-path green | unit | `cargo test -p silence-tools vietnamese_utf8 long_nested` | ❌→✅ | ⬜ pending |
 | 01-04-T2 | 01-04 | 3 | NET-01, WIN-02 | T-01-10 | Bind loopback only; Engine separate | unit | `cargo test -p silence-engine bind_refuses` | ❌→✅ | ⬜ pending |
-| 01-04-T3 | 01-04 | 3 | METR-04, WIN-01 | T-01-11 | ConPTY keep + optional 1–2 evals | unit (+ optional eval) | `cargo test -p silence-tools -p silence-engine -p silence-sandbox` | ⚠️ | ⬜ pending |
+| 01-04-T3 | 01-04 | 3 | METR-04, WIN-01 | T-01-11 | ConPTY keep + ≥1 mandatory evals/v0 task def (live evals skip if no keys) | unit (+ eval def) | `cargo test -p silence-tools -p silence-engine -p silence-sandbox` + manifest has UTF/staged/shell task | ⚠️ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*  
 *01-03-T1 is checkpoint:decision (no automated row).*

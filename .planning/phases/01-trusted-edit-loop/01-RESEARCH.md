@@ -125,7 +125,7 @@ The phase fails its locked LOOP-01 semantics today because mutating file tools *
 
 1. **Walking Skeleton (recommended):** One production tracer — workspace open → prompt → `edit` staged Diff → user Apply writes + audit → Reject leaves disk unchanged → permission Ask with remember persisted for that workspace. Defer multi-file queue polish, Monaco side-by-side hunk UI, and shell path expansion beyond reliability fixes.
 2. **Apply/reject UX:** Keep ChatPane banner + existing DiffPane for tracer; do not rebuild DiffPane as a full review IDE in Phase 1.
-3. **METR-04 evals:** Prefer `cargo test -p silence-tools` (UTF Vietnamese round-trip, path >260 via `\\?\` or enabled long paths) + optional interactive PTY smoke; add **at most 1–2** `evals/v0` tasks that exercise `shell` (e.g. `echo` Vietnamese + create file under nested long path). Do **not** require full 20-task / ≥70% suite (Phase 3).
+3. **METR-04 evals:** Prefer `cargo test -p silence-tools` (UTF Vietnamese round-trip, path >260 via `\\?\` or enabled long paths) + optional interactive PTY smoke; add **at least 1** (at most 2) `evals/v0` task definitions that exercise `shell` UTF and/or staged-edit (e.g. `echo` Vietnamese + create file under nested long path). Live `npm run evals` may skip without keys. Do **not** require full 20-task / ≥70% suite (Phase 3).
 4. **Permission remember storage:** Store under workspace `.silence/permissions.json` (or Engine data_dir map keyed by canonical workspace path) with schema `{ "allow_tools": ["edit","write","shell"] }`. Load into session allowlist on `session.create`. Prefer workspace-local file so clone/share semantics stay obvious; do not use renderer `localStorage` as source of truth (bypassable / not Engine-enforced).
 
 ## Standard Stack
@@ -403,20 +403,23 @@ let _child = pair.slave.spawn_command(cmd).context("spawn pty cmd")?;
 
 ## Open Questions
 
-1. **Staging vs revert-on-reject**
+1. **Staging vs revert-on-reject** `(RESOLVED)`
    - What we know: Locked text says review then apply/reject; code auto-writes today.
    - What's unclear: Product preference if Ask already approved the mutation.
    - Recommendation: Prefer staging (Apply is the disk commit). Planner should lock this in PLAN.md Wave 0.
+   - **RESOLVED: stage-then-apply** — Apply commits pending bytes; Reject leaves disk at `before` (D-01; plans 01-01 / 01-02). Not auto-apply+revert.
 
-2. **Permission remember granularity**
+2. **Permission remember granularity** `(RESOLVED)`
    - What we know: Allowlist matches tool name string today.
    - What's unclear: Remember per-tool vs per-tool+args pattern.
    - Recommendation: Remember by tool name (`edit`, `write`, `shell`) for Phase 1; arg-scoped keys later.
+   - **RESOLVED: tool name** — remember keys are tool names only for Phase 1 (PERM-01 / D-03; plan 01-03). Arg-scoped keys deferred.
 
-3. **Named pipe for Studio production**
+3. **Named pipe for Studio production** `(RESOLVED)`
    - What we know: ADR prefers named pipe; Studio uses TCP loopback ephemeral.
    - What's unclear: Whether Phase 1 must switch Studio to named pipe.
    - Recommendation: Keep TCP loopback for Phase 1 if bind guard + process isolation pass; track pipe as hardening follow-up (still NET-01 compliant).
+   - **RESOLVED: keep TCP 127.0.0.1 for Studio in Phase 1; named pipe optional later** — Studio spawn stays `serve --tcp 127.0.0.1:0` with loopback bind guard (NET-01 / D-06; plan 01-04). Named-pipe cutover is not required in Phase 1.
 
 ## Environment Availability
 
@@ -467,7 +470,7 @@ Step 2.6: External tools checked (node/npm/cargo/powershell). Graphify disabled 
 - [ ] Unit tests for permission remember + workspace persistence load/save
 - [ ] UTF-8 Vietnamese + long-path shell/file fixtures under `crates/tools`
 - [ ] Bind-address guard test for TCP serve
-- [ ] Optional: 1–2 `evals/v0` shell reliability tasks (not full suite)
+- [ ] Mandatory: ≥1 `evals/v0` shell UTF or staged-edit task definition (live run may skip without keys; not full suite)
 - [ ] Framework install: none — use existing cargo/npm
 
 ## Security Domain
