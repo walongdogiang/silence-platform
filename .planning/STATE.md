@@ -16,14 +16,14 @@ progress:
 See: `.planning/PROJECT.md` and `docs/PRD.md`.
 
 **Core value:** Harness that can edit a local workspace with permission, plan-approve, and eval. Not a VS Code fork. BMAD/GSD/ECC stay out of the product UI.
-**Current focus:** Phase 1 — Trusted edit loop (research done; ready to plan).
+**Current focus:** Phase 1 — Trusted edit loop (UI-SPEC draft; ready for UI checker / plan).
 
 ## Current Position
 
 Phase: 1 of 6 (Trusted edit loop)
 Plan: — of — in current phase
-Status: Research complete — ready for PLAN.md
-Last activity: 2026-11-05 — Phase 1 RESEARCH.md written (brownfield gap analysis: stage/apply, permission remember, Windows shell).
+Status: UI-SPEC draft written — ready for checker then PLAN.md
+Last activity: 2026-11-05 — Phase 1 01-UI-SPEC.md (Diff Apply/Reject, Permission Ask+remember, brownfield tokens).
 
 Progress: [░░░░░░░░░░] 0%
 
