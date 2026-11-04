@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: Trusted edit loop
 status: planning
-stopped_at: Phase 1 plans written — ready for execute
-last_updated: "2026-11-05T06:10:00.000Z"
+stopped_at: Phase 1 plans revised after checker — ready for execute
+last_updated: "2026-11-05T06:25:00.000Z"
 last_activity: 2026-11-05
-last_activity_desc: Phase 1 PLAN.md set (4 plans) + Walking Skeleton 01-SKELETON.md created.
+last_activity_desc: Revised Phase 1 plans for checker blockers (research_resolution, test-name contracts) + warnings.
 state_head: b11419b4065c77e0da146a27236d695060eeabe3
 progress:
   total_phases: 6
@@ -29,8 +29,8 @@ See: `.planning/PROJECT.md` and `docs/PRD.md`.
 
 Phase: 1 of 6 (Trusted edit loop)
 Plan: 0 of 4 in current phase
-Status: Plans written — ready for `/gsd-execute-phase 1`
-Last activity: 2026-11-05 — Created 01-01..01-04 PLAN.md, 01-SKELETON.md; ROADMAP Plans updated.
+Status: Plans revised after checker — ready for `/gsd-execute-phase 1`
+Last activity: 2026-11-05 — Checker revision: RESEARCH open questions resolved; unified stage test names; Wave 0 filtered verify; mandatory evals/v0 task def in 01-04.
 
 Progress: [░░░░░░░░░░] 0%
 
