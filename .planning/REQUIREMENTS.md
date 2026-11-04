@@ -90,30 +90,30 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LOOP-01 | — | Pending |
-| LOOP-02 | — | Pending |
-| LOOP-03 | — | Pending |
-| MODL-01 | — | Pending |
-| MODL-02 | — | Pending |
-| MCP-01 | — | Pending |
-| SUBA-01 | — | Pending |
-| COST-01 | — | Pending |
-| AUDT-01 | — | Pending |
-| WIN-01 | — | Pending |
-| WIN-02 | — | Pending |
-| PERM-01 | — | Pending |
-| SEC-01 | — | Pending |
-| NET-01 | — | Pending |
-| METR-01 | — | Pending |
-| METR-02 | — | Pending |
-| METR-03 | — | Pending |
-| METR-04 | — | Pending |
+| LOOP-01 | Phase 1 | Pending |
+| LOOP-02 | Phase 2 | Pending |
+| LOOP-03 | Phase 1 | Pending |
+| MODL-01 | Phase 3 | Pending |
+| MODL-02 | Phase 3 | Pending |
+| MCP-01 | Phase 4 | Pending |
+| SUBA-01 | Phase 5 | Pending |
+| COST-01 | Phase 6 | Pending |
+| AUDT-01 | Phase 6 | Pending |
+| WIN-01 | Phase 1 | Pending |
+| WIN-02 | Phase 1 | Pending |
+| PERM-01 | Phase 1 | Pending |
+| SEC-01 | Phase 3 | Pending |
+| NET-01 | Phase 1 | Pending |
+| METR-01 | Phase 3 | Pending |
+| METR-02 | Phase 3 | Pending |
+| METR-03 | Phase 3 | Pending |
+| METR-04 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 18 total
-- Mapped to phases: 0
-- Unmapped: 18 ⚠️
+- Mapped to phases: 18
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-04*
-*Last updated: 2026-11-04 after PRD express resume (skip map, skip research)*
+*Last updated: 2026-11-05 after initial ROADMAP (6 MVP phases)*
