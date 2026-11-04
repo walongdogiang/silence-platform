@@ -1,10 +1,11 @@
 ---
 phase: "01"
 slug: "trusted-edit-loop"
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: "2026-11-05"
+reviewed_at: "2026-11-05T05:27:00+07:00"
 ---
 
 # Phase 1 — UI Design Contract
@@ -199,16 +200,24 @@ Applicable state considerations resolved: 8 covered, 0 backstop, 0 unresolved
 
 ---
 
+## Focal point (Chat Workspace — Phase 1)
+
+Primary reading surface remains Chat Workspace. Eye-order by state:
+1. Empty / no workspace → **Mở workspace** (empty-hub)
+2. Permission Ask → warn banner + **Cho phép**
+3. Pending Diff → Diff banner **Apply** (accent) over DiffPane canvas
+4. Idle with session → composer prompt path
+
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking) — **Apply** / **Reject** intentional single-word exceptions (shipped Diff chrome)
+- [x] Dimension 2 Visuals: FLAG (non-blocking) — focal point / hierarchy documented above
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-11-05 (gsd-ui-checker — FLAG overall, no BLOCK)
 
 **Dimension 7 note:** Component Inventory section omitted because `Tool: none` (template rule). First-party Studio components for this phase live under `apps/studio/src/renderer/components/` (14 `*.tsx` files on disk as of 2026-11-05); Phase 1 touchpoints: `ChatPane.tsx`, `DiffPane.tsx`, `Composer.tsx`, `App.tsx` wiring. Icons: `lucide-react@1.61.0`. Editor: `@monaco-editor/react@4.7.0`.
