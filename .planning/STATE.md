@@ -1,6 +1,13 @@
 ---
-gsd_state_version: '1.0'
+gsd_state_version: "1.0"
+current_phase: 1
+current_phase_name: Trusted edit loop
 status: planning
+stopped_at: Phase 1 UI-SPEC approved
+last_updated: "2026-11-04T22:31:05.467Z"
+last_activity: 2026-11-05
+last_activity_desc: Phase 1 01-UI-SPEC.md (Diff Apply/Reject, Permission Ask+remember, brownfield tokens).
+state_head: 709b5cc35fe171e4b3c9f93938e75ac46a97cf48
 progress:
   total_phases: 6
   completed_phases: 0
@@ -78,6 +85,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05
-Stopped at: Project initialized; ready for `/gsd-plan-phase 1 --prd docs/PRD.md`
-Resume file: None
+Last session: 2026-11-04T22:31:05.410Z
+Stopped at: Phase 1 UI-SPEC approved
+Resume file: .planning/phases/5ilence-01-trusted-edit-loop/01-UI-SPEC.md
