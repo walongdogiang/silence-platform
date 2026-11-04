@@ -20,29 +20,22 @@ Deliver the year-1 **trusted edit loop** on the existing brownfield Studio + Eng
 ## Implementation Decisions
 
 ### Core loop (locked from PRD / ROADMAP)
-- User opens a workspace, prompts AI; agent reads/greps/edits files and runs shell; user reviews diff then apply/reject (LOOP-01)
-- UI never calls the model; every file change goes through the tool runtime with diff + audit (LOOP-03)
-- Success: Studio renderer never calls model or tools directly — only Engine via RPC
+- **D-01:** User opens a workspace, prompts AI; agent reads/greps/edits files and runs shell; user reviews diff then apply/reject (LOOP-01). Disk mutation uses stage-then-apply: Apply commits; Reject leaves disk at `before`.
+- **D-02:** UI never calls the model; every file change goes through the tool runtime with diff + audit (LOOP-03). Studio renderer never calls model or tools directly — only Engine via RPC.
 
 ### Permissions (locked)
-- Permission default = `ask` (rememberable per workspace); no silent YOLO (PERM-01)
-- Risky tools must prompt before execution
+- **D-03:** Permission default = `ask` (rememberable per workspace); no silent YOLO (PERM-01). Risky tools must prompt before execution.
 
 ### Windows / process isolation (locked)
-- Default terminal ConPTY + PowerShell; long paths; UTF-16/UTF-8 including Vietnamese must not break (WIN-01, METR-04)
-- Engine (Rust sidecar) is a separate process — UI crash does not kill the agent (WIN-02)
-- IPC local-only (named pipe / loopback); no LAN bind (NET-01)
+- **D-04:** Default terminal ConPTY + PowerShell; long paths; UTF-16/UTF-8 including Vietnamese must not break (WIN-01, METR-04)
+- **D-05:** Engine (Rust sidecar) is a separate process — UI crash does not kill the agent (WIN-02)
+- **D-06:** IPC local-only (named pipe / loopback); no LAN bind (NET-01)
 
 ### Architecture (locked from ADR)
-- Electron + React Studio; Rust `silence-engine` owns harness
-- JSON-RPC over named pipe (Windows) or TCP `127.0.0.1` for dev
-- No napi-rs as primary IPC; Monaco editor (no VS Code fork year 1)
-- Protocol dual-sourced: `packages/protocol` + `crates/protocol`
+- **D-07:** Electron + React Studio; Rust `silence-engine` owns harness; JSON-RPC over named pipe (Windows) or TCP `127.0.0.1` for dev; no napi-rs as primary IPC; Monaco editor (no VS Code fork year 1); protocol dual-sourced: `packages/protocol` + `crates/protocol`
 
 ### Product principles (locked)
-- Cloud models are the year-1 direction overall, but Phase 1 only needs a working prompt→tool→diff path (provider wiring depth belongs mainly to Phase 3)
-- GSD/BMAD/ECC must not ship into product UI
-- Brand surfaces: 5ilence Studio / Engine / Agent; keep existing `apps/studio` + `silence-engine` paths
+- **D-08:** Cloud models are the year-1 direction overall, but Phase 1 only needs a working prompt→tool→diff path (provider wiring depth belongs mainly to Phase 3); GSD/BMAD/ECC must not ship into product UI; brand surfaces: 5ilence Studio / Engine / Agent; keep existing `apps/studio` + `silence-engine` paths
 
 ### Claude's Discretion
 - Exact gap analysis of what already works vs missing in brownfield Studio/Engine for LOOP-01

@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Trusted edit loop
-**Goal:** User can open a local workspace, prompt the agent, review file/shell work as diffs, and apply or reject under ask-by-default permissions — with Engine isolated on local-only IPC and reliable Windows shell.
+**Goal:** As a Windows developer, I want to open a local workspace, prompt the agent, review staged file diffs and Apply or Reject under ask permissions, so that Engine-only edits stay trusted on local-only IPC with reliable PowerShell.
 **Mode:** mvp
 **Depends on:** Nothing (first phase)
 **Requirements:** LOOP-01, LOOP-03, WIN-01, WIN-02, PERM-01, NET-01, METR-04
@@ -31,7 +31,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. User reviews proposed file changes as diffs and can apply or reject; every change goes through the tool runtime with audit.
   3. Risky tools prompt with permission default `ask` (rememberable per workspace); there is no silent YOLO path.
   4. Engine runs as a separate process on local-only IPC (named pipe / loopback); UI crash does not kill the agent, and ConPTY + PowerShell handles long paths and Vietnamese UTF without breaking shell tools.
-**Plans:** TBD
+**Plans:** 4 plans
+Plans:
+- [ ] 01-01-PLAN.md — Wave 0 Nyquist failing tests (stage, permission, UTF/long-path, bind)
+- [ ] 01-02-PLAN.md — Walking Skeleton tracer: stage-then-apply Diff Apply/Reject + audit
+- [ ] 01-03-PLAN.md — PERM-01 remember (name_hint + workspace store + Studio checkbox)
+- [ ] 01-04-PLAN.md — WIN/NET/METR-04 shell UTF, ConPTY keep, loopback bind guard
 **UI hint**: yes
 
 ### Phase 2: Plan-then-edit
@@ -102,7 +107,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Trusted edit loop | 0/TBD | Not started | - |
+| 1. Trusted edit loop | 0/4 | Planned | - |
 | 2. Plan-then-edit | 0/TBD | Not started | - |
 | 3. Cloud model and Auto | 0/TBD | Not started | - |
 | 4. Workspace MCP | 0/TBD | Not started | - |
