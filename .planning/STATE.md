@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: Trusted edit loop
 status: planning
-stopped_at: Phase 1 plans revised after checker — ready for execute
-last_updated: "2026-11-05T06:25:00.000Z"
+stopped_at: Phase 1 plans verified — ready to execute
+last_updated: "2026-11-05T00:07:27.222Z"
 last_activity: 2026-11-05
 last_activity_desc: Revised Phase 1 plans for checker blockers (research_resolution, test-name contracts) + warnings.
-state_head: b11419b4065c77e0da146a27236d695060eeabe3
+state_head: b228369c48f145cec69f983e0ac09734eaac377d
 progress:
   total_phases: 6
   completed_phases: 0
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 - `templates/silence/AGENTS.md` still forbids the **in-app** 5ilence agent from committing unless the end user asks.
 - Cursor build-repo instructions live in root `AGENTS.md` (not `.cursorules`). `.planning/config.json` `claude_md_path` is `./AGENTS.md`.
 - Repo/folder brand name: **`5ilence`**. Product surfaces: Studio (`apps/studio`) / Engine (`silence-engine`) / Agent / CLI. Họ crate phụ vẫn `silence-*`. CLI (C11) later.
+- GSD `project_code` is **`SILENCE`** (letter-first; must not be `5ilence` — digit-leading codes break phase-dir matching). Brand/path stay `5ilence`; phase dirs stay `NN-slug` (e.g. `01-trusted-edit-loop`).
 - Roadmap: six vertical MVP phases aligned to year-1 jobs; Windows/NFR + metrics folded into Phases 1 and 3; v2 backlog not phased.
 - Phase 1 locked D-01..D-08 in `01-CONTEXT.md` (stage-then-apply, Ask+remember, Engine isolation, local-only IPC, dual protocol, no GSD in product UI).
 
@@ -86,6 +87,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T06:10:00.000Z
-Stopped at: Phase 1 plans written — ready for execute
+Last session: 2026-11-05T00:07:27.181Z
+Stopped at: Phase 1 plans verified — ready to execute
 Resume file: .planning/phases/01-trusted-edit-loop/01-01-PLAN.md

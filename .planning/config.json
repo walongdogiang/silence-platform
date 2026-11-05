@@ -55,7 +55,7 @@
     "context_warnings": true,
     "workflow_guard": false
   },
-  "project_code": "5ilence",
+  "project_code": "SILENCE",
   "agent_skills": {},
   "claude_md_path": "./AGENTS.md"
 }

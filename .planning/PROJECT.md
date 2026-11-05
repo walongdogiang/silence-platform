@@ -15,3 +15,5 @@ Canonical product spec: `docs/PRD.md`. Architecture: `docs/adr/0001-architecture
 GSD in this repo is for **Cursor building 5ilence**, not for shipping GSD into the app.
 
 Do **not** run `/gsd-new-project` in a way that overwrites `docs/PRD.md`. Plan with `/gsd-plan-phase --prd docs/PRD.md`.
+
+GSD `project_code` in `.planning/config.json` is **`SILENCE`** (technical prefix only). Product/repo brand remains **`5ilence`**. Do not set `project_code` to a digit-leading string.
