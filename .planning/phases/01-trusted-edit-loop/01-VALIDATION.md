@@ -6,6 +6,7 @@ nyquist_compliant: false
 wave_0_complete: false
 created: "2026-11-05"
 updated: "2026-11-05"
+# wave_0_complete stays false until Plans 01-02..01-04 green the suite
 ---
 
 # Phase 1 — Validation Strategy
@@ -40,8 +41,8 @@ updated: "2026-11-05"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 01-01-T1 | 01-01 | 1 | LOOP-01, WIN-01, METR-04 | T-01-01 | Stage/UTF/long-path red baselines | unit | `cargo test -p silence-tools` | ❌ W0 | ⬜ pending |
-| 01-01-T2 | 01-01 | 1 | PERM-01, NET-01 | T-01-02 | Permission + bind red baselines | unit | `cargo test -p silence-engine permissions_round_trip bind_refuses` | ❌ W0 | ⬜ pending |
+| 01-01-T1 | 01-01 | 1 | LOOP-01, WIN-01, METR-04 | T-01-01 | Stage/UTF/long-path red baselines | unit | `cargo test -p silence-tools` | ✅ | ❌ red |
+| 01-01-T2 | 01-01 | 1 | PERM-01, NET-01 | T-01-02 | Permission + bind red baselines | unit | `cargo test -p silence-engine permissions_round_trip bind_refuses` | ✅ | ❌ red |
 | 01-02-T1 | 01-02 | 2 | LOOP-01, LOOP-03, WIN-02 | T-01-03, T-01-04 | Staged edit not on disk until Apply; Reject via Engine | unit + human-check | `cargo test -p silence-tools stage_write_leaves_disk_unchanged staged_edit_reject_keeps_before` | ❌→✅ | ⬜ pending |
 | 01-02-T2 | 01-02 | 2 | LOOP-03 | T-01-05 | Audit on Apply; Reject no write | unit | `cargo test -p silence-engine` | ⚠️ partial | ⬜ pending |
 | 01-02-T3 | 01-02 | 2 | LOOP-01 | T-01-06 | Diff banner loading/error UX | cargo + human-check | `cargo test -p silence-tools -p silence-engine` | ✅ UI | ⬜ pending |
@@ -58,12 +59,12 @@ updated: "2026-11-05"
 
 ## Wave 0 Requirements
 
-- [ ] Unit tests for staged write/edit + apply/reject disk semantics
-- [ ] Unit tests for permission remember + workspace persistence load/save
-- [ ] UTF-8 Vietnamese + long-path shell/file fixtures under `crates/tools`
-- [ ] Bind-address guard test for TCP serve
+- [x] Unit tests for staged write/edit + apply/reject disk semantics (`stage_write_leaves_disk_unchanged`, `staged_edit_reject_keeps_before` — red until 01-02)
+- [x] Unit tests for permission remember + workspace persistence load/save (`permissions_round_trip`, `permissions_missing_file_is_empty` — red until 01-03)
+- [x] UTF-8 Vietnamese + long-path shell/file fixtures under `crates/tools` (`vietnamese_utf8_round_trip`, `long_nested_path_tool_io` — red until 01-04)
+- [x] Bind-address guard test for TCP serve (`bind_refuses_non_loopback` — red until 01-04)
 - [ ] Mandatory: ≥1 `evals/v0` task definition for shell UTF and/or staged-edit path (live `npm run evals` may skip without keys; not full 20-suite gate)
-- [ ] Framework install: none — use existing cargo/npm
+- [x] Framework install: none — use existing cargo/npm
 
 ---
 
