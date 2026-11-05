@@ -401,7 +401,7 @@ let _child = pair.slave.spawn_command(cmd).context("spawn pty cmd")?;
 | A4 | Windows PowerShell 5.1 remains the default shell on target machines | WIN-01 | PS7-only assumptions could break encoding tests |
 | A5 | No new crates needed for Phase 1 | Standard Stack | Unexpected ConPTY bug might force `portable-pty` bump |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Staging vs revert-on-reject** `(RESOLVED)`
    - What we know: Locked text says review then apply/reject; code auto-writes today.
