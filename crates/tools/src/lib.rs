@@ -318,22 +318,84 @@ fn edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     })
 }
 
-/// Propose a write without committing to disk. Wave 0 stub still commits (Plan 01-02 greens staging).
+/// Resolve a write path under the workspace without creating parents (stage-safe).
+fn resolve_write_target(ws: &Workspace, rel: &str) -> Result<PathBuf> {
+    let path = if Path::new(rel).is_absolute() {
+        ws.resolve(rel)?
+    } else {
+        let p = ws.root.join(rel);
+        if !p.starts_with(&ws.root) {
+            return Err(anyhow!("path escapes workspace"));
+        }
+        p
+    };
+    if !path.starts_with(&ws.root) {
+        return Err(anyhow!("path escapes workspace"));
+    }
+    Ok(path)
+}
+
+/// Propose a write without committing bytes to disk.
 pub fn stage_write(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
-    write(ws, args)
+    let rel = args["path"].as_str().unwrap_or("");
+    let path = resolve_write_target(ws, rel)?;
+    let before = std::fs::read_to_string(&path).unwrap_or_default();
+    let after = args["contents"].as_str().unwrap_or("").to_string();
+    Ok(ToolOutput {
+        ok: true,
+        output: format!("proposed write {}", ws.rel(&path)),
+        diff: Some(FileDiff {
+            path: ws.rel(&path),
+            before,
+            after,
+        }),
+    })
 }
 
-/// Propose an edit without committing to disk. Wave 0 stub still commits (Plan 01-02 greens staging).
+/// Propose an edit without committing bytes to disk.
 pub fn stage_edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
-    edit(ws, args)
+    let path = ws.resolve(args["path"].as_str().unwrap_or(""))?;
+    let before = std::fs::read_to_string(&path)?;
+    let old = args["old_string"].as_str().unwrap_or("");
+    let new = args["new_string"].as_str().unwrap_or("");
+    let replace_all = args
+        .get("replace_all")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let count = before.matches(old).count();
+    if old.is_empty() {
+        return Err(anyhow!("old_string empty"));
+    }
+    if count == 0 {
+        return Err(anyhow!("old_string not found"));
+    }
+    if count > 1 && !replace_all {
+        return Err(anyhow!("old_string found {count} times; set replace_all"));
+    }
+    let after = if replace_all {
+        before.replace(old, new)
+    } else {
+        before.replacen(old, new, 1)
+    };
+    Ok(ToolOutput {
+        ok: true,
+        output: format!("proposed edit {}", ws.rel(&path)),
+        diff: Some(FileDiff {
+            path: ws.rel(&path),
+            before,
+            after,
+        }),
+    })
 }
 
-/// Discard a staged path; disk must stay at `before`. Wave 0 stub is a no-op.
-pub fn reject_staged(_ws: &Workspace, _rel: &str) -> Result<()> {
+/// Discard a staged path at the tools layer. Staging never wrote disk, so this is a no-op
+/// that still validates the relative path stays inside the workspace jail.
+pub fn reject_staged(ws: &Workspace, rel: &str) -> Result<()> {
+    let _ = resolve_write_target(ws, rel)?;
     Ok(())
 }
 
-/// Commit a staged path to disk. Wave 0 stub — Plan 01-02 wires real pending→fs apply.
+/// Commit staged contents to disk (used by `diff.apply`).
 pub fn commit_staged(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     write(ws, args)
 }

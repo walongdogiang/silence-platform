@@ -1,0 +1,35 @@
+export type DiffApplyParams = {
+  session_id: string;
+  path: string;
+  after: string;
+};
+
+export type DiffRejectParams = {
+  session_id: string;
+  path: string;
+};
+
+export type SessionEvent =
+  | { type: "token"; text: string }
+  | { type: "thinking"; text: string }
+  | { type: "tool_start"; call_id: string; name: string; input: unknown }
+  | { type: "tool_end"; call_id: string; name: string; ok: boolean; output: string }
+  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string }
+  | { type: "plan"; markdown: string }
+  | { type: "diff"; path: string; before: string; after: string }
+  | { type: "trace"; event: string; detail: unknown }
+  | { type: "route"; task_class: string; model_id: string; reason: string }
+  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number }
+  | { type: "terminal"; data: string }
+  | { type: "done"; stop: string }
+  | { type: "error"; message: string };
+
+export type ModelInfo = {
+  id: string;
+  label?: string;
+  api_model?: string;
+  tier: string;
+  context_window: number;
+  tools: boolean;
+  vision: boolean;
+};
