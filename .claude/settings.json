@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "PowerShell(cargo test:*)",
+      "PowerShell(cargo check:*)",
+      "PowerShell(cargo build:*)",
+      "PowerShell(cargo clippy:*)",
+      "PowerShell(cargo fmt:*)",
+      "PowerShell(.\\scripts\\cargo-msvc.bat:*)",
+      "Bash(./scripts/cargo-msvc.bat:*)",
+      "Bash(npm run:*)",
+      "PowerShell(npm run:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)"
+    ],
+    "ask": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "PowerShell(git commit:*)",
+      "PowerShell(git push:*)",
+      "PowerShell(git tag:*)"
+    ],
+    "deny": [
+      "Read(./target/**)",
+      "Read(./**/node_modules/**)",
+      "Read(./Cargo.lock)",
+      "Read(./package-lock.json)",
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  }
+}
