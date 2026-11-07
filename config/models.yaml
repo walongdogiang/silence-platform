@@ -1,0 +1,96 @@
+# Catalog OpenRouter — cần SILENCE_API_BASE=https://openrouter.ai/api/v1 và SILENCE_API_KEY.
+# Env: SILENCE_API_KEY, SILENCE_API_BASE. SILENCE_MODEL_* override api_model nếu set.
+
+version: 1
+default_model: auto
+optimize: balance # cost | balance | intelligence
+
+providers:
+  - id: company-gateway
+    kind: openai_compat
+    base_url: ${SILENCE_API_BASE:-https://openrouter.ai/api/v1}
+    api_key_env: SILENCE_API_KEY
+
+models:
+  - id: claude-haiku
+    label: Claude Haiku 5.5
+    provider: company-gateway
+    api_model: ${SILENCE_MODEL_FAST:-anthropic/claude-haiku-5.5}
+    tier: fast
+    context_window: 1000000
+    max_output_tokens: 8192
+    tools: true
+    vision: true
+    input_cost_per_1m: 0.10
+    output_cost_per_1m: 0.50
+
+  - id: claude-sonnet
+    label: Claude Sonnet 5.5
+    provider: company-gateway
+    api_model: ${SILENCE_MODEL_MID:-anthropic/claude-sonnet-5.5}
+    tier: mid
+    context_window: 1000000
+    max_output_tokens: 16384
+    tools: true
+    vision: true
+    input_cost_per_1m: 2.00
+    output_cost_per_1m: 10.00
+
+  - id: claude-opus
+    label: Claude Opus 5.5
+    provider: company-gateway
+    api_model: ${SILENCE_MODEL_STRONG:-anthropic/claude-opus-5.5}
+    tier: strong
+    context_window: 1000000
+    max_output_tokens: 16384
+    tools: true
+    vision: true
+    input_cost_per_1m: 5.00
+    output_cost_per_1m: 25.00
+
+  - id: north-mini-code
+    label: North Mini Code
+    provider: company-gateway
+    api_model: cohere/north-mini-code:free
+    tier: free
+    context_window: 256000
+    max_output_tokens: 65536
+    tools: true
+    vision: false
+    input_cost_per_1m: 0
+    output_cost_per_1m: 0
+
+  - id: flint
+    label: Flint
+    provider: company-gateway
+    api_model: recursive/flint:free
+    tier: free
+    context_window: 128000
+    max_output_tokens: 8192
+    tools: true
+    vision: false
+    input_cost_per_1m: 0
+    output_cost_per_1m: 0
+
+  - id: xing4-29b
+    label: Xing4.0 29B A4B
+    provider: company-gateway
+    api_model: xingchen-agi/xing4.0-29b-a4b:free
+    tier: free
+    context_window: 256000
+    max_output_tokens: 16384
+    tools: true
+    vision: false
+    input_cost_per_1m: 0
+    output_cost_per_1m: 0
+
+routes:
+  chat: fast
+  explore: fast
+  edit: mid
+  debug: strong
+  architect: strong
+
+escalation:
+  on: [empty_output, refuse, tool_loop_stuck, repeated_test_fail, timeout]
+  to: strong

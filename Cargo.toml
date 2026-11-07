@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/protocol",
+  "crates/sandbox",
+  "crates/tools",
+  "crates/mcp",
+  "crates/router",
+  "crates/runtime",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["5ilence"]
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+ignore = "0.4"
+walkdir = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls"] }
+futures-util = "0.3"
+bytes = "1"
+async-trait = "0.1"
+dunce = "1"
+which = "7"
+silence-protocol = { path = "crates/protocol" }
+silence-sandbox = { path = "crates/sandbox" }
+silence-tools = { path = "crates/tools" }
+silence-mcp = { path = "crates/mcp" }
+silence-router = { path = "crates/router" }

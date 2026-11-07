@@ -1,0 +1,11 @@
+{
+  "mcpServers": [
+    {
+      "name": "internal-echo",
+      "command": "python",
+      "args": ["evals/fixtures/mcp-echo/server.py"],
+      "enabled": false,
+      "notes": "Mẫu MCP nội bộ. Thay bằng git/ticket/CI khi có. Không cấp shell."
+    }
+  ]
+}

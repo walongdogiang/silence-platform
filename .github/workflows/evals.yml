@@ -1,0 +1,27 @@
+name: nightly-evals
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 17 * * *"
+
+jobs:
+  evals:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build engine
+        run: cargo build -p silence-engine
+      - name: Run evals
+        env:
+          SILENCE_API_KEY: ${{ secrets.SILENCE_API_KEY }}
+          SILENCE_API_BASE: ${{ secrets.SILENCE_API_BASE }}
+        run: cargo run -p silence-engine -- evals --dir evals/v0 --repo-root .
+        continue-on-error: true
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: evals/results

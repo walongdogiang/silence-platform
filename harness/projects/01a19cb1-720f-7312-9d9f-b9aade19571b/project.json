@@ -1,0 +1,19 @@
+{
+"type": "reference | adapter | self", (adapter là folder chứa harness trung gian đến project root)
+"root_path": "C:\Users\Silence\Desktop\odoo\pythonProject\addons-external\hk_payroll", (root_path của reference sẽ trỏ đến adapter)
+"org_id": "...",
+"worktree": ["main","dev",](viết code vô dev, main chỉ merge, cảnh báo khi viết code vào main)
+"src_profile": [
+{
+   "type": "ssh | local | ...",
+   "config ssh | local"...
+},
+],
+"run_profile": [
+ {"type": "api | web", "port":, "host_name":},
+ "
+],
+"public_profile": [
+{"src_type","port","host_name","path"}
+],
+}

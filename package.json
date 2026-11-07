@@ -1,0 +1,15 @@
+{
+  "name": "silence",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/studio",
+    "packages/protocol"
+  ],
+  "scripts": {
+    "desktop": "npm run studio",
+    "studio": "npm run dev --workspace @silence/studio",
+    "runtime": "cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420",
+    "evals": "cargo run -p silence-engine -- evals --dir evals/v0 --repo-root ."
+  }
+}

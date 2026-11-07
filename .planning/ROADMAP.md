@@ -33,10 +33,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Risky tools prompt with permission default `ask` (rememberable per workspace); there is no silent YOLO path.
   4. Engine runs as a separate process on local-only IPC (named pipe / loopback); UI crash does not kill the agent, and ConPTY + PowerShell handles long paths and Vietnamese UTF without breaking shell tools.
 
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 Plans:
 **Wave 1**
-- [ ] 01-01-PLAN.md — Wave 0 Nyquist failing tests (stage, permission, UTF/long-path, bind)
+- [x] 01-01-PLAN.md — Wave 0 Nyquist failing tests (stage, permission, UTF/long-path, bind)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 01-02-PLAN.md — Walking Skeleton tracer: stage-then-apply Diff Apply/Reject + audit
@@ -125,7 +125,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Trusted edit loop | 0/4 | Planned | - |
+| 1. Trusted edit loop | 1/4 | In Progress | - |
 | 2. Plan-then-edit | 0/TBD | Not started | - |
 | 3. Cloud model and Auto | 0/TBD | Not started | - |
 | 4. Workspace MCP | 0/TBD | Not started | - |

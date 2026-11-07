@@ -1,0 +1,174 @@
+# Eval v0 — 20 task trên fixture sample-app (thay bằng repo nội bộ khi có).
+# kinds: edit | bugfix | explore | plan
+# Runner: silence-engine evals --dir evals/v0
+
+workspace: fixtures/sample-app
+setup: []
+verify_cmd: python -m tests.runner
+
+tasks:
+  - id: E01-edit-add-pow
+    kind: edit
+    prompt: "Thêm hàm pow_int(a, b) vào src/calc.py trả về a**b với b >= 0. Export dùng được từ tests."
+    pass_if:
+      grep:
+        - path: src/calc.py
+          pattern: "def pow_int"
+
+  - id: E02-edit-clamp-doc
+    kind: edit
+    prompt: "Thêm docstring tiếng Anh một dòng cho clamp() giải thích inclusive bounds."
+    pass_if:
+      grep:
+        - path: src/calc.py
+          pattern: "def clamp"
+
+  - id: E03-edit-slug-underscore
+    kind: edit
+    prompt: "Sửa slugify để thay space bằng underscore thay vì gạch ngang."
+    pass_if:
+      grep:
+        - path: src/util.py
+          pattern: "replace\\(\" \", \"_\"\\)"
+
+  - id: E04-edit-health-version
+    kind: edit
+    prompt: "health() trong src/api.py trả thêm field version = \"1.0.0\"."
+    pass_if:
+      grep:
+        - path: src/api.py
+          pattern: "1\\.0\\.0"
+
+  - id: E05-edit-user-count
+    kind: edit
+    prompt: "Thêm UserStore.count() trả về số user đang lưu."
+    pass_if:
+      grep:
+        - path: src/user.py
+          pattern: "def count"
+
+  - id: B06-bugfix-mul
+    kind: bugfix
+    prompt: "mul() đang cộng thay vì nhân. Sửa và đảm bảo test_mul pass."
+    verify_filter: test_mul
+    pass_if:
+      test: test_mul
+
+  - id: B07-bugfix-factorial
+    kind: bugfix
+    prompt: "factorial() sai vòng lặp (off-by-one và nhân nhầm i). Sửa để factorial(0)=1, factorial(5)=120."
+    verify_filter: test_factorial
+    pass_if:
+      test: test_factorial
+
+  - id: B08-bugfix-user-get
+    kind: bugfix
+    prompt: "UserStore.get phải trả None khi thiếu user, không raise KeyError."
+    verify_filter: test_user_get_missing
+    pass_if:
+      test: test_user_get_missing
+
+  - id: B09-bugfix-email-case
+    kind: bugfix
+    prompt: "find_by_email phải so sánh email không phân biệt hoa thường."
+    verify_filter: test_find_email_case
+    pass_if:
+      test: test_find_email_case
+
+  - id: B10-bugfix-mean-empty
+    kind: bugfix
+    prompt: "mean([]) phải trả 0.0, không chia cho 0."
+    verify_filter: test_mean_empty
+    pass_if:
+      test: test_mean_empty
+
+  - id: B11-bugfix-moving-average
+    kind: bugfix
+    prompt: "Sửa moving_average window slicing (i - window + 1) để test_moving_average pass."
+    verify_filter: test_moving_average
+    pass_if:
+      test: test_moving_average
+
+  - id: B12-bugfix-create-user-201
+    kind: bugfix
+    prompt: "create_user phải trả status 201, không phải 200."
+    pass_if:
+      grep:
+        - path: src/api.py
+          pattern: "\"status\": 201"
+
+  - id: X13-explore-bugs
+    kind: explore
+    prompt: "Liệt kê các bug có chủ đích trong src/calc.py, src/user.py, src/stats.py. Không sửa file. Trả về đường dẫn + mô tả ngắn."
+    read_only: true
+    pass_if:
+      report_mentions:
+        - mul
+        - factorial
+        - mean
+
+  - id: X14-explore-modules
+    kind: explore
+    prompt: "Mô tả trách nhiệm từng module trong src/. Không sửa file."
+    read_only: true
+    pass_if:
+      report_mentions:
+        - calc.py
+        - user.py
+        - api.py
+        - util.py
+        - stats.py
+
+  - id: X15-explore-tests
+    kind: explore
+    prompt: "Đọc tests/runner.py và liệt kê test nào hiện FAIL trên code gốc. Không sửa file."
+    read_only: true
+    pass_if:
+      report_mentions:
+        - test_mul
+        - test_factorial
+
+  - id: X16-explore-api-auth
+    kind: explore
+    prompt: "echo_headers đang làm gì với Authorization? Có nên redact thay vì drop không? Không sửa file."
+    read_only: true
+    pass_if:
+      report_mentions:
+        - Authorization
+
+  - id: P17-plan-fix-calc
+    kind: plan
+    prompt: "Lập plan sửa mul và factorial. Không edit. Plan phải có bước test_mul và test_factorial."
+    plan_only: true
+    pass_if:
+      plan_mentions:
+        - mul
+        - factorial
+        - test_mul
+
+  - id: P18-plan-user-store
+    kind: plan
+    prompt: "Plan harden UserStore (get missing, email case, count). Không edit code."
+    plan_only: true
+    pass_if:
+      plan_mentions:
+        - get
+        - email
+
+  - id: P19-plan-stats
+    kind: plan
+    prompt: "Plan sửa mean rỗng và moving_average. Liệt kê test tương ứng. Không edit."
+    plan_only: true
+    pass_if:
+      plan_mentions:
+        - mean
+        - moving_average
+
+  - id: P20-plan-windows-paths
+    kind: plan
+    prompt: "Plan sửa join_workspace cho Windows path tuyệt đối. Không edit. Nhắc os.path hoặc pathlib."
+    plan_only: true
+    pass_if:
+      plan_mentions:
+        - join_workspace
+        - Windows

@@ -1,0 +1,17 @@
+---
+description: GSD may create atomic git commits in this repo
+alwaysApply: true
+---
+
+# GSD commits (authorized)
+
+Playbook for non-GSD work: `AGENTS.md`. This file only authorizes GSD execute/plan commits.
+
+This repo opted in: **GSD execute/plan may `git commit` atomically** (per-task / per-wave). Do not skip those commits. Do not ask again for permission during `/gsd-execute-phase`.
+
+- Config: `.planning/config.json` → `commit_docs: true`, `git.allow_default_branch_commits: true`, `git.branching_strategy: none`.
+- Prefer `gsd_run query commit` for `.planning/` files.
+- Never commit `.env`, secrets, or `node_modules/`.
+- Do **not** run `/gsd-new-project` in a way that overwrites `docs/PRD.md`. Use `/gsd-plan-phase --prd docs/PRD.md`.
+- GSD is Cursor-only (`.cursor/`, `.planning/`). Do not ship GSD into the 5ilence app UI.
+- The in-app 5ilence agent (`templates/silence/AGENTS.md`) still must not commit unless that product's user asks.
