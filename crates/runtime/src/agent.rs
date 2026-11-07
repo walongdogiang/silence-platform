@@ -2,11 +2,12 @@ use crate::audit::{now_event, AuditLog};
 use crate::compact::{compact_if_needed, messages_tokens};
 use crate::gateway::{self, ToolCall};
 use crate::org::{self, OrgContext};
+use crate::provider_error::{sanitize, ErrorCode, ProviderError};
 use crate::redact::redact;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use silence_mcp::McpHost;
-use silence_protocol::{PermissionMode, SessionEvent, SessionMode};
+use silence_protocol::{ErrorInfo, PermissionMode, SessionEvent, SessionMode};
 use silence_router::{self, Catalog};
 use silence_tools::{self, Workspace};
 use std::collections::HashMap;
@@ -129,12 +130,42 @@ pub async fn prompt(ctx: Arc<AppCtx>, session_id: String, text: String) -> Resul
     let tx = ctx.events.lock().await.get(&session_id).cloned();
     tokio::spawn(async move {
         if let Err(err) = run_turn(ctx, session_arc, text, tx.clone()).await {
-            emit(&tx, SessionEvent::Error {
-                message: err.to_string(),
-            });
+            emit(&tx, error_event(&err));
         }
     });
     Ok(())
+}
+
+/// Lỗi lượt → event có cấu trúc. Không đưa raw body ra ngoài.
+fn error_event(err: &anyhow::Error) -> SessionEvent {
+    let (code, status, detail) = match err.downcast_ref::<ProviderError>() {
+        Some(pe) => (pe.code, pe.status, pe.detail.clone()),
+        None => (ErrorCode::Unknown, None, sanitize(&format!("{err:#}"), "")),
+    };
+    SessionEvent::Error {
+        message: format!("turn failed: {}", code.as_str()),
+        error: Some(ErrorInfo {
+            code: code.as_str().to_string(),
+            status,
+            retryable: code.retryable(),
+            detail,
+        }),
+    }
+}
+
+/// Lỗi ngay ở lần gọi model đầu tiên → bỏ câu hỏi vừa push để user gửi lại không bị nhân đôi.
+async fn rollback_user_message(session_arc: &Arc<Mutex<Session>>, loops: u32, text: &str) {
+    if loops != 1 {
+        return;
+    }
+    let mut s = session_arc.lock().await;
+    let is_ours = s.messages.last().is_some_and(|m| {
+        m.get("role").and_then(|r| r.as_str()) == Some("user")
+            && m.get("content").and_then(|c| c.as_str()) == Some(redact(text).as_str())
+    });
+    if is_ours {
+        s.messages.pop();
+    }
 }
 
 async fn run_turn(
@@ -150,7 +181,7 @@ async fn run_turn(
             .push(json!({"role":"user","content": redact(&text)}));
     }
     let mut empty_streak = 0;
-    let mut loops = 0;
+    let mut loops: u32 = 0;
     loop {
         loops += 1;
         if loops > 24 {
@@ -158,6 +189,7 @@ async fn run_turn(
                 &tx,
                 SessionEvent::Error {
                     message: "tool loop stuck".into(),
+                    error: None,
                 },
             );
             break;
@@ -255,7 +287,16 @@ async fn run_turn(
         let result = match result {
             Ok(r) => r,
             Err(err) => {
-                let upgraded = silence_router::escalate(&ctx.catalog, "timeout")?;
+                // Chỉ escalate/retry lỗi tạm thời; hết credit / key sai thì dừng ngay.
+                let retryable = err
+                    .downcast_ref::<ProviderError>()
+                    .map(|e| e.code.retryable())
+                    .unwrap_or(false);
+                let upgraded = if retryable {
+                    silence_router::escalate(&ctx.catalog, "timeout")?
+                } else {
+                    model_id.clone()
+                };
                 if upgraded != model_id {
                     emit(
                         &tx,
@@ -264,7 +305,7 @@ async fn run_turn(
                             detail: json!({"from": model_id, "to": upgraded, "err": err.to_string()}),
                         },
                     );
-                    gateway::chat(
+                    match gateway::chat(
                         &ctx.catalog,
                         &upgraded,
                         &messages,
@@ -281,8 +322,16 @@ async fn run_turn(
                             );
                         },
                     )
-                    .await?
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(err2) => {
+                            rollback_user_message(&session_arc, loops, &text).await;
+                            return Err(err2);
+                        }
+                    }
                 } else {
+                    rollback_user_message(&session_arc, loops, &text).await;
                     return Err(err);
                 }
             }

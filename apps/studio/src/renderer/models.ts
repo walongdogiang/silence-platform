@@ -1,3 +1,4 @@
+import type { ErrorInfo } from "./types";
 export type CheckpointFile = { path: string; before: string; after: string };
 
 export type ChatLine =
@@ -6,6 +7,7 @@ export type ChatLine =
   | { kind: "tool"; name: string; output: string }
   | { kind: "route"; text: string }
   | { kind: "sys"; text: string }
+  | { kind: "error"; message: string; info?: ErrorInfo }
   | { kind: "worked"; ms: number; at: number }
   | { kind: "narrate"; verb: string; detail?: string; /** legacy persist */ text?: string }
   | { kind: "thought"; ms?: number; brief: string; body?: string }

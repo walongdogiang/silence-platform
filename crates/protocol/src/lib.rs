@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.2";
+pub const PROTOCOL_VERSION: &str = "0.1.3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
@@ -181,7 +181,22 @@ pub enum SessionEvent {
     },
     Error {
         message: String,
+        /// Lỗi có cấu trúc (mã nội bộ). Không có → UI dùng thông báo chung.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<ErrorInfo>,
     },
+}
+
+/// Lỗi lượt đã chuẩn hóa. `code`: PROVIDER_CREDITS | PROVIDER_AUTH | PROVIDER_RATE |
+/// PROVIDER_UNAVAILABLE | NETWORK | TIMEOUT | UNKNOWN. `detail` đã lọc secret + cắt ngắn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ErrorInfo {
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    pub retryable: bool,
+    #[serde(default)]
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,4 +293,35 @@ pub struct ModelInfo {
     pub context_window: u32,
     pub tools: bool,
     pub vision: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn error_event_without_info_is_backward_compatible() {
+        let ev: SessionEvent = serde_json::from_value(json!({"type":"error","message":"x"})).unwrap();
+        let back = serde_json::to_value(&ev).unwrap();
+        assert_eq!(back, json!({"type":"error","message":"x"}));
+    }
+
+    #[test]
+    fn error_event_with_info_roundtrip() {
+        let ev = SessionEvent::Error {
+            message: "turn failed: PROVIDER_CREDITS".into(),
+            error: Some(ErrorInfo {
+                code: "PROVIDER_CREDITS".into(),
+                status: Some(402),
+                retryable: false,
+                detail: "Insufficient credits".into(),
+            }),
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["type"], "error");
+        assert_eq!(v["error"]["code"], "PROVIDER_CREDITS");
+        assert_eq!(v["error"]["status"], 402);
+        assert_eq!(v["error"]["retryable"], false);
+    }
 }

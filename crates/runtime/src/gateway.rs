@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Context, Result};
+use crate::provider_error::ProviderError;
+use anyhow::Result;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -69,18 +70,21 @@ async fn chat_inner(
     req = req
         .header("HTTP-Referer", "https://5ilence.local")
         .header("X-Title", "5ilence");
-    let res = req.send().await.context("gateway http")?;
+    let res = req
+        .send()
+        .await
+        .map_err(|e| ProviderError::from_reqwest(&e, &key))?;
     if !res.status().is_success() {
-        let status = res.status();
+        let status = res.status().as_u16();
         let text = res.text().await.unwrap_or_default();
-        return Err(anyhow!("gateway {status}: {text}"));
+        return Err(ProviderError::from_http(status, &text, &key).into());
     }
     let mut stream = res.bytes_stream();
     let mut buf = String::new();
     let mut result = ChatResult::default();
     let mut tool_acc: Vec<(String, String, String)> = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
+        let chunk = chunk.map_err(|e| ProviderError::from_reqwest(&e, &key))?;
         buf.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(pos) = buf.find('\n') {
             let line = buf[..pos].trim().to_string();

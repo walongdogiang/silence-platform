@@ -6,6 +6,7 @@ pub mod eval_runner;
 pub mod gateway;
 pub mod org;
 pub mod permissions;
+pub mod provider_error;
 pub mod pty;
 pub mod redact;
 pub mod rpc;

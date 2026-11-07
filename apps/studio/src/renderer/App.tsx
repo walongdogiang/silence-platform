@@ -219,6 +219,7 @@ export function App() {
   const turnStartedAtRef = useRef(0);
   const turnFilesRef = useRef<CheckpointFile[]>([]);
   const thoughtStartedAtRef = useRef(0);
+  const lastPromptRef = useRef("");
   const [termEl, setTermEl] = useState<HTMLDivElement | null>(null);
   const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs" | "preview">("changes");
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
@@ -381,10 +382,16 @@ export function App() {
         setLines((xs) => {
           const sealed = thoughtStart ? sealThoughtMs(xs, thoughtStart) : xs;
           const withMeta = appendTurnMeta(sealed, turnStart, files);
-          return [...withMeta, { kind: "sys", text: ev.message }];
+          return [...withMeta, { kind: "error", message: ev.message, info: ev.error }];
         });
-        setOutputLog((xs) => [...xs.slice(-199), ev.message]);
+        const logLine = ev.error
+          ? `[error] ${ev.error.code}${ev.error.status ? ` (HTTP ${ev.error.status})` : ""}: ${ev.error.detail}`
+          : `[error] ${ev.message}`;
+        setOutputLog((xs) => [...xs.slice(-199), logLine]);
         setBusy(false);
+        // Giữ prompt: trả lại câu vừa gửi nếu composer đang trống. Không auto-retry.
+        const last = lastPromptRef.current;
+        setPrompt((p) => (p.trim() ? p : last));
       } else if (ev.type === "done") {
         const files = turnFilesRef.current;
         turnFilesRef.current = [];
@@ -667,10 +674,11 @@ export function App() {
     setFileText(r.text);
   }
 
-  async function send() {
-    const text = prompt.trim();
-    if (!sessionId || !text) return;
-    setPrompt("");
+  async function send(retryText?: string) {
+    const text = (retryText ?? prompt).trim();
+    if (!sessionId || !text || busy) return;
+    lastPromptRef.current = text;
+    if (retryText === undefined) setPrompt("");
     turnStartedAtRef.current = Date.now();
     turnFilesRef.current = [];
     thoughtStartedAtRef.current = Date.now();
@@ -681,7 +689,18 @@ export function App() {
       { kind: "narrate", verb: plan.verb, detail: plan.detail },
     ]);
     setBusy(true);
-    await window.silence.rpc("session.prompt", { session_id: sessionId, text });
+    try {
+      await window.silence.rpc("session.prompt", { session_id: sessionId, text });
+    } catch (e) {
+      // RPC bị từ chối (vd. Engine chưa sẵn sàng): tắt busy, trả prompt, hiện thẻ lỗi chung.
+      const message = e instanceof Error ? e.message : String(e);
+      turnStartedAtRef.current = 0;
+      thoughtStartedAtRef.current = 0;
+      setLines((xs) => [...xs, { kind: "error", message }]);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${message}`]);
+      setBusy(false);
+      setPrompt((p) => (p.trim() ? p : text));
+    }
   }
 
   async function applyDiff() {
@@ -864,6 +883,7 @@ export function App() {
           onOpenWorkspace={() => void openWorkspace()}
           onChip={onChip}
           onUsePrompt={setPrompt}
+          onRetry={() => void send(lastPromptRef.current)}
         />
         {activeThreadId ? composerEl : null}
       </div>

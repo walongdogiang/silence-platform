@@ -1,0 +1,182 @@
+//! Chuẩn hóa lỗi provider (HTTP / mạng) thành mã nội bộ để UI hiển thị thân thiện.
+//! Không bao giờ đưa raw body ra ngoài: chỉ `detail` đã lọc secret và cắt ngắn.
+
+use crate::redact::redact;
+use serde_json::Value;
+use std::fmt;
+
+const DETAIL_MAX: usize = 400;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorCode {
+    ProviderCredits,
+    ProviderAuth,
+    ProviderRate,
+    ProviderUnavailable,
+    Network,
+    Timeout,
+    Unknown,
+}
+
+impl ErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorCode::ProviderCredits => "PROVIDER_CREDITS",
+            ErrorCode::ProviderAuth => "PROVIDER_AUTH",
+            ErrorCode::ProviderRate => "PROVIDER_RATE",
+            ErrorCode::ProviderUnavailable => "PROVIDER_UNAVAILABLE",
+            ErrorCode::Network => "NETWORK",
+            ErrorCode::Timeout => "TIMEOUT",
+            ErrorCode::Unknown => "UNKNOWN",
+        }
+    }
+
+    /// Lỗi tạm thời: được phép escalate/retry. Credit/key sai thì không.
+    pub fn retryable(self) -> bool {
+        matches!(
+            self,
+            ErrorCode::ProviderRate
+                | ErrorCode::ProviderUnavailable
+                | ErrorCode::Network
+                | ErrorCode::Timeout
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderError {
+    pub code: ErrorCode,
+    pub status: Option<u16>,
+    /// Đã lọc secret + cắt ngắn.
+    pub detail: String,
+}
+
+impl fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.status {
+            Some(s) => write!(f, "provider error {} (HTTP {s})", self.code.as_str()),
+            None => write!(f, "provider error {}", self.code.as_str()),
+        }
+    }
+}
+
+impl std::error::Error for ProviderError {}
+
+impl ProviderError {
+    pub fn from_http(status: u16, body: &str, key: &str) -> Self {
+        Self {
+            code: classify_http(status, body),
+            status: Some(status),
+            detail: sanitize(body, key),
+        }
+    }
+
+    pub fn from_reqwest(err: &reqwest::Error, key: &str) -> Self {
+        let code = if err.is_timeout() {
+            ErrorCode::Timeout
+        } else if err.is_connect() || err.is_request() || err.is_body() {
+            ErrorCode::Network
+        } else {
+            ErrorCode::Unknown
+        };
+        Self {
+            code,
+            status: err.status().map(|s| s.as_u16()),
+            detail: sanitize(&err.to_string(), key),
+        }
+    }
+}
+
+pub fn classify_http(status: u16, body: &str) -> ErrorCode {
+    match status {
+        402 => {
+            let b = body.to_lowercase();
+            let credit_hint = ["credit", "insufficient", "balance", "quota", "payment"]
+                .iter()
+                .any(|w| b.contains(w));
+            if credit_hint {
+                ErrorCode::ProviderCredits
+            } else {
+                ErrorCode::Unknown
+            }
+        }
+        401 | 403 => ErrorCode::ProviderAuth,
+        408 => ErrorCode::Timeout,
+        429 => ErrorCode::ProviderRate,
+        500..=599 => ErrorCode::ProviderUnavailable,
+        _ => ErrorCode::Unknown,
+    }
+}
+
+/// Lấy `error.message` nếu body là JSON; xoá key + pattern secret; cắt ngắn.
+pub fn sanitize(body: &str, key: &str) -> String {
+    let msg = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("error")
+                .and_then(|e| e.get("message").or(Some(e)))
+                .and_then(|m| m.as_str().map(str::to_string))
+                .or_else(|| v.get("message").and_then(|m| m.as_str()).map(str::to_string))
+        })
+        .unwrap_or_else(|| body.to_string());
+    let mut out = msg.trim().to_string();
+    if key.len() >= 4 {
+        out = out.replace(key, "[REDACTED]");
+    }
+    out = redact(&out);
+    if out.chars().count() > DETAIL_MAX {
+        out = out.chars().take(DETAIL_MAX).collect::<String>() + "…";
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OR_402: &str = r#"{"error":{"message":"Insufficient credits. Add more using https://openrouter.ai/settings/credits","code":402}}"#;
+
+    #[test]
+    fn credits_402_openrouter() {
+        let e = ProviderError::from_http(402, OR_402, "");
+        assert_eq!(e.code, ErrorCode::ProviderCredits);
+        assert_eq!(e.status, Some(402));
+        assert!(e.detail.starts_with("Insufficient credits"));
+        assert!(!e.detail.contains('{'));
+        assert!(!e.code.retryable());
+    }
+
+    #[test]
+    fn ambiguous_402_is_unknown() {
+        assert_eq!(classify_http(402, r#"{"error":{"message":"nope"}}"#), ErrorCode::Unknown);
+    }
+
+    #[test]
+    fn http_codes() {
+        assert_eq!(classify_http(401, ""), ErrorCode::ProviderAuth);
+        assert_eq!(classify_http(403, ""), ErrorCode::ProviderAuth);
+        assert_eq!(classify_http(429, ""), ErrorCode::ProviderRate);
+        assert_eq!(classify_http(503, ""), ErrorCode::ProviderUnavailable);
+        assert_eq!(classify_http(418, ""), ErrorCode::Unknown);
+        assert!(ErrorCode::ProviderRate.retryable());
+        assert!(ErrorCode::Timeout.retryable());
+        assert!(!ErrorCode::ProviderAuth.retryable());
+    }
+
+    #[test]
+    fn sanitize_strips_key_and_truncates() {
+        let key = "sk-or-v1-abcdef0123456789";
+        let body = format!("bad key {key} Bearer abc.def-ghi");
+        let s = sanitize(&body, key);
+        assert!(!s.contains(key));
+        assert!(!s.contains("abc.def-ghi"));
+        let long = "x".repeat(2000);
+        assert!(sanitize(&long, "").chars().count() <= DETAIL_MAX + 1);
+    }
+
+    #[test]
+    fn display_has_no_body() {
+        let e = ProviderError::from_http(402, OR_402, "");
+        assert_eq!(e.to_string(), "provider error PROVIDER_CREDITS (HTTP 402)");
+    }
+}

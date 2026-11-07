@@ -64,3 +64,11 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 ## Thread
 
 Gửi → Planning + bắt đầu đo thought. `thinking` → Thinking + body. `tool_start`/`token` → seal `ms`. `done`/`error` → drop Planning/Thinking live, past bước, Thought record, checkpoint, worked.
+
+## Lỗi trong lượt
+
+- Engine chuẩn hóa lỗi provider → `error` event có `error: { code, status?, retryable, detail }` (`PROVIDER_CREDITS`, `PROVIDER_AUTH`, `PROVIDER_RATE`, `PROVIDER_UNAVAILABLE`, `NETWORK`, `TIMEOUT`, `UNKNOWN`). Thiếu `error` → thông báo chung.
+- Hiện **inline trong lượt** bằng `ErrorCard` (tiêu đề + mô tả + hướng xử lý tiếng Việt). Không toast/dialog; không dán JSON/HTTP làm nội dung chính.
+- "Chi tiết kỹ thuật" thu gọn (mã · HTTP · `detail` đã lọc secret ở Engine). Output log ghi cùng dòng.
+- Nút "Thử lại" chỉ khi `retryable` (rate/5xx/mạng/timeout) và chỉ ở lượt cuối. Credit/key sai: không retry, không auto-retry.
+- Sau lỗi: `busy` tắt; prompt vừa gửi được trả lại composer nếu đang trống. Copy: `renderer/errorCopy.ts`.

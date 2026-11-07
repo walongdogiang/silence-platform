@@ -21,6 +21,7 @@ import {
   type NarrateStep,
 } from "../chatMeta";
 import type { ChatLine, Diff, Perm } from "../models";
+import { ErrorCard } from "./ErrorCard";
 import { SoftScroll } from "./SoftScroll";
 
 const MODES = [
@@ -43,6 +44,7 @@ type Turn = {
   checkpoint?: { id: string; at: number; label: string; files: { path: string; before: string; after: string }[] };
   traces: ChatLine[];
   ai?: { text: string; at?: number };
+  errors: Extract<ChatLine, { kind: "error" }>[];
   live?: boolean;
   /** Index dòng cuối (inclusive) trong `lines` thuộc turn này — dùng Fork Chat */
   endLine: number;
@@ -59,7 +61,7 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
 
   function ensure(lineIdx: number): Turn {
     if (!cur) {
-      cur = { user: "", traces: [], narrations: [], endLine: lineIdx };
+      cur = { user: "", traces: [], narrations: [], errors: [], endLine: lineIdx };
       turns.push(cur);
     }
     cur.endLine = lineIdx;
@@ -69,7 +71,7 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.kind === "user") {
-      cur = { user: l.text, traces: [], narrations: [], endLine: i };
+      cur = { user: l.text, traces: [], narrations: [], errors: [], endLine: i };
       turns.push(cur);
     } else if (l.kind === "worked") {
       const t = ensure(i);
@@ -91,12 +93,14 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
       const t = ensure(i);
       if (t.ai) t.ai.text += l.text;
       else t.ai = { text: l.text, at: t.worked?.at };
+    } else if (l.kind === "error") {
+      ensure(i).errors.push(l);
     } else {
       ensure(i).traces.push(l);
     }
   }
 
-  const out = turns.filter((t) => t.user || t.ai || t.traces.length || t.worked || t.narrations.length || t.thought);
+  const out = turns.filter((t) => t.user || t.ai || t.traces.length || t.worked || t.narrations.length || t.thought || t.errors.length);
   for (const t of out) {
     if (t.ai && !t.ai.at && t.worked?.at) t.ai.at = t.worked.at;
   }
@@ -432,6 +436,7 @@ export function ChatPane(props: {
   onOpenWorkspace?: () => void;
   onChip?: (chip: string) => void;
   onUsePrompt?: (text: string) => void;
+  onRetry?: () => void;
 }) {
   const steps = props.plan ? planSteps(props.plan) : [];
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
@@ -554,6 +559,15 @@ export function ChatPane(props: {
                   />
                 </div>
               ) : null}
+              {t.errors.map((e, j) => (
+                <ErrorCard
+                  key={`err-${j}`}
+                  message={e.message}
+                  info={e.info}
+                  retryDisabled={Boolean(props.busy)}
+                  onRetry={i === turns.length - 1 ? props.onRetry : undefined}
+                />
+              ))}
             </div>
           );
         })}

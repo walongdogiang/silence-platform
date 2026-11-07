@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.2";
+export const PROTOCOL_VERSION = "0.1.3";
 
 export type DiffApplyParams = {
   session_id: string;
@@ -41,7 +41,25 @@ export type SessionEvent =
   | { type: "cost"; input_tokens: number; output_tokens: number; usd: number }
   | { type: "terminal"; data: string }
   | { type: "done"; stop: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; error?: ErrorInfo };
+
+export type ErrorCode =
+  | "PROVIDER_CREDITS"
+  | "PROVIDER_AUTH"
+  | "PROVIDER_RATE"
+  | "PROVIDER_UNAVAILABLE"
+  | "NETWORK"
+  | "TIMEOUT"
+  | "UNKNOWN";
+
+/** Lỗi lượt đã chuẩn hóa ở Engine. `detail` đã lọc secret + cắt ngắn. */
+export type ErrorInfo = {
+  code: ErrorCode | string;
+  status?: number;
+  retryable: boolean;
+  detail: string;
+};
+
 
 export type ModelInfo = {
   id: string;
