@@ -29,7 +29,7 @@ export function previewFrom(lines: ChatLine[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i];
     const text = l.kind === "tool" ? l.output : "text" in l ? l.text : "";
-    const t = text.trim().replace(/\s+/g, " ");
+    const t = (text ?? "").trim().replace(/\s+/g, " ");
     if (t) return t.length > 72 ? `${t.slice(0, 71)}…` : t;
   }
   return "";
