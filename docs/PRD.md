@@ -32,7 +32,7 @@ Hướng bắc: **Cursor và Claude Code có chức năng gì thì 5ilence cũng
 | Nhóm | Ví dụ |
 | --- | --- |
 | Context & convention | `@` file/folder, `/` skills, `AGENTS.md` / rules theo path, hooks |
-| Modes | Ask / Debug / Review gắn runtime (UI đã có stub) |
+| Modes | Ask / Debug / Review / MultiTask đã gắn runtime (xem `docs/frontend/composer.md`); còn lại: MultiTask chạy sub-agent song song |
 | Git & session | commit khi user hỏi, worktree, resume thread |
 | CLI | 5ilence CLI kiểu Claude Code, cùng harness với Studio |
 | Index codebase | grep/ripgrep trước; embedding/RAG nếu cần sau |

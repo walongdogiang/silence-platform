@@ -2305,3 +2305,6 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 @media (max-width: 1280px) {
   .app.view-chat { --context-w: 240px; }
 }
+
+.perm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.perm-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--font-size-base); }

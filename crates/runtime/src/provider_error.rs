@@ -108,6 +108,37 @@ pub fn classify_http(status: u16, body: &str) -> ErrorCode {
     }
 }
 
+/// `"<provider>: <upstream message>"` from an OpenRouter error body, if present.
+fn upstream_detail(body: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    let meta = v.get("error")?.get("metadata")?;
+    let raw = meta.get("raw")?;
+    let text = match raw {
+        Value::String(s) => match serde_json::from_str::<Value>(s) {
+            Ok(inner) => inner
+                .pointer("/error/message")
+                .or_else(|| inner.get("message"))
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| s.clone()),
+            Err(_) => s.clone(),
+        },
+        other => other
+            .pointer("/error/message")
+            .or_else(|| other.get("message"))
+            .and_then(|m| m.as_str())
+            .map(str::to_string)?,
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    match meta.get("provider_name").and_then(|p| p.as_str()) {
+        Some(p) => Some(format!("{p}: {text}")),
+        None => Some(text.to_string()),
+    }
+}
+
 /// Lấy `error.message` nếu body là JSON; xoá key + pattern secret; cắt ngắn.
 pub fn sanitize(body: &str, key: &str) -> String {
     let msg = serde_json::from_str::<Value>(body)
@@ -120,6 +151,11 @@ pub fn sanitize(body: &str, key: &str) -> String {
         })
         .unwrap_or_else(|| body.to_string());
     let mut out = msg.trim().to_string();
+    // OpenRouter wraps upstream failures as "Provider returned error"; the real reason is in
+    // `error.metadata.raw` (often itself JSON with an `error.message`).
+    if let Some(up) = upstream_detail(body) {
+        out = format!("{out} — {up}");
+    }
     if key.len() >= 4 {
         out = out.replace(key, "[REDACTED]");
     }
@@ -161,6 +197,13 @@ mod tests {
         assert!(ErrorCode::ProviderRate.retryable());
         assert!(ErrorCode::Timeout.retryable());
         assert!(!ErrorCode::ProviderAuth.retryable());
+    }
+
+    #[test]
+    fn upstream_reason_is_surfaced() {
+        let body = r#"{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"error\":{\"message\":\"messages.2: tool_use ids were found without tool_result\"}}","provider_name":"Anthropic"}}}"#;
+        let s = sanitize(body, "");
+        assert!(s.starts_with("Provider returned error — Anthropic: messages.2"), "{s}");
     }
 
     #[test]

@@ -11,7 +11,10 @@ export type DiffRejectParams = {
   path: string;
 };
 
-export type SessionMode = "agent" | "plan";
+export type SessionMode = "agent" | "plan" | "ask" | "debug" | "review" | "multitask";
+
+/** Params of `session.prompt`. `context`: extra text the UI attaches (e.g. Output tail in Debug). */
+export type PromptParams = { session_id: string; text: string; context?: string };
 export type PermissionMode = "ask" | "allowlist" | "yolo";
 
 export type RpcRequest = {

@@ -83,7 +83,39 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         "session.create" => session_create(state.clone(), writer.clone(), req.params).await,
         "session.prompt" => {
             let p: PromptParams = serde_json::from_value(req.params)?;
-            agent::prompt(state.ctx.clone(), p.session_id, p.text).await?;
+            let text = match p.context.as_deref().map(str::trim) {
+                Some(c) if !c.is_empty() => format!(
+                    "{}\n\n<ui_context>\n{}\n</ui_context>",
+                    p.text,
+                    crate::redact::redact(c)
+                ),
+                _ => p.text,
+            };
+            agent::prompt(state.ctx.clone(), p.session_id, text).await?;
+            Ok(json!({"ok": true}))
+        }
+        "permissions.list" => {
+            let ws = req.params.get("workspace").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(json!({"allow": agent::list_permissions(ws)?}))
+        }
+        "permissions.revoke" => {
+            let ws = req.params.get("workspace").and_then(|v| v.as_str()).unwrap_or("");
+            let entry = req.params.get("entry").and_then(|v| v.as_str()).unwrap_or("");
+            agent::revoke_permission(&state.ctx, ws, entry).await?;
+            Ok(json!({"allow": agent::list_permissions(ws)?}))
+        }
+        "session.set_mode" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let mode: silence_protocol::SessionMode = serde_json::from_value(
+                req.params.get("mode").cloned().unwrap_or_default(),
+            )?;
+            agent::set_mode(&state.ctx, sid, mode).await?;
+            Ok(json!({"ok": true}))
+        }
+        "session.set_model" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let model = req.params.get("model").and_then(|v| v.as_str()).unwrap_or("auto");
+            agent::set_model(&state.ctx, sid, model).await?;
             Ok(json!({"ok": true}))
         }
         "session.abort" => {
@@ -109,7 +141,7 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         }
         "session.approve_plan" => {
             let p: ApprovePlanParams = serde_json::from_value(req.params)?;
-            agent::approve_plan(&state.ctx, &p.session_id).await?;
+            agent::approve_plan(state.ctx.clone(), &p.session_id).await?;
             Ok(json!({"ok": true}))
         }
         "models.list" => Ok(json!({"models": state.ctx.catalog.infos(), "default": "auto"})),

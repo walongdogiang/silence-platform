@@ -19,7 +19,6 @@ use uuid::Uuid;
 const SYSTEM: &str = r#"You are 5ilence, an internal AI engineer. You work in a local workspace on Windows.
 Use tools to read, search, and edit. Prefer grep/read before editing. Do not invent file contents.
 Never commit unless asked. Never exfiltrate secrets. Apply the smallest correct change.
-When plan mode is on, only gather context and call submit_plan — do not edit.
 
 ## User-facing response formatting
 - Write user-facing answers in Markdown.
@@ -31,6 +30,68 @@ When plan mode is on, only gather context and call submit_plan — do not edit.
 - Use the appropriate tool schema or structured output format when a task requires machine-readable data.
 - Do not dump raw tool or runtime output into the answer; summarize what matters for the user. The product shows tool details separately.
 "#;
+
+/// What a session mode changes in the loop. The mode is re-read every turn
+/// (`session.set_mode`), so its instructions are injected per call, not stored in history.
+pub struct ModeProfile {
+    pub read_only: bool,
+    pub submit_plan: bool,
+    /// Tier to use when the session model is `auto`.
+    pub tier: Option<&'static str>,
+    pub system: &'static str,
+}
+
+pub fn profile(mode: SessionMode) -> ModeProfile {
+    let (submit_plan, tier, system) = match mode {
+        SessionMode::Agent => (false, None, ""),
+        SessionMode::Plan => (
+            true,
+            None,
+            "## Mode: Plan\nOnly gather context with read-only tools, then call submit_plan with a concrete step-by-step plan (files, changes, how to verify). Do not edit. If the user gives feedback on a plan, revise it and call submit_plan again.",
+        ),
+        SessionMode::Ask => (
+            false,
+            None,
+            "## Mode: Ask\nAnswer questions about the code using read-only tools. Never edit, write, or run shell. If the user wants a change, explain what you would change and tell them to switch to Agent mode.",
+        ),
+        SessionMode::Debug => (
+            false,
+            Some("strong"),
+            "## Mode: Debug\nWork evidence-first: 1) reproduce or locate the failure (read logs in <ui_context>, run the failing test/command with shell), 2) state hypotheses, 3) confirm one with evidence (logs, test output, code reading), 4) make the smallest fix, 5) re-run to verify. Do not edit before you have evidence. Report root cause, fix, and verification result.",
+        ),
+        SessionMode::Review => (
+            false,
+            Some("strong"),
+            "## Mode: Review\nReview code; never edit. Default scope: uncommitted changes (git_status, git_diff); otherwise the files or paths the user names. Read surrounding code before judging. Report findings ordered by severity (bug, security, correctness, then maintainability), each with `path:line`, the concrete failure scenario, and a suggested fix. Skip style nits unless asked. If nothing is wrong, say so. End by offering to apply fixes in Agent mode.",
+        ),
+        SessionMode::Multitask => (
+            false,
+            None,
+            "## Mode: MultiTask\nSplit the request into independent sub-tasks that touch different files. Delegate each to a sub-agent with the task tool (implement for changes, explore for research), giving each a self-contained prompt. Do sequential or overlapping work yourself. Finish with a short per-sub-task summary: what changed, what is left.",
+        ),
+    };
+    ModeProfile {
+        read_only: mode.read_only(),
+        submit_plan,
+        tier,
+        system,
+    }
+}
+
+/// History with the mode instructions appended to the system message (not persisted).
+fn with_mode_system(messages: &[Value], extra: &str) -> Vec<Value> {
+    let mut out = messages.to_vec();
+    if extra.is_empty() {
+        return out;
+    }
+    if let Some(first) = out.first_mut() {
+        if first.get("role").and_then(|r| r.as_str()) == Some("system") {
+            let base = first.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            first["content"] = Value::String(format!("{base}\n\n{extra}"));
+        }
+    }
+    out
+}
 
 #[derive(Debug, Clone)]
 pub struct PendingEdit {
@@ -50,7 +111,9 @@ pub struct Session {
     pub allowlist: Vec<String>,
     /// request_id → (tool name, decision channel). The name is resolved here, server-side,
     /// so `session.permission` never trusts a client-supplied tool name (T-01-09).
-    pub pending_perm: HashMap<String, (String, oneshot::Sender<bool>)>,
+    /// The allowlist entry to store on "remember" (`edit:src/**` or a bare tool name) is
+    /// computed here from the real tool args, never taken from the client.
+    pub pending_perm: HashMap<String, (String, String, oneshot::Sender<bool>)>,
     /// Staged file proposals awaiting `diff.apply` / `diff.reject`.
     pub pending_edits: HashMap<String, PendingEdit>,
     pub last_plan: Option<String>,
@@ -210,13 +273,23 @@ async fn run_turn(
                 return Ok(());
             }
             let last = text.as_str();
-            let decision = silence_router::route(&ctx.catalog, &s.model, last)?;
+            let mut decision = silence_router::route(&ctx.catalog, &s.model, last)?;
+            let prof = profile(s.mode);
+            // On Auto, a mode may pin a tier (Debug/Review → strong). Explicit picks win.
+            if s.model == "auto" {
+                if let Some(tier) = prof.tier {
+                    if let Ok(m) = ctx.catalog.by_tier(tier) {
+                        decision.model_id = m.id.clone();
+                        decision.reason = format!("mode {:?} -> tier {tier}", s.mode);
+                    }
+                }
+            }
             let model = ctx.catalog.resolve(&decision.model_id)?;
             (
                 decision.model_id,
                 decision.task_class.as_str().to_string(),
                 decision.reason,
-                s.mode == SessionMode::Plan,
+                prof.read_only,
                 model.context_window,
             )
         };
@@ -246,8 +319,9 @@ async fn run_turn(
         let (messages, tools) = {
             let mut s = session_arc.lock().await;
             compact_if_needed(&mut s.messages, context_window);
+            let prof = profile(s.mode);
             let mut tools = silence_tools::openai_tools(read_only);
-            if read_only {
+            if prof.submit_plan {
                 let arr = tools.as_array_mut().unwrap();
                 arr.push(json!({
                     "type": "function",
@@ -262,9 +336,9 @@ async fn run_turn(
                     }
                 }));
             }
-            arr_extend_mcp(&ctx, &mut tools).await;
+            arr_extend_mcp(&ctx, &mut tools, read_only).await;
             arr_extend_task(&mut tools, read_only);
-            (s.messages.clone(), tools)
+            (with_mode_system(&s.messages, prof.system), tools)
         };
 
         let mut token_buf = String::new();
@@ -425,10 +499,14 @@ async fn run_turn(
     Ok(())
 }
 
-async fn arr_extend_mcp(ctx: &AppCtx, tools: &mut Value) {
+/// Read-only modes only get MCP tools the server marks `readOnlyHint: true`.
+async fn arr_extend_mcp(ctx: &AppCtx, tools: &mut Value, read_only: bool) {
     let extra = ctx.mcp.all_tools().await;
     if let Some(arr) = tools.as_array_mut() {
         for (server, tool) in extra {
+            if read_only && !tool.read_only {
+                continue;
+            }
             arr.push(json!({
                 "type": "function",
                 "function": {
@@ -464,6 +542,21 @@ fn arr_extend_task(tools: &mut Value, plan: bool) {
     }
 }
 
+/// Close a tool call with a refusal (ToolEnd ok=false) and return the text for the model.
+fn refuse(tx: &Option<mpsc::UnboundedSender<SessionEvent>>, tc: &ToolCall, why: &str) -> String {
+    let msg = format!("{} {why}", tc.name);
+    emit(
+        tx,
+        SessionEvent::ToolEnd {
+            call_id: tc.id.clone(),
+            name: tc.name.clone(),
+            ok: false,
+            output: msg.clone(),
+        },
+    );
+    msg
+}
+
 async fn dispatch_tool(
     ctx: &AppCtx,
     session_arc: &Arc<Mutex<Session>>,
@@ -480,6 +573,9 @@ async fn dispatch_tool(
         },
     );
     if tc.name == "submit_plan" {
+        if session_arc.lock().await.mode != SessionMode::Plan {
+            return Ok(refuse(tx, tc, "is only available in Plan mode"));
+        }
         let md = args
             .get("markdown")
             .and_then(|v| v.as_str())
@@ -502,6 +598,17 @@ async fn dispatch_tool(
         let mut parts = rest.splitn(2, "__");
         let server = parts.next().unwrap_or("");
         let tool = parts.next().unwrap_or("");
+        if session_arc.lock().await.mode.read_only() {
+            let ro = ctx
+                .mcp
+                .all_tools()
+                .await
+                .into_iter()
+                .any(|(s, t)| s == server && t.name == tool && t.read_only);
+            if !ro {
+                return Ok(refuse(tx, tc, "is not read-only and this mode is read-only"));
+            }
+        }
         let allowed = ask_perm(ctx, session_arc, tx, &tc.name, &args).await?;
         if !allowed {
             return Ok("permission denied".into());
@@ -519,6 +626,9 @@ async fn dispatch_tool(
         return Ok(out);
     }
     if tc.name == "task" {
+        if session_arc.lock().await.mode.read_only() {
+            return Ok(refuse(tx, tc, "is not available in a read-only mode"));
+        }
         let kind = args
             .get("subagent_type")
             .and_then(|v| v.as_str())
@@ -541,6 +651,11 @@ async fn dispatch_tool(
         return Ok(out);
     }
     if silence_tools::mutates(&tc.name) {
+        // Defence in depth: read-only modes never offer these tools, but a model can still
+        // hallucinate a call, so refuse here before any permission prompt.
+        if session_arc.lock().await.mode.read_only() {
+            return Ok(refuse(tx, tc, "is not available in a read-only mode"));
+        }
         let allowed = ask_perm(ctx, session_arc, tx, &tc.name, &args).await?;
         if !allowed {
             return Ok("permission denied".into());
@@ -793,17 +908,16 @@ async fn ask_perm(
         PermissionMode::Ask => {
             {
                 let s = session_arc.lock().await;
-                if s.allowlist.iter().any(|k| k == name) {
+                if s.allowlist.iter().any(|k| permissions::entry_matches(k, name, args)) {
                     return Ok(true);
                 }
             }
             let (ptx, prx) = oneshot::channel();
             let request_id = Uuid::new_v4().to_string();
-            session_arc
-                .lock()
-                .await
-                .pending_perm
-                .insert(request_id.clone(), (name.to_string(), ptx));
+            session_arc.lock().await.pending_perm.insert(
+                request_id.clone(),
+                (name.to_string(), permissions::entry_for(name, args), ptx),
+            );
             emit(
                 tx,
                 SessionEvent::Permission {
@@ -833,12 +947,12 @@ pub async fn decide_permission(
         .cloned()
         .ok_or_else(|| anyhow!("unknown session"))?;
     let mut s = session.lock().await;
-    let Some((name, tx)) = s.pending_perm.remove(request_id) else {
+    let Some((name, entry, tx)) = s.pending_perm.remove(request_id) else {
         return Ok(());
     };
     // Deny never persists; only known mutating/MCP tools can be remembered.
-    if allow && remember && permissions::is_rememberable(&name) && !s.allowlist.contains(&name) {
-        s.allowlist.push(name);
+    if allow && remember && permissions::is_rememberable(&name) && !s.allowlist.contains(&entry) {
+        s.allowlist.push(entry);
         if let Err(e) = permissions::save(&s.workspace.root, &s.allowlist) {
             eprintln!("permissions: cannot persist allowlist: {e:#}");
         }
@@ -847,7 +961,9 @@ pub async fn decide_permission(
     Ok(())
 }
 
-pub async fn approve_plan(ctx: &AppCtx, session_id: &str) -> Result<()> {
+/// Approve the last submitted plan: switch to Agent, save the plan under
+/// `.silence/plans/`, and start the implementation turn right away.
+pub async fn approve_plan(ctx: Arc<AppCtx>, session_id: &str) -> Result<()> {
     let session = ctx
         .sessions
         .lock()
@@ -855,15 +971,85 @@ pub async fn approve_plan(ctx: &AppCtx, session_id: &str) -> Result<()> {
         .get(session_id)
         .cloned()
         .ok_or_else(|| anyhow!("unknown session"))?;
-    let mut s = session.lock().await;
-    s.mode = SessionMode::Agent;
-    let plan = s.last_plan.clone();
-    if let Some(plan) = plan {
-        s.messages.push(json!({
-            "role": "user",
-            "content": format!("Plan approved. Implement it.\n\n{plan}")
-        }));
+    let (plan, root) = {
+        let mut s = session.lock().await;
+        let plan = s.last_plan.take().ok_or_else(|| anyhow!("no plan to approve"))?;
+        s.mode = SessionMode::Agent;
+        (plan, s.workspace.root.clone())
+    };
+    let saved = save_plan(&root, &plan)
+        .map(|p| format!("\n\n(Saved at `{p}`.)"))
+        .unwrap_or_default();
+    prompt(
+        ctx,
+        session_id.to_string(),
+        format!("Plan approved. Implement it.{saved}\n\n{plan}"),
+    )
+    .await
+}
+
+/// Write an approved plan to `.silence/plans/<unix-seconds>.md`; returns the relative path.
+fn save_plan(root: &std::path::Path, plan: &str) -> Result<String> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let rel = format!(".silence/plans/{secs}.md");
+    let path = root.join(&rel);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
     }
+    std::fs::write(&path, plan)?;
+    Ok(rel)
+}
+
+/// Remembered permission entries of a workspace (read from disk).
+pub fn list_permissions(workspace: &str) -> Result<Vec<String>> {
+    let ws = Workspace::new(workspace)?;
+    permissions::load(&ws.root)
+}
+
+/// Remove one remembered entry from disk and from every live session of that workspace.
+pub async fn revoke_permission(ctx: &AppCtx, workspace: &str, entry: &str) -> Result<()> {
+    let ws = Workspace::new(workspace)?;
+    let mut list = permissions::load(&ws.root)?;
+    list.retain(|e| e != entry);
+    permissions::save(&ws.root, &list)?;
+    let sessions: Vec<_> = ctx.sessions.lock().await.values().cloned().collect();
+    for s in sessions {
+        let mut s = s.lock().await;
+        if s.workspace.root == ws.root {
+            s.allowlist.retain(|e| e != entry);
+        }
+    }
+    Ok(())
+}
+
+/// Switch the mode (agent / plan / ask) of a live session.
+pub async fn set_mode(ctx: &AppCtx, session_id: &str, mode: SessionMode) -> Result<()> {
+    let session = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    session.lock().await.mode = mode;
+    Ok(())
+}
+
+/// Switch the model of a live session (the picker changes after `session.create`).
+pub async fn set_model(ctx: &AppCtx, session_id: &str, model: &str) -> Result<()> {
+    if model != "auto" {
+        ctx.catalog.resolve(model)?;
+    }
+    let session = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    session.lock().await.model = model.to_string();
     Ok(())
 }
 
@@ -872,6 +1058,30 @@ pub async fn abort(ctx: &AppCtx, session_id: &str) -> Result<()> {
         s.lock().await.abort = true;
     }
     Ok(())
+}
+
+const SUBAGENT_MAX_ROUNDS: usize = 8;
+
+/// One sub-agent tool call. Mutating calls go through the parent's normal path
+/// (`dispatch_tool`: read-only-mode guard, permission ask, diff staging, audit) — a sub-agent
+/// never writes the workspace silently. No nested sub-agents.
+async fn subagent_tool(
+    ctx: &AppCtx,
+    parent: &Arc<Mutex<Session>>,
+    tx: &Option<mpsc::UnboundedSender<SessionEvent>>,
+    tc: &ToolCall,
+    read_only: bool,
+) -> String {
+    if tc.name == "task" || tc.name == "submit_plan" {
+        return format!("{} is not available to sub-agents", tc.name);
+    }
+    if read_only && silence_tools::mutates(&tc.name) {
+        return "read-only subagent cannot mutate".into();
+    }
+    match Box::pin(dispatch_tool(ctx, parent, tx, tc)).await {
+        Ok(out) => out,
+        Err(e) => format!("ERROR: {e}"),
+    }
 }
 
 async fn run_subagent(
@@ -888,26 +1098,25 @@ async fn run_subagent(
             detail: json!({"kind": kind, "prompt": prompt}),
         },
     );
-    let (workspace, parent_id) = {
-        let p = parent.lock().await;
-        (p.workspace.root.clone(), p.id.clone())
-    };
+    let parent_id = parent.lock().await.id.clone();
     let (model, read_only) = match kind {
         "explore" => (ctx.catalog.by_tier("fast")?.id.clone(), true),
         "review" => (ctx.catalog.by_tier("strong")?.id.clone(), true),
         _ => (ctx.catalog.by_tier("mid")?.id.clone(), false),
     };
-    let ws = Workspace::new(&workspace)?;
     let tools = silence_tools::openai_tools(read_only);
-    let messages = vec![
+    let mut msgs = vec![
         json!({"role":"system","content": format!("{SYSTEM}\nYou are a {kind} sub-agent. You cannot spawn sub-agents. Return a concise summary.")}),
         json!({"role":"user","content": prompt}),
     ];
     let mut acc = String::new();
-    let mut msgs = messages;
-    let result = gateway::chat(&ctx.catalog, &model, &msgs, &tools, |_| {}, |_| {}).await?;
-    acc.push_str(&result.content);
-    if !result.tool_calls.is_empty() {
+    for _round in 0..SUBAGENT_MAX_ROUNDS {
+        let result = gateway::chat(&ctx.catalog, &model, &msgs, &tools, |_| {}, |_| {}).await?;
+        if result.tool_calls.is_empty() {
+            acc = result.content;
+            break;
+        }
+        acc = result.content.clone();
         msgs.push(json!({
             "role": "assistant",
             "content": result.content,
@@ -918,20 +1127,9 @@ async fn run_subagent(
             })).collect::<Vec<_>>()
         }));
         for tc in result.tool_calls {
-            let args: Value = serde_json::from_str(&tc.arguments).unwrap_or(json!({}));
-            let out = if silence_tools::mutates(&tc.name) && read_only {
-                "read-only subagent cannot mutate".into()
-            } else {
-                silence_tools::execute(&ws, &tc.name, &args)
-                    .await
-                    .map(|o| o.output)
-                    .unwrap_or_else(|e| e.to_string())
-            };
+            let out = subagent_tool(ctx, parent, tx, &tc, read_only).await;
             msgs.push(json!({"role":"tool","tool_call_id": tc.id, "content": redact(&out)}));
         }
-        let result2 = gateway::chat(&ctx.catalog, &model, &msgs, &tools, |_| {}, |_| {}).await?;
-        acc.push('\n');
-        acc.push_str(&result2.content);
     }
     let _ = ctx
         .audit
@@ -1059,5 +1257,87 @@ mod permission_tests {
         let ws = tempfile::tempdir().unwrap();
         permissions::save(ws.path(), &["read".into(), "edit".into(), "rm -rf".into()]).unwrap();
         assert_eq!(permissions::load(ws.path()).unwrap(), vec!["edit".to_string()]);
+    }
+
+    fn edit_call(path: &str) -> ToolCall {
+        ToolCall {
+            id: "c1".into(),
+            name: "edit".into(),
+            arguments: json!({"path": path, "old_string": "a = 1", "new_string": "a = 2"}).to_string(),
+        }
+    }
+
+    #[test]
+    fn mode_profiles() {
+        for m in [SessionMode::Plan, SessionMode::Ask, SessionMode::Review] {
+            assert!(profile(m).read_only, "{m:?} must be read-only");
+        }
+        for m in [SessionMode::Agent, SessionMode::Debug, SessionMode::Multitask] {
+            assert!(!profile(m).read_only, "{m:?} must allow edits");
+        }
+        assert!(profile(SessionMode::Plan).submit_plan);
+        assert!(!profile(SessionMode::Ask).submit_plan);
+        assert_eq!(profile(SessionMode::Debug).tier, Some("strong"));
+        assert_eq!(profile(SessionMode::Review).tier, Some("strong"));
+        assert_eq!(profile(SessionMode::Agent).tier, None);
+    }
+
+    #[test]
+    fn mode_system_is_appended_not_persisted() {
+        let hist = vec![json!({"role":"system","content":"BASE"}), json!({"role":"user","content":"hi"})];
+        let out = with_mode_system(&hist, "## Mode: Ask");
+        assert_eq!(out[0]["content"], "BASE\n\n## Mode: Ask");
+        assert_eq!(hist[0]["content"], "BASE");
+        assert_eq!(with_mode_system(&hist, "")[0]["content"], "BASE");
+    }
+
+    #[tokio::test]
+    async fn read_only_modes_refuse_edit_without_asking() {
+        for mode in [SessionMode::Ask, SessionMode::Review, SessionMode::Plan] {
+            let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            std::fs::write(ws.path().join("a.py"), "a = 1\n").unwrap();
+            let ctx = test_ctx(data.path());
+            let (_sid, s) = new_session(&ctx, ws.path()).await;
+            s.lock().await.mode = mode;
+            let out = dispatch_tool(&ctx, &s, &None, &edit_call("a.py")).await.unwrap();
+            assert!(out.contains("read-only"), "{mode:?}: {out}");
+            assert!(s.lock().await.pending_perm.is_empty(), "{mode:?} must not ask");
+            assert_eq!(std::fs::read_to_string(ws.path().join("a.py")).unwrap(), "a = 1\n");
+        }
+    }
+
+    #[tokio::test]
+    async fn subagent_edit_goes_through_permission() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::write(ws.path().join("a.py"), "a = 1\n").unwrap();
+        let ctx = test_ctx(data.path());
+        let (sid, s) = new_session(&ctx, ws.path()).await;
+        let (c, sc) = (ctx.clone(), s.clone());
+        let h = tokio::spawn(async move { subagent_tool(&c, &sc, &None, &edit_call("a.py"), false).await });
+        let mut asked = false;
+        for _ in 0..50 {
+            let rid = s.lock().await.pending_perm.keys().next().cloned();
+            if let Some(rid) = rid {
+                asked = true;
+                decide_permission(&ctx, &sid, &rid, false, false).await.unwrap();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let out = h.await.unwrap();
+        assert!(asked, "sub-agent edit must emit a permission ask");
+        assert_eq!(out, "permission denied");
+        assert_eq!(std::fs::read_to_string(ws.path().join("a.py")).unwrap(), "a = 1\n");
+    }
+
+    #[tokio::test]
+    async fn read_only_subagent_and_nesting_refused() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ctx = test_ctx(data.path());
+        let (_sid, s) = new_session(&ctx, ws.path()).await;
+        let out = subagent_tool(&ctx, &s, &None, &edit_call("a.py"), true).await;
+        assert_eq!(out, "read-only subagent cannot mutate");
+        let task = ToolCall { id: "t".into(), name: "task".into(), arguments: "{}".into() };
+        assert!(subagent_tool(&ctx, &s, &None, &task, false).await.contains("not available"));
     }
 }
