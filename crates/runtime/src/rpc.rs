@@ -67,7 +67,18 @@ async fn write_json(writer: &SharedWriter, value: &Value) -> Result<()> {
 
 async fn dispatch(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> Result<()> {
     let id = req.id.clone();
-    let result = match req.method.as_str() {
+    // Every failure inside `handle` (bad params, unknown session, …) must become an RPC error
+    // response. Never use `?` here: that would skip the reply and the client would hang until
+    // its own timeout.
+    let resp = match handle(state, writer.clone(), req).await {
+        Ok(v) => RpcResponse::ok(id, v),
+        Err(err) => RpcResponse::err(id, -32000, format!("{err:#}")),
+    };
+    write_json(&writer, &serde_json::to_value(&resp)?).await
+}
+
+async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> Result<Value> {
+    match req.method.as_str() {
         "ping" => Ok(json!({"ok": true, "protocol": silence_protocol::PROTOCOL_VERSION})),
         "session.create" => session_create(state.clone(), writer.clone(), req.params).await,
         "session.prompt" => {
@@ -166,12 +177,7 @@ async fn dispatch(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -
             Ok(json!({"ok": true}))
         }
         other => Err(anyhow::anyhow!("unknown method {other}")),
-    };
-    let resp = match result {
-        Ok(v) => RpcResponse::ok(id, v),
-        Err(err) => RpcResponse::err(id, -32000, err.to_string()),
-    };
-    write_json(&writer, &serde_json::to_value(&resp)?).await
+    }
 }
 
 async fn session_create(state: Arc<RpcState>, writer: SharedWriter, params: Value) -> Result<Value> {
@@ -240,4 +246,71 @@ async fn terminal_start(state: Arc<RpcState>, writer: SharedWriter, params: Valu
         }
     });
     Ok(json!({"ok": true}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::AuditLog;
+    use silence_router::Catalog;
+    use std::time::Duration;
+    use tokio::io::{duplex, split, AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    /// Send one request line through `serve_connection` and return the parsed reply.
+    async fn roundtrip(line: &str) -> Value {
+        let data = tempfile::tempdir().unwrap();
+        let raw = serde_json::from_value(json!({
+            "version": 1, "providers": [], "models": [], "routes": {}
+        }))
+        .unwrap();
+        let ctx = Arc::new(AppCtx::new(
+            Catalog { raw },
+            AuditLog::open(data.path()).unwrap(),
+        ));
+        let state = Arc::new(RpcState::new(ctx));
+
+        let (client, server) = duplex(64 * 1024);
+        let (sr, sw) = split(server);
+        tokio::spawn(serve_connection(state, sr, sw));
+
+        let (cr, mut cw) = split(client);
+        cw.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+        let mut lines = BufReader::new(cr).lines();
+        // A missing reply is exactly the bug this guards against, so fail instead of hanging.
+        let reply = tokio::time::timeout(Duration::from_secs(3), lines.next_line())
+            .await
+            .expect("engine must reply to a failing request, not stay silent")
+            .unwrap()
+            .expect("connection closed without a reply");
+        serde_json::from_str(&reply).unwrap()
+    }
+
+    #[tokio::test]
+    async fn prompt_on_unknown_session_returns_error_response() {
+        let v = roundtrip(
+            r#"{"jsonrpc":"2.0","id":7,"method":"session.prompt","params":{"session_id":"nope","text":"hi"}}"#,
+        )
+        .await;
+        assert_eq!(v["id"], 7);
+        assert!(
+            v["error"]["message"].as_str().unwrap().contains("unknown session"),
+            "got {v}"
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_params_return_error_response() {
+        let v = roundtrip(
+            r#"{"jsonrpc":"2.0","id":8,"method":"session.prompt","params":{"session_id":5}}"#,
+        )
+        .await;
+        assert_eq!(v["id"], 8);
+        assert!(v["error"]["message"].is_string(), "got {v}");
+    }
+
+    #[tokio::test]
+    async fn ping_still_ok() {
+        let v = roundtrip(r#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}"#).await;
+        assert_eq!(v["result"]["ok"], true);
+    }
 }
