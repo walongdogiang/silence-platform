@@ -2,6 +2,7 @@ use crate::audit::{now_event, AuditLog};
 use crate::compact::{compact_if_needed, messages_tokens};
 use crate::gateway::{self, ToolCall};
 use crate::org::{self, OrgContext};
+use crate::permissions;
 use crate::provider_error::{sanitize, ErrorCode, ProviderError};
 use crate::redact::redact;
 use anyhow::{anyhow, Result};
@@ -47,7 +48,9 @@ pub struct Session {
     pub messages: Vec<Value>,
     pub org: OrgContext,
     pub allowlist: Vec<String>,
-    pub pending_perm: HashMap<String, oneshot::Sender<bool>>,
+    /// request_id → (tool name, decision channel). The name is resolved here, server-side,
+    /// so `session.permission` never trusts a client-supplied tool name (T-01-09).
+    pub pending_perm: HashMap<String, (String, oneshot::Sender<bool>)>,
     /// Staged file proposals awaiting `diff.apply` / `diff.reject`.
     pub pending_edits: HashMap<String, PendingEdit>,
     pub last_plan: Option<String>,
@@ -83,6 +86,7 @@ pub async fn create_session(
 ) -> Result<String> {
     let ws = Workspace::new(workspace)?;
     let org = org::load(&ws.root).unwrap_or_default();
+    let allowlist = permissions::load(&ws.root).unwrap_or_default();
     let id = Uuid::new_v4().to_string();
     let mut system = SYSTEM.to_string();
     system.push_str(&org::system_append(&org));
@@ -94,7 +98,7 @@ pub async fn create_session(
         model: model.unwrap_or_else(|| "auto".into()),
         messages: vec![json!({"role":"system","content": system})],
         org,
-        allowlist: Vec::new(),
+        allowlist,
         pending_perm: HashMap::new(),
         pending_edits: HashMap::new(),
         last_plan: None,
@@ -799,7 +803,7 @@ async fn ask_perm(
                 .lock()
                 .await
                 .pending_perm
-                .insert(request_id.clone(), ptx);
+                .insert(request_id.clone(), (name.to_string(), ptx));
             emit(
                 tx,
                 SessionEvent::Permission {
@@ -820,7 +824,6 @@ pub async fn decide_permission(
     request_id: &str,
     allow: bool,
     remember: bool,
-    name_hint: Option<String>,
 ) -> Result<()> {
     let session = ctx
         .sessions
@@ -830,14 +833,17 @@ pub async fn decide_permission(
         .cloned()
         .ok_or_else(|| anyhow!("unknown session"))?;
     let mut s = session.lock().await;
-    if remember {
-        if let Some(n) = name_hint {
-            s.allowlist.push(n);
+    let Some((name, tx)) = s.pending_perm.remove(request_id) else {
+        return Ok(());
+    };
+    // Deny never persists; only known mutating/MCP tools can be remembered.
+    if allow && remember && permissions::is_rememberable(&name) && !s.allowlist.contains(&name) {
+        s.allowlist.push(name);
+        if let Err(e) = permissions::save(&s.workspace.root, &s.allowlist) {
+            eprintln!("permissions: cannot persist allowlist: {e:#}");
         }
     }
-    if let Some(tx) = s.pending_perm.remove(request_id) {
-        let _ = tx.send(allow);
-    }
+    let _ = tx.send(allow);
     Ok(())
 }
 
@@ -949,4 +955,109 @@ async fn run_subagent(
         },
     );
     Ok(acc)
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn test_ctx(data: &std::path::Path) -> Arc<AppCtx> {
+        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": [], "routes": {}})).unwrap();
+        let audit = AuditLog::open(data).unwrap();
+        Arc::new(AppCtx::new(Catalog { raw }, audit))
+    }
+
+    async fn new_session(ctx: &AppCtx, ws: &std::path::Path) -> (String, Arc<Mutex<Session>>) {
+        let id = create_session(
+            ctx,
+            ws.to_str().unwrap(),
+            None,
+            SessionMode::Agent,
+            PermissionMode::Ask,
+        )
+        .await
+        .unwrap();
+        let s = ctx.sessions.lock().await.get(&id).cloned().unwrap();
+        (id, s)
+    }
+
+    /// Run `ask_perm` for `tool`, wait for the pending request, then answer it.
+    /// Returns (decision seen by the tool, whether an ask was needed).
+    async fn ask_and_answer(
+        ctx: &Arc<AppCtx>,
+        sid: &str,
+        s: &Arc<Mutex<Session>>,
+        tool: &str,
+        allow: bool,
+        remember: bool,
+    ) -> (bool, bool) {
+        let (c, sc, name) = (ctx.clone(), s.clone(), tool.to_string());
+        let h = tokio::spawn(async move {
+            ask_perm(&c, &sc, &None, &name, &json!({})).await.unwrap()
+        });
+        let mut asked = false;
+        for _ in 0..50 {
+            let rid = s.lock().await.pending_perm.keys().next().cloned();
+            if let Some(rid) = rid {
+                asked = true;
+                decide_permission(ctx, sid, &rid, allow, remember).await.unwrap();
+                break;
+            }
+            if h.is_finished() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        (h.await.unwrap(), asked)
+    }
+
+    #[tokio::test]
+    async fn remember_allow_pushes_tool_name() {
+        let (_d, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ctx = test_ctx(data.path());
+        let (sid, s) = new_session(&ctx, _d.path()).await;
+        let (ok, asked) = ask_and_answer(&ctx, &sid, &s, "edit", true, true).await;
+        assert!(ok && asked);
+        assert_eq!(s.lock().await.allowlist, vec!["edit".to_string()]);
+        assert_eq!(permissions::load(_d.path()).unwrap(), vec!["edit".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn second_call_skips_ask_when_allowlisted() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ctx = test_ctx(data.path());
+        let (sid, s) = new_session(&ctx, ws.path()).await;
+        ask_and_answer(&ctx, &sid, &s, "edit", true, true).await;
+        let (ok, asked) = ask_and_answer(&ctx, &sid, &s, "edit", true, true).await;
+        assert!(ok, "remembered tool must be allowed");
+        assert!(!asked, "remembered tool must not emit a second ask");
+    }
+
+    #[tokio::test]
+    async fn create_session_loads_allowlist() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        permissions::save(ws.path(), &["write".to_string()]).unwrap();
+        let ctx = test_ctx(data.path());
+        let (_sid, s) = new_session(&ctx, ws.path()).await;
+        assert_eq!(s.lock().await.allowlist, vec!["write".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn deny_never_persists() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ctx = test_ctx(data.path());
+        let (sid, s) = new_session(&ctx, ws.path()).await;
+        let (ok, asked) = ask_and_answer(&ctx, &sid, &s, "shell", false, true).await;
+        assert!(asked && !ok);
+        assert!(s.lock().await.allowlist.is_empty());
+        assert!(!ws.path().join(".silence/permissions.json").exists());
+    }
+
+    #[test]
+    fn unknown_tool_names_are_dropped_on_load() {
+        let ws = tempfile::tempdir().unwrap();
+        permissions::save(ws.path(), &["read".into(), "edit".into(), "rm -rf".into()]).unwrap();
+        assert_eq!(permissions::load(ws.path()).unwrap(), vec!["edit".to_string()]);
+    }
 }

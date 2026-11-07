@@ -427,7 +427,9 @@ export function ChatPane(props: {
   wsName: string;
   busy?: boolean;
   onApprovePlan: () => void;
-  onAllow: () => void;
+  permBusy?: boolean;
+  permError?: boolean;
+  onAllow: (remember: boolean) => void;
   onDeny: () => void;
   onApplyDiff: () => void;
   onRejectDiff: () => void;
@@ -442,6 +444,12 @@ export function ChatPane(props: {
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
   const logRef = useRef<HTMLDivElement>(null);
   const [copyToast, setCopyToast] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const permRequestId = props.perm?.request_id;
+  // Default back to checked for every new permission request.
+  useEffect(() => {
+    setRemember(true);
+  }, [permRequestId]);
   const copyToastTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -604,11 +612,31 @@ export function ChatPane(props: {
           <div className="banner warn">
             <h4>Cho phép {props.perm.name}?</h4>
             <pre>{JSON.stringify(props.perm.input, null, 2)}</pre>
+            <label className="perm-remember">
+              <input
+                type="checkbox"
+                checked={remember}
+                disabled={props.permBusy}
+                onChange={(e) => setRemember(e.target.checked)}
+              />
+              Nhớ cho workspace này
+            </label>
+            {props.permError && (
+              <p className="perm-error" role="alert">
+                <strong>Không gửi được quyết định quyền.</strong> Cho phép hoặc Từ chối lại; nếu vẫn
+                lỗi, mở lại workspace.
+              </p>
+            )}
             <div className="row">
-              <button type="button" className="primary" onClick={props.onAllow}>
+              <button
+                type="button"
+                className="primary"
+                disabled={props.permBusy}
+                onClick={() => props.onAllow(remember)}
+              >
                 Cho phép
               </button>
-              <button type="button" className="ghost" onClick={props.onDeny}>
+              <button type="button" className="ghost" disabled={props.permBusy} onClick={props.onDeny}>
                 Từ chối
               </button>
             </div>

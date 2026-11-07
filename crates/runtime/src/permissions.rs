@@ -1,36 +1,56 @@
 //! Workspace permission allowlist persistence (`.silence/permissions.json`).
 //!
-//! Wave 0 stubs intentionally do not persist. Plan 01-03 turns load/save green.
+//! Engine is the only writer. Renderer "remember" is a request, never a gate.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 const REL_PATH: &str = ".silence/permissions.json";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[allow(dead_code)] // Schema reserved for Plan 01-03 persistence body.
 struct PermissionsFile {
     #[serde(default)]
     allow_tools: Vec<String>,
 }
 
-/// Load `allow_tools` for a workspace. Missing file → empty list (once implemented).
+/// Only tools that go through `ask_perm` may be remembered (T-01-08).
+pub fn is_rememberable(name: &str) -> bool {
+    silence_tools::mutates(name) || name.starts_with("mcp__")
+}
+
+/// Load `allow_tools` for a workspace. Missing file → empty list.
+/// Unknown tool names in a hand-edited file are dropped.
 pub fn load(workspace: &Path) -> Result<Vec<String>> {
-    let _ = workspace.join(REL_PATH);
-    // Wave 0 stub: refuse real persistence until Plan 01-03.
-    Err(anyhow!(
-        "permissions::load not implemented — Wave 0 stub (Plan 01-03)"
-    ))
+    let path = workspace.join(REL_PATH);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).with_context(|| path.display().to_string()),
+    };
+    let file: PermissionsFile =
+        serde_json::from_str(&text).with_context(|| path.display().to_string())?;
+    let mut out: Vec<String> = Vec::new();
+    for t in file.allow_tools {
+        if is_rememberable(&t) && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    Ok(out)
 }
 
 /// Persist `allow_tools` under workspace `.silence/permissions.json`.
 pub fn save(workspace: &Path, allow_tools: &[String]) -> Result<()> {
-    let _ = (workspace.join(REL_PATH), allow_tools);
-    // Wave 0 stub: no-op failure so round-trip cannot succeed yet.
-    Err(anyhow!(
-        "permissions::save not implemented — Wave 0 stub (Plan 01-03)"
-    ))
+    let path = workspace.join(REL_PATH);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+    }
+    let file = PermissionsFile {
+        allow_tools: allow_tools.to_vec(),
+    };
+    let text = serde_json::to_string_pretty(&file)?;
+    std::fs::write(&path, text).with_context(|| path.display().to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]

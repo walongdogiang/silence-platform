@@ -92,7 +92,6 @@ async fn dispatch(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -
                 &p.request_id,
                 p.allow,
                 p.remember,
-                None,
             )
             .await?;
             Ok(json!({"ok": true}))

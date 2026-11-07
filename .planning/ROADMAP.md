@@ -42,7 +42,7 @@ Plans:
 - [ ] 01-02-PLAN.md — Walking Skeleton tracer: stage-then-apply Diff Apply/Reject + audit
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 01-03-PLAN.md — PERM-01 remember (name_hint + workspace store + Studio checkbox)
+- [x] 01-03-PLAN.md — PERM-01 remember (name_hint + workspace store + Studio checkbox)
 - [ ] 01-04-PLAN.md — WIN/NET/METR-04 shell UTF, ConPTY keep, loopback bind guard
 
 **UI hint**: yes

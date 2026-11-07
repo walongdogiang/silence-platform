@@ -209,6 +209,8 @@ export function App() {
   const [diff, setDiff] = useState<Diff | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
   const [perm, setPerm] = useState<Perm | null>(null);
+  const [permBusy, setPermBusy] = useState(false);
+  const [permError, setPermError] = useState(false);
   const [cost, setCost] = useState({ usd: 0, input_tokens: 0, output_tokens: 0, events: 0 });
   const [busy, setBusy] = useState(false);
   const termRef = useRef<HTMLDivElement | null>(null);
@@ -369,6 +371,7 @@ export function App() {
         turnFilesRef.current = [...prev, fileDiff];
         setDiff(fileDiff);
       } else if (ev.type === "permission") {
+        setPermError(false);
         setPerm({ request_id: ev.request_id, name: ev.name, input: ev.input, reason: ev.reason });
       } else if (ev.type === "terminal") {
         term.current?.write(ev.data.replace(/\n/g, "\r\n"));
@@ -787,15 +790,25 @@ export function App() {
     else if (chip === "More") setAppearOpen(true);
   }
 
-  function answerPerm(allow: boolean) {
-    if (!perm || !sessionId) return;
-    void window.silence.rpc("session.permission", {
-      session_id: sessionId,
-      request_id: perm.request_id,
-      allow,
-      remember: allow,
-    });
-    setPerm(null);
+  async function answerPerm(allow: boolean, remember: boolean) {
+    if (!perm || !sessionId || permBusy) return;
+    setPermBusy(true);
+    setPermError(false);
+    try {
+      await window.silence.rpc("session.permission", {
+        session_id: sessionId,
+        request_id: perm.request_id,
+        allow,
+        // Deny never persists; Engine enforces this too.
+        remember: allow && remember,
+      });
+      setPerm(null);
+    } catch {
+      // Keep the banner mounted so the user can retry.
+      setPermError(true);
+    } finally {
+      setPermBusy(false);
+    }
   }
 
   function approvePlan() {
@@ -874,8 +887,10 @@ export function App() {
           wsName={wsName}
           busy={busy}
           onApprovePlan={approvePlan}
-          onAllow={() => answerPerm(true)}
-          onDeny={() => answerPerm(false)}
+          permBusy={permBusy}
+          permError={permError}
+          onAllow={(remember) => void answerPerm(true, remember)}
+          onDeny={() => void answerPerm(false, false)}
           onApplyDiff={() => void applyDiff()}
           onRejectDiff={() => void rejectDiff()}
           onRestoreCheckpoint={(id) => void restoreCheckpoint(id)}
