@@ -23,6 +23,8 @@
       "PowerShell(git log:*)"
     ],
     "ask": [
+      "Bash(npm run evals:*)",
+      "PowerShell(npm run evals:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git tag:*)",

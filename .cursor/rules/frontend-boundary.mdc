@@ -12,4 +12,4 @@ Specs: `docs/frontend/README.md`. Do not put backend/infra notes in those files.
 - No silent file writes. Diff + user approve. No fake mic/upload/automations — label “chưa gắn”.
 - Speak Vietnamese to the user. Keep agent/system prompts in English.
 - Unused: `ProjectHeader.tsx`, `ContextPanel.tsx`, `Sidebar.tsx` (do not remount Explorer / Agents Window chrome in chat).
-- Historical `ui-app.md` is not the current layout source of truth.
+- Historical `docs/archive/ui-app.md` is not the current layout source of truth.
