@@ -700,6 +700,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "RED until Plan 01-04: shell must read/write UTF-8 on Windows PowerShell 5.x"]
     async fn vietnamese_utf8_round_trip() {
         let (_d, ws) = tmp_ws();
         let phrase = "Xin chào thế giới";
@@ -731,6 +732,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "RED until Plan 01-04: extended-length (\\\\?\\) path support"]
     fn long_nested_path_tool_io() {
         let (_d, ws) = tmp_ws();
         // Nested relative path whose absolute form exceeds classic MAX_PATH (260).

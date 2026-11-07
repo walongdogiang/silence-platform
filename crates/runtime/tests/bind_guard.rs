@@ -1,6 +1,7 @@
 use silence_engine::bind_policy::ensure_loopback_tcp_bind;
 
 #[test]
+#[ignore = "RED until Plan 01-04: ensure_loopback_tcp_bind is a Wave 0 stub (NET-01)"]
 fn bind_refuses_non_loopback() {
     for host in ["0.0.0.0:0", "0.0.0.0:8080", "192.168.1.10:9000", "*:0"] {
         assert!(

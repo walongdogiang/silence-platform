@@ -34,9 +34,9 @@
     "sub_repos": []
   },
   "git": {
-    "branching_strategy": "none",
+    "branching_strategy": "phase",
     "create_tag": false,
-    "allow_default_branch_commits": true,
+    "allow_default_branch_commits": false,
     "base_branch": "main"
   },
   "parallelization": {

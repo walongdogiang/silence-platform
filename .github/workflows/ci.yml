@@ -1,0 +1,54 @@
+name: ci
+
+# Chạy trên mọi PR vào main và mỗi lần push main. Không gọi model, không cần secret.
+# Eval tốn API nên chỉ chạy ở workflow nightly-evals (evals.yml).
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    name: engine (cargo test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Test RED của Wave 0 được #[ignore] kèm lý do; bỏ #[ignore] khi làm Plan 01-04.
+      - name: Test workspace
+        run: cargo test --workspace
+
+  studio:
+    name: studio (tsc + vitest)
+    runs-on: windows-latest
+    env:
+      # Không cần binary Electron để type-check và chạy vitest.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Repo chưa commit package-lock.json nên dùng install, không dùng ci.
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Type-check
+        run: npx tsc --noEmit -p apps/studio
+      - name: Unit tests
+        run: npm test --workspace @silence/studio
