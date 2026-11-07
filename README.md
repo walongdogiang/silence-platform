@@ -14,10 +14,11 @@ Studio Electron + React/TypeScript (`apps/studio`). Lõi harness Rust (`silence-
 ```powershell
 $env:SILENCE_API_BASE="http://127.0.0.1:11434/v1"
 $env:SILENCE_API_KEY="..."
-.\scripts\cargo-msvc.bat build -p silence-engine
 npm install
 npm run studio
 ```
+
+`npm run studio` tự build Engine trước (`prestudio` → `npm run build:engine`), nên Studio luôn chạy bản Engine khớp code. Đóng Studio trước khi chạy lại, vì Engine đang chạy giữ khóa file `silence-engine.exe` và build sẽ báo "Access is denied".
 
 `scripts/cargo-msvc.bat` bọc MSVC + Windows SDK (máy này thiếu `ucrt.lib` x64). Khi SDK đầy đủ, dùng `cargo` bình thường.
 

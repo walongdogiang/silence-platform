@@ -8,7 +8,9 @@
   ],
   "scripts": {
     "desktop": "npm run studio",
+    "prestudio": "npm run build:engine",
     "studio": "npm run dev --workspace @silence/studio",
+    "build:engine": "scripts\\cargo-msvc.bat build -p silence-engine",
     "runtime": "cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420",
     "evals": "cargo run -p silence-engine -- evals --dir evals/v0 --repo-root ."
   }
