@@ -9,7 +9,7 @@ Playbook for non-GSD work: `AGENTS.md`. This file only authorizes GSD execute/pl
 
 This repo opted in: **GSD execute/plan may `git commit` atomically** (per-task / per-wave). Do not skip those commits. Do not ask again for permission during `/gsd-execute-phase`.
 
-- Config: `.planning/config.json` → `commit_docs: true`, `git.allow_default_branch_commits: true`, `git.branching_strategy: none`.
+- Config: `.planning/config.json` → `commit_docs: true`, `git.allow_default_branch_commits: false`, `git.branching_strategy: phase`. GSD commits go to a per-phase branch, never straight to `main`; merge via PR (see "Quy trình Git" in `AGENTS.md`).
 - Prefer `gsd_run query commit` for `.planning/` files.
 - Never commit `.env`, secrets, or `node_modules/`.
 - Do **not** run `/gsd-new-project` in a way that overwrites `docs/PRD.md`. Use `/gsd-plan-phase --prd docs/PRD.md`.

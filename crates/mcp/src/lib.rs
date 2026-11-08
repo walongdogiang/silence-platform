@@ -14,6 +14,8 @@ pub struct McpTool {
     pub name: String,
     pub description: String,
     pub schema: Value,
+    /// Server-declared `annotations.readOnlyHint`. Absent → false (assume it may mutate).
+    pub read_only: bool,
 }
 
 pub struct McpClient {
@@ -87,6 +89,10 @@ impl McpClient {
                         .get("inputSchema")
                         .cloned()
                         .unwrap_or_else(|| json!({"type": "object"})),
+                    read_only: t
+                        .pointer("/annotations/readOnlyHint")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
                 })
             })
             .collect())

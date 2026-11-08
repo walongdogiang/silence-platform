@@ -50,6 +50,18 @@ type Turn = {
   endLine: number;
 };
 
+/** Nhãn ô "Nhớ": mirror của `permissions::entry_for` (Engine mới là nơi quyết định phạm vi thật). */
+function permRememberLabel(input: unknown): string {
+  const raw = (input as { path?: unknown } | null | undefined)?.path;
+  if (typeof raw !== "string") return "Nhớ cho mọi lần gọi tool này trong workspace";
+  const p = raw.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+  const segs = p.split("/");
+  if (!p || p.startsWith("/") || p.includes(":") || segs.some((s) => s === ".." || s === "")) {
+    return "Nhớ cho mọi lần gọi tool này trong workspace";
+  }
+  return segs.length === 1 ? "Nhớ cho file ở thư mục gốc" : `Nhớ cho ${segs.slice(0, -1).join("/")}/**`;
+}
+
 function lineToStep(l: Extract<ChatLine, { kind: "narrate" }>): NarrateStep {
   if (l.verb) return { verb: l.verb, detail: l.detail };
   return parseNarrateLegacy(l.text ?? "");
@@ -427,6 +439,7 @@ export function ChatPane(props: {
   wsName: string;
   busy?: boolean;
   onApprovePlan: () => void;
+  onRevisePlan?: () => void;
   permBusy?: boolean;
   permError?: boolean;
   onAllow: (remember: boolean) => void;
@@ -444,12 +457,13 @@ export function ChatPane(props: {
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
   const logRef = useRef<HTMLDivElement>(null);
   const [copyToast, setCopyToast] = useState(false);
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(false);
   const permRequestId = props.perm?.request_id;
-  // Default back to checked for every new permission request.
+  // Remembering widens trust, so it is opt-in: unchecked for every new permission request.
   useEffect(() => {
-    setRemember(true);
+    setRemember(false);
   }, [permRequestId]);
+  const rememberLabel = permRememberLabel(props.perm?.input);
   const copyToastTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -604,6 +618,11 @@ export function ChatPane(props: {
               <button type="button" className="primary" onClick={props.onApprovePlan}>
                 <CheckCircle2 size={14} /> Duyệt plan
               </button>
+              {props.onRevisePlan ? (
+                <button type="button" className="ghost" onClick={props.onRevisePlan}>
+                  Góp ý / sửa
+                </button>
+              ) : null}
             </div>
           </div>
         )}
@@ -619,7 +638,7 @@ export function ChatPane(props: {
                 disabled={props.permBusy}
                 onChange={(e) => setRemember(e.target.checked)}
               />
-              Nhớ cho workspace này
+              {rememberLabel}
             </label>
             {props.permError && (
               <p className="perm-error" role="alert">

@@ -19,3 +19,4 @@ link/
 !scripts/**
 .DS_Store
 .claude/settings.local.json
+.silence/permissions.json

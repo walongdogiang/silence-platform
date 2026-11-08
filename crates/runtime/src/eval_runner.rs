@@ -25,6 +25,9 @@ struct Task {
     read_only: bool,
     #[serde(default)]
     plan_only: bool,
+    /// Session mode for this task (agent/plan/ask/debug/review/multitask). Overrides `plan_only`.
+    #[serde(default)]
+    mode: Option<SessionMode>,
     #[serde(default)]
     verify_filter: Option<String>,
     pass_if: PassIf,
@@ -40,6 +43,9 @@ struct PassIf {
     report_mentions: Vec<String>,
     #[serde(default)]
     plan_mentions: Vec<String>,
+    /// Paths that must be byte-identical to the fixture afterwards (read-only modes).
+    #[serde(default)]
+    unchanged: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,7 +77,9 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         copy_dir(&fixture, &ws)?;
         let audit = AuditLog::open(&results_dir.join(&task.id))?;
         let ctx = Arc::new(AppCtx::new(catalog.clone(), audit));
-        let mode = if task.plan_only || task.kind == "plan" {
+        let mode = if let Some(m) = task.mode {
+            m
+        } else if task.plan_only || task.kind == "plan" {
             SessionMode::Plan
         } else {
             SessionMode::Agent
@@ -92,7 +100,7 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         let passed = if !ok_run {
             false
         } else {
-            check_pass(task, &ws, &report, &plan, &manifest.verify_cmd)
+            check_pass(task, &ws, &fixture, &report, &plan, &manifest.verify_cmd)
         };
         println!(
             "{} {} {}",
@@ -135,8 +143,20 @@ async fn wait_done(
     }
 }
 
-fn check_pass(task: &Task, ws: &Path, report: &str, plan: &str, verify_cmd: &str) -> bool {
+fn check_pass(
+    task: &Task,
+    ws: &Path,
+    fixture: &Path,
+    report: &str,
+    plan: &str,
+    verify_cmd: &str,
+) -> bool {
     let hay = format!("{report}\n{plan}").to_lowercase();
+    for rel in &task.pass_if.unchanged {
+        if std::fs::read(ws.join(rel)).ok() != std::fs::read(fixture.join(rel)).ok() {
+            return false;
+        }
+    }
     for g in &task.pass_if.grep {
         let path = ws.join(&g.path);
         let Ok(text) = std::fs::read_to_string(&path) else {

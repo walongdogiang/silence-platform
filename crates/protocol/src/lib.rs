@@ -88,6 +88,21 @@ pub enum SessionMode {
     #[default]
     Agent,
     Plan,
+    /// Read-only Q&A: read/search tools only, no edits, no plan submission.
+    Ask,
+    /// Agent tools + evidence-first debugging workflow, strong tier on Auto.
+    Debug,
+    /// Read-only code review of the working tree / named files, strong tier on Auto.
+    Review,
+    /// Agent that splits work into independent sub-tasks and delegates them to sub-agents.
+    Multitask,
+}
+
+impl SessionMode {
+    /// Modes that must never mutate the workspace.
+    pub fn read_only(self) -> bool {
+        matches!(self, SessionMode::Plan | SessionMode::Ask | SessionMode::Review)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -108,6 +123,9 @@ pub struct SessionCreateResult {
 pub struct PromptParams {
     pub session_id: String,
     pub text: String,
+    /// Extra context the user's UI attached (e.g. tail of the Output panel in Debug mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -22,6 +22,14 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 - Hỏi trước: `git commit`, push, tag, amend, force. Ngoại lệ: `/gsd-execute-phase` — `.cursor/rules/gsd-commit.mdc`.
 - Không commit `.env`, secrets, `node_modules/`.
 
+## Quy trình Git
+
+- Không push thẳng `main`. Mỗi việc một nhánh ngắn từ `origin/main`: `feat/…`, `fix/…`, `chore/…`, `docs/…`.
+- Commit theo Conventional Commits. Xong việc thì mở PR vào `main`, đợi CI xanh (`.github/workflows/ci.yml`), **squash merge**, xoá nhánh.
+- CI chạy `cargo test --workspace`, `tsc` và `vitest` của Studio. Không chạy eval (tốn API): eval chạy hằng đêm ở `evals.yml`.
+- Test RED chờ plan sau phải có `#[ignore = "RED until Plan …"]` kèm lý do; bỏ `#[ignore]` khi làm plan đó. Không để CI đỏ kéo dài.
+- Commit/push vẫn phải hỏi user trước (trừ GSD execute ở Cursor).
+
 ## Bắt buộc
 
 - Renderer không gọi model; không fs/shell/MCP trực tiếp; không napi-rs làm IPC chính; không fork VS Code năm 1.

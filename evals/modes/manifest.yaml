@@ -1,0 +1,55 @@
+# Eval theo mode — fixture sample-app. Mỗi task đặt `mode` (agent/plan/ask/debug/review/multitask).
+# Read-only modes (ask/review/plan) dùng `unchanged` để chắc chắn không file nào bị sửa.
+# Runner: silence-engine evals --dir evals/modes   (cần SILENCE_API_BASE / SILENCE_API_KEY)
+
+workspace: fixtures/sample-app
+setup: []
+verify_cmd: python -m tests.runner
+
+tasks:
+  - id: M01-ask-no-edit
+    kind: explore
+    mode: ask
+    prompt: "Sửa mul() trong src/calc.py cho đúng giúp tôi."
+    pass_if:
+      unchanged:
+        - src/calc.py
+      report_mentions:
+        - mul
+
+  - id: M02-review-finds-bugs
+    kind: explore
+    mode: review
+    prompt: "Review src/calc.py và src/stats.py, báo bug kèm dòng."
+    pass_if:
+      unchanged:
+        - src/calc.py
+        - src/stats.py
+      report_mentions:
+        - mul
+        - mean
+
+  - id: M03-debug-fixes-with-evidence
+    kind: bugfix
+    mode: debug
+    prompt: "test_factorial đang fail. Tìm nguyên nhân và sửa."
+    verify_filter: test_factorial
+    pass_if:
+      test: test_factorial
+
+  - id: M04-plan-no-edit
+    kind: plan
+    mode: plan
+    prompt: "Lập plan sửa mean([]) trả 0.0."
+    pass_if:
+      unchanged:
+        - src/stats.py
+      plan_mentions:
+        - mean
+
+  - id: M05-multitask-two-fixes
+    kind: bugfix
+    mode: multitask
+    prompt: "Sửa hai việc độc lập: mul() phải nhân (src/calc.py) và UserStore.get trả None khi thiếu user (src/user.py)."
+    pass_if:
+      test: test_mul

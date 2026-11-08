@@ -8,7 +8,7 @@ import { BottomPanel, type PanelTab } from "./components/BottomPanel";
 import { ChatHistoryPanel, HISTORY_KEY, loadThreads, previewFrom, titleFrom } from "./components/ChatHistoryPanel";
 import { ChatPane } from "./components/ChatPane";
 import { ChatTabBar } from "./components/ChatTabBar";
-import { Composer } from "./components/Composer";
+import { Composer, type SessionMode } from "./components/Composer";
 import { DiffPane } from "./components/DiffPane";
 import { NetworkPanel } from "./components/NetworkPanel";
 import { TitleBar } from "./components/TitleBar";
@@ -200,7 +200,7 @@ export function App() {
   const [model, setModel] = useState("auto");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
-  const [mode, setMode] = useState<"agent" | "plan">("agent");
+  const [mode, setMode] = useState<SessionMode>("agent");
   const [tree, setTree] = useState<string[]>([]);
   const [file, setFile] = useState<string | null>(null);
   const [fileText, setFileText] = useState("");
@@ -693,7 +693,21 @@ export function App() {
     ]);
     setBusy(true);
     try {
-      await window.silence.rpc("session.prompt", { session_id: sessionId, text });
+      let sid = sessionId;
+      try {
+        await window.silence.rpc("session.set_model", { session_id: sid, model });
+      } catch (e) {
+        // Engine đã restart nên session cũ (lưu trong lịch sử) không còn: tạo session mới, giữ lịch sử hiển thị.
+        if (!/unknown session/i.test(e instanceof Error ? e.message : String(e)) || !workspace) throw e;
+        sid = await createLiveSession(workspace);
+        setSessionId(sid);
+        await window.silence.rpc("session.set_model", { session_id: sid, model });
+      }
+      // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
+      await window.silence.rpc("session.set_mode", { session_id: sid, mode });
+      // Debug: gửi kèm phần cuối tab Output (Engine lọc secret trước khi đưa cho model).
+      const context = mode === "debug" ? outputLog.slice(-60).join("\n") : undefined;
+      await window.silence.rpc("session.prompt", { session_id: sid, text, context });
     } catch (e) {
       // RPC bị từ chối (vd. Engine chưa sẵn sàng): tắt busy, trả prompt, hiện thẻ lỗi chung.
       const message = e instanceof Error ? e.message : String(e);
@@ -785,8 +799,21 @@ export function App() {
   }
 
   function onChip(chip: string) {
-    if (chip === "Plan") setMode("plan");
-    else if (chip === "Code" || chip === "Agent") setMode("agent");
+    const byChip: Record<string, SessionMode> = {
+      Plan: "plan",
+      Agent: "agent",
+      Code: "agent",
+      Debug: "debug",
+      MultiTask: "multitask",
+      Review: "review",
+      Ask: "ask",
+    };
+    if (chip === "ReviewChanges") {
+      // Nút Review ở hàng Files: chuyển sang Review và điền sẵn yêu cầu nếu ô nhập đang trống.
+      setMode("review");
+      setPrompt((p) => (p.trim() ? p : "Review các thay đổi chưa commit"));
+      focusComposer();
+    } else if (byChip[chip]) setMode(byChip[chip]);
     else if (chip === "More") setAppearOpen(true);
   }
 
@@ -811,12 +838,37 @@ export function App() {
     }
   }
 
-  function approvePlan() {
-    if (!sessionId) return;
-    void window.silence.rpc("session.approve_plan", { session_id: sessionId });
+  async function approvePlan() {
+    if (!sessionId || busy) return;
+    // Engine lưu plan vào .silence/plans/, chuyển sang Agent và tự chạy lượt implement.
     setPlan(null);
     setMode("agent");
-    setLines((xs) => [...xs, { kind: "sys", text: "Plan đã duyệt — agent sẽ implement." }]);
+    turnStartedAtRef.current = Date.now();
+    turnFilesRef.current = [];
+    thoughtStartedAtRef.current = Date.now();
+    const step = planningStep();
+    setLines((xs) => [
+      ...xs,
+      { kind: "user", text: "Duyệt plan — implement." },
+      { kind: "narrate", verb: step.verb, detail: step.detail },
+    ]);
+    setBusy(true);
+    try {
+      await window.silence.rpc("session.approve_plan", { session_id: sessionId });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      turnStartedAtRef.current = 0;
+      thoughtStartedAtRef.current = 0;
+      setLines((xs) => [...xs, { kind: "error", message }]);
+      setBusy(false);
+    }
+  }
+
+  function revisePlan() {
+    // Giữ mode Plan; góp ý gõ vào ô nhập sẽ được model dùng để sửa và nộp lại plan.
+    setMode("plan");
+    setPrompt((p) => (p.trim() ? p : "Sửa plan: "));
+    focusComposer();
   }
 
   const editorLang = useMemo(() => {
@@ -886,7 +938,8 @@ export function App() {
           hasSession={Boolean(sessionId)}
           wsName={wsName}
           busy={busy}
-          onApprovePlan={approvePlan}
+          onApprovePlan={() => void approvePlan()}
+          onRevisePlan={revisePlan}
           permBusy={permBusy}
           permError={permError}
           onAllow={(remember) => void answerPerm(true, remember)}
@@ -1013,6 +1066,7 @@ export function App() {
         value={appearance}
         onChange={setAppearance}
         onClose={() => setAppearOpen(false)}
+        workspace={workspace}
       />
     </div>
   );

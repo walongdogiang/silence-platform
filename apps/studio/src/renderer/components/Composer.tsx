@@ -21,14 +21,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { modelParts, modelTitle, speedLabel } from "../theme/modelsPrefs";
 import type { ModelInfo } from "../types";
 
+export type SessionMode = "agent" | "plan" | "ask" | "debug" | "review" | "multitask";
+
 const MODES = [
-  { id: "Plan", title: "Plan", Icon: List },
-  { id: "Agent", title: "Agent", Icon: InfinityIcon },
-  { id: "Debug", title: "Debug", Icon: Bug },
-  { id: "MultiTask", title: "MultiTask", Icon: Users },
-  { id: "Review", title: "Review", Icon: GitCompare },
-  { id: "Ask", title: "Ask", Icon: MessageCircle },
+  { id: "Plan", title: "Plan", mode: "plan", desc: "Chỉ đọc, lập kế hoạch để bạn duyệt rồi mới sửa", Icon: List },
+  { id: "Agent", title: "Agent", mode: "agent", desc: "Đọc, sửa file, chạy lệnh (hỏi quyền, có diff)", Icon: InfinityIcon },
+  { id: "Debug", title: "Debug", mode: "debug", desc: "Tái hiện, tìm nguyên nhân, sửa nhỏ nhất, chạy lại; gửi kèm log Output", Icon: Bug },
+  { id: "MultiTask", title: "MultiTask", mode: "multitask", desc: "Tách việc độc lập, giao cho sub-agent, tổng hợp kết quả", Icon: Users },
+  { id: "Review", title: "Review", mode: "review", desc: "Chỉ đọc, review thay đổi chưa commit, báo lỗi theo mức độ", Icon: GitCompare },
+  { id: "Ask", title: "Ask", mode: "ask", desc: "Chỉ đọc, hỏi đáp về code, không sửa", Icon: MessageCircle },
 ] as const;
+
+const modeLabel = (mode: SessionMode) => MODES.find((m) => m.mode === mode)?.id ?? "Agent";
 
 const CTX_MAX = 256_000;
 
@@ -84,7 +88,7 @@ export function Composer(props: {
   onPrompt: (v: string) => void;
   onSend: () => void;
   onChip: (chip: string) => void;
-  mode: "agent" | "plan";
+  mode: SessionMode;
   model: string;
   models: ModelInfo[];
   onModel: (id: string) => void;
@@ -102,7 +106,7 @@ export function Composer(props: {
   const [tipY, setTipY] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
-  const [picked, setPicked] = useState(props.mode === "plan" ? "Plan" : "Agent");
+  const [picked, setPicked] = useState<string>(modeLabel(props.mode));
   const modeRef = useRef<HTMLDivElement>(null);
   const modelRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
@@ -119,7 +123,7 @@ export function Composer(props: {
   const hoverTip = hoverModel ? modelTip(hoverModel, props.models) : null;
 
   useEffect(() => {
-    setPicked((prev) => (props.mode === "plan" ? "Plan" : prev === "Plan" ? "Agent" : prev));
+    setPicked(modeLabel(props.mode));
   }, [props.mode]);
 
   useEffect(() => {
@@ -273,7 +277,12 @@ export function Composer(props: {
             </button>
             {files.length > 0 ? filesMenu : null}
           </div>
-          <button type="button" className="composer-review" onClick={() => props.onChip("Review")}>
+          <button
+            type="button"
+            className="composer-review"
+            title="Review thay đổi chưa commit (chỉ đọc)"
+            onClick={() => props.onChip("ReviewChanges")}
+          >
             Review
           </button>
         </div>
@@ -313,6 +322,7 @@ export function Composer(props: {
                   type="button"
                   role="menuitem"
                   className={`mode-item${picked === m.id ? " active" : ""}`}
+                  title={m.desc}
                   onClick={() => pick(m.id)}
                 >
                   <m.Icon size={14} />

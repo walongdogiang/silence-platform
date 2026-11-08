@@ -1,4 +1,5 @@
 import { Monitor, Moon, Sun, X } from "lucide-react";
+import { PermissionsSection } from "./PermissionsSection";
 import mountains from "../assets/wallpapers/mountains.png";
 import {
   ACCENTS,
@@ -39,6 +40,7 @@ export function AppearancePanel(props: {
   value: Appearance;
   onChange: (next: Appearance) => void;
   onClose: () => void;
+  workspace?: string;
 }) {
   if (!props.open) return null;
   const a = props.value;
@@ -142,6 +144,8 @@ export function AppearancePanel(props: {
           Reduce Motion
         </label>
       </div>
+
+      <PermissionsSection workspace={props.workspace ?? ""} />
 
       <button type="button" className="ghost" onClick={() => props.onChange({ ...DEFAULT_APPEARANCE })}>
         Reset to default
