@@ -16,6 +16,7 @@ export type SessionEvent =
   | { type: "tool_end"; call_id: string; name: string; ok: boolean; output: string }
   | { type: "permission"; request_id: string; name: string; input: unknown; reason: string }
   | { type: "plan"; markdown: string }
+  | { type: "mode_suggestion"; mode: "agent" | "plan" | "ask" | "debug" | "review" | "multitask"; reason: string }
   | { type: "diff"; path: string; before: string; after: string }
   | { type: "trace"; event: string; detail: unknown }
   | { type: "route"; task_class: string; model_id: string; reason: string }

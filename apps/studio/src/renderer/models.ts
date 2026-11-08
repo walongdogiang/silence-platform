@@ -1,3 +1,4 @@
+import type { SessionMode } from "./modes";
 import type { ErrorInfo } from "./types";
 export type CheckpointFile = { path: string; before: string; after: string };
 
@@ -6,6 +7,8 @@ export type ChatLine =
   | { kind: "token"; text: string }
   | { kind: "tool"; name: string; output: string }
   | { kind: "route"; text: string }
+  /** Engine gợi ý chuyển mode (vd. Ask → Agent) để áp dụng thay đổi vừa đề xuất. */
+  | { kind: "mode_suggest"; mode: SessionMode; reason: string; prompt: string }
   | { kind: "sys"; text: string }
   | { kind: "error"; message: string; info?: ErrorInfo }
   | { kind: "worked"; ms: number; at: number }

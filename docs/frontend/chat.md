@@ -29,6 +29,14 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 - **Tách kênh:** tool / thinking / plan / diff / permission là event protocol riêng, không lẫn vào Copy.
 - Roadmap tiếp: `docs/frontend/chat-markdown-roadmap.md`.
 
+## Gợi ý đổi mode (Ask / Review → Agent)
+
+- Ở Ask/Review, khi người dùng muốn thay đổi, model đưa đề xuất bằng khối ```diff có `path:line` rồi gọi tool `suggest_mode` (không ghi gì). Engine phát event `mode_suggestion { mode, reason }`; Engine **không** tự đổi mode.
+- UI hiện thẻ dưới câu trả lời của lượt cuối: **Chuyển sang Agent và thực hiện** (đổi mode, gửi lại đúng prompt cũ; vẫn xin quyền + diff) và **Giữ Ask** (ẩn thẻ). Thẻ ẩn khi đang busy hoặc mode đã đổi.
+- Trước khi gửi: đang ở Ask/Review mà câu có động từ sửa (`looksLikeEditRequest`, `renderer/modes.ts`) → dòng nhỏ trên ô nhập "Đang ở Ask (chỉ đọc) … **Gửi bằng Agent**". Không chặn gửi.
+- Dòng route trong meta của lượt có nhãn mode: `Ask · chat → model`.
+- Ngôn ngữ trả lời theo tin nhắn user; code nhắc kèm `path:line` (`SYSTEM`).
+
 ## Fork Chat
 
 - Nút Fork cạnh Copy trên tin AI đã xong (`!live`); disable khi `busy`.

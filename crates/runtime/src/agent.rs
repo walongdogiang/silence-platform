@@ -29,6 +29,8 @@ Never commit unless asked. Never exfiltrate secrets. Apply the smallest correct 
 - Follow explicit user requests for JSON, plain text, code-only output, or other formats.
 - Use the appropriate tool schema or structured output format when a task requires machine-readable data.
 - Do not dump raw tool or runtime output into the answer; summarize what matters for the user. The product shows tool details separately.
+- Reply in the language of the user's latest message.
+- When you talk about code, name the file and line as `path:line` (workspace-relative); never say just "the file".
 "#;
 
 /// What a session mode changes in the loop. The mode is re-read every turn
@@ -36,6 +38,8 @@ Never commit unless asked. Never exfiltrate secrets. Apply the smallest correct 
 pub struct ModeProfile {
     pub read_only: bool,
     pub submit_plan: bool,
+    /// Offer the `suggest_mode` tool (non-mutating; only emits `ModeSuggestion`).
+    pub suggest_mode: bool,
     /// Tier to use when the session model is `auto`.
     pub tier: Option<&'static str>,
     pub system: &'static str,
@@ -52,7 +56,7 @@ pub fn profile(mode: SessionMode) -> ModeProfile {
         SessionMode::Ask => (
             false,
             None,
-            "## Mode: Ask\nAnswer questions about the code using read-only tools. Never edit, write, or run shell. If the user wants a change, explain what you would change and tell them to switch to Agent mode.",
+            "## Mode: Ask\nAnswer questions about the code using read-only tools. Never edit, write, or run shell. If the user asks for a change, do not just tell them to switch modes: look up the exact spot, show the proposed change as a short ```diff block with `path:line`, then call suggest_mode with mode \"agent\" so the UI offers a one-click switch. Do not call suggest_mode more than once per reply.",
         ),
         SessionMode::Debug => (
             false,
@@ -62,7 +66,7 @@ pub fn profile(mode: SessionMode) -> ModeProfile {
         SessionMode::Review => (
             false,
             Some("strong"),
-            "## Mode: Review\nReview code; never edit. Default scope: uncommitted changes (git_status, git_diff); otherwise the files or paths the user names. Read surrounding code before judging. Report findings ordered by severity (bug, security, correctness, then maintainability), each with `path:line`, the concrete failure scenario, and a suggested fix. Skip style nits unless asked. If nothing is wrong, say so. End by offering to apply fixes in Agent mode.",
+            "## Mode: Review\nReview code; never edit. Default scope: uncommitted changes (git_status, git_diff); otherwise the files or paths the user names. Read surrounding code before judging. Report findings ordered by severity (bug, security, correctness, then maintainability), each with `path:line`, the concrete failure scenario, and a suggested fix. Show a suggested fix as a short ```diff block. Skip style nits unless asked. If nothing is wrong, say so. If you found problems worth fixing, end by calling suggest_mode with mode \"agent\" (once) so the UI offers a one-click switch to apply them.",
         ),
         SessionMode::Multitask => (
             false,
@@ -73,6 +77,8 @@ pub fn profile(mode: SessionMode) -> ModeProfile {
     ModeProfile {
         read_only: mode.read_only(),
         submit_plan,
+        // Plan has its own approve flow; only Ask/Review get the switch-to-Agent suggestion.
+        suggest_mode: matches!(mode, SessionMode::Ask | SessionMode::Review),
         tier,
         system,
     }
@@ -336,6 +342,23 @@ async fn run_turn(
                     }
                 }));
             }
+            if prof.suggest_mode {
+                tools.as_array_mut().unwrap().push(json!({
+                    "type": "function",
+                    "function": {
+                        "name": "suggest_mode",
+                        "description": "Ask the UI to offer the user a one-click switch to Agent mode so a change you proposed can be applied. Does not change anything itself.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "mode": {"type": "string", "enum": ["agent"]},
+                                "reason": {"type": "string", "description": "One short sentence for the user, in their language."}
+                            },
+                            "required": ["mode", "reason"]
+                        }
+                    }
+                }));
+            }
             arr_extend_mcp(&ctx, &mut tools, read_only).await;
             arr_extend_task(&mut tools, read_only);
             (with_mode_system(&s.messages, prof.system), tools)
@@ -572,6 +595,39 @@ async fn dispatch_tool(
             input: args.clone(),
         },
     );
+    if tc.name == "suggest_mode" {
+        let mode = session_arc.lock().await.mode;
+        if !profile(mode).suggest_mode {
+            return Ok(refuse(tx, tc, "is only available in Ask and Review mode"));
+        }
+        // Only a switch to Agent is offered. The UI decides; the Engine never changes mode here.
+        let reason = args
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(300)
+            .collect::<String>();
+        emit(
+            tx,
+            SessionEvent::ModeSuggestion {
+                mode: SessionMode::Agent,
+                reason,
+            },
+        );
+        let out = "Suggestion shown to the user. Do not call it again; finish your reply.".to_string();
+        emit(
+            tx,
+            SessionEvent::ToolEnd {
+                call_id: tc.id.clone(),
+                name: tc.name.clone(),
+                ok: true,
+                output: out.clone(),
+            },
+        );
+        return Ok(out);
+    }
     if tc.name == "submit_plan" {
         if session_arc.lock().await.mode != SessionMode::Plan {
             return Ok(refuse(tx, tc, "is only available in Plan mode"));
@@ -1303,6 +1359,64 @@ mod permission_tests {
             assert!(out.contains("read-only"), "{mode:?}: {out}");
             assert!(s.lock().await.pending_perm.is_empty(), "{mode:?} must not ask");
             assert_eq!(std::fs::read_to_string(ws.path().join("a.py")).unwrap(), "a = 1\n");
+        }
+    }
+
+    fn suggest_call() -> ToolCall {
+        ToolCall {
+            id: "s1".into(),
+            name: "suggest_mode".into(),
+            arguments: json!({"mode": "agent", "reason": "Cần sửa so_a"}).to_string(),
+        }
+    }
+
+    #[test]
+    fn suggest_mode_only_in_ask_and_review() {
+        assert!(profile(SessionMode::Ask).suggest_mode);
+        assert!(profile(SessionMode::Review).suggest_mode);
+        for m in [SessionMode::Plan, SessionMode::Agent, SessionMode::Debug, SessionMode::Multitask] {
+            assert!(!profile(m).suggest_mode, "{m:?} must not offer suggest_mode");
+        }
+    }
+
+    #[test]
+    fn system_prompt_has_language_and_path_rules() {
+        assert!(SYSTEM.contains("language of the user's latest message"));
+        assert!(SYSTEM.contains("`path:line`"));
+    }
+
+    #[tokio::test]
+    async fn suggest_mode_emits_event_without_touching_files() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::write(ws.path().join("a.py"), "a = 1\n").unwrap();
+        let ctx = test_ctx(data.path());
+        let (_sid, s) = new_session(&ctx, ws.path()).await;
+        s.lock().await.mode = SessionMode::Ask;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let out = dispatch_tool(&ctx, &s, &Some(tx), &suggest_call()).await.unwrap();
+        assert!(out.contains("Suggestion shown"));
+        let mut got = None;
+        while let Ok(ev) = rx.try_recv() {
+            if let SessionEvent::ModeSuggestion { mode, reason } = ev {
+                got = Some((mode, reason));
+            }
+        }
+        assert_eq!(got, Some((SessionMode::Agent, "Cần sửa so_a".to_string())));
+        assert_eq!(s.lock().await.mode, SessionMode::Ask, "engine must not switch mode itself");
+        assert!(s.lock().await.pending_perm.is_empty());
+        assert_eq!(std::fs::read_to_string(ws.path().join("a.py")).unwrap(), "a = 1\n");
+    }
+
+    #[tokio::test]
+    async fn suggest_mode_refused_in_agent_mode() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ctx = test_ctx(data.path());
+        let (_sid, s) = new_session(&ctx, ws.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let out = dispatch_tool(&ctx, &s, &Some(tx), &suggest_call()).await.unwrap();
+        assert!(out.contains("only available"), "{out}");
+        while let Ok(ev) = rx.try_recv() {
+            assert!(!matches!(ev, SessionEvent::ModeSuggestion { .. }));
         }
     }
 

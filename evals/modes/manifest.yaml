@@ -16,6 +16,7 @@ tasks:
         - src/calc.py
       report_mentions:
         - mul
+        - "[event:mode_suggestion]"   # Ask phải gợi ý chuyển sang Agent, không chỉ nói bằng chữ
 
   - id: M02-review-finds-bugs
     kind: explore

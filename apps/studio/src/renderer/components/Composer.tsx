@@ -19,9 +19,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { modelParts, modelTitle, speedLabel } from "../theme/modelsPrefs";
+import { MODE_LABEL, looksLikeEditRequest, type SessionMode } from "../modes";
 import type { ModelInfo } from "../types";
 
-export type SessionMode = "agent" | "plan" | "ask" | "debug" | "review" | "multitask";
+export type { SessionMode };
 
 const MODES = [
   { id: "Plan", title: "Plan", mode: "plan", desc: "Chỉ đọc, lập kế hoạch để bạn duyệt rồi mới sửa", Icon: List },
@@ -87,6 +88,8 @@ export function Composer(props: {
   prompt: string;
   onPrompt: (v: string) => void;
   onSend: () => void;
+  /** Gửi tin hiện tại bằng mode khác (gợi ý khi đang ở mode chỉ đọc mà gõ yêu cầu sửa). */
+  onSendAs?: (mode: SessionMode) => void;
   onChip: (chip: string) => void;
   mode: SessionMode;
   model: string;
@@ -284,6 +287,16 @@ export function Composer(props: {
             onClick={() => props.onChip("ReviewChanges")}
           >
             Review
+          </button>
+        </div>
+      ) : null}
+      {props.onSendAs && (props.mode === "ask" || props.mode === "review") && !props.busy && !props.disabled && looksLikeEditRequest(props.prompt) ? (
+        <div className="composer-hint" role="status">
+          <span>
+            Đang ở {MODE_LABEL[props.mode]} (chỉ đọc) nên sẽ không sửa file.
+          </span>
+          <button type="button" onClick={() => props.onSendAs?.("agent")}>
+            Gửi bằng Agent
           </button>
         </div>
       ) : null}

@@ -134,6 +134,8 @@ async fn wait_done(
                 plan.push_str(&markdown);
                 report.push_str(&markdown);
             }
+            // Marker so a task can require the event via `report_mentions: ["[event:mode_suggestion]"]`.
+            Ok(Some(SessionEvent::ModeSuggestion { .. })) => report.push_str("\n[event:mode_suggestion]\n"),
             Ok(Some(SessionEvent::Done { .. })) => return true,
             Ok(Some(SessionEvent::Error { .. })) => return false,
             Ok(Some(_)) => {}
