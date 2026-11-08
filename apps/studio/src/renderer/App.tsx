@@ -677,10 +677,16 @@ export function App() {
 
   async function openFile(rel: string) {
     if (!workspace) return;
-    setFile(rel);
-    setShowNetwork(false);
-    const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
-    setFileText(r.text);
+    try {
+      // Đọc trước rồi mới đặt file: chip trong câu trả lời có thể trỏ tới file không tồn tại.
+      const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
+      setFile(rel);
+      setShowNetwork(false);
+      setFileText(r.text);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] không mở được ${rel}: ${message}`]);
+    }
   }
 
   async function send(retryText?: string, modeOverride?: SessionMode) {
@@ -952,6 +958,7 @@ export function App() {
           wsName={wsName}
           busy={busy}
           mode={mode}
+          onOpenFile={(p) => void openFile(p)}
           onSwitchAndRun={(m, text) => {
             // Đổi mode rồi gửi lại đúng prompt cũ; vẫn qua xin quyền và diff như thường.
             setMode(m);

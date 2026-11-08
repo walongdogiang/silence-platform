@@ -23,7 +23,9 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 
 - **Nguồn sự thật:** mọi `ChatLine` loại `token` trong lượt → `Turn.ai.text` (chuỗi gốc từ model).
 - **Quy ước format:** system prompt runtime (`crates/runtime/src/agent.rs` → `SYSTEM`) bảo model viết câu trả lời user bằng Markdown.
-- **Hiển thị năm 1:** plain text + `pre-wrap` — chưa có Markdown renderer (xem roadmap).
+- **Hiển thị:** `components/MarkdownMessage.tsx` (`react-markdown` + `remark-gfm`: đậm/nghiêng, danh sách, bảng, task list, code fence). Streaming: fence chưa đóng vẫn ra khối code.
+- **An toàn:** không `rehype-raw` (HTML thô hiện như chữ, không thành phần tử); `javascript:`/`data:`/`file:` không thành link; **ảnh từ xa bị chặn** (URL ảnh là kênh rò rỉ dữ liệu khi model bị prompt-injection); link `http(s)` mở trình duyệt ngoài qua `window.silence.openExternal` (main kiểm lại scheme, từ chối URL kèm user:pass). Main chặn `will-navigate`/`window.open`, link không bao giờ thay giao diện app (`src/main/safeUrl.ts`).
+- **Chip file:** inline code dạng `path`, `path:line` (đường dẫn tương đối, không `..`, không ổ đĩa) thành chip bấm mở file trong workspace; chưa cuộn tới dòng.
 - **Copy Message:** `clipboard.writeText(ai.text)` — nguyên nguồn; không gồm Thought, Explored, tool details, checkpoint, route, timestamp.
 - **Copy UX (Cursor-like):** hover tooltip “Copy Message”; sau khi copy, icon → check ~2s; toast góc dưới trái “Message copied to clipboard”.
 - **Tách kênh:** tool / thinking / plan / diff / permission là event protocol riêng, không lẫn vào Copy.

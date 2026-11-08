@@ -23,6 +23,7 @@ import {
 import type { ChatLine, Diff, Perm } from "../models";
 import { MODE_LABEL, type SessionMode } from "../modes";
 import { ErrorCard } from "./ErrorCard";
+import { MarkdownMessage } from "./MarkdownMessage";
 import { SoftScroll } from "./SoftScroll";
 
 const MODES = [
@@ -444,6 +445,8 @@ export function ChatPane(props: {
   busy?: boolean;
   onApprovePlan: () => void;
   onRevisePlan?: () => void;
+  /** Mở file trong workspace khi bấm chip `path:line` trong câu trả lời. */
+  onOpenFile?: (path: string) => void;
   /** Mode hiện tại của composer: thẻ gợi ý chỉ hiện khi vẫn đang ở mode chỉ đọc. */
   mode?: SessionMode;
   /** Bấm "Chuyển sang Agent": đổi mode và gửi lại đúng prompt của lượt đó. */
@@ -581,7 +584,7 @@ export function ChatPane(props: {
               ) : null}
               {t.ai ? (
                 <div className="msg-ai-wrap">
-                  <div className="msg-ai">{t.ai.text}</div>
+                  <MarkdownMessage text={t.ai.text} onOpenFile={props.onOpenFile} />
                   <AiFooter
                     text={t.ai.text}
                     canFork={Boolean(props.onForkChat) && !t.live}

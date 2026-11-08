@@ -1,14 +1,15 @@
 # Roadmap — Markdown chat (sau năm 1 tối thiểu)
 
-Đã làm: quy tắc user-facing Markdown trong `SYSTEM` (`crates/runtime/src/agent.rs`); Copy = nguồn `ai.text`; docs hợp đồng trong `chat.md`.
+Đã làm: quy tắc user-facing GitHub-flavored Markdown trong `SYSTEM` (`crates/runtime/src/agent.rs`); Copy = nguồn `ai.text`; docs hợp đồng trong `chat.md`; renderer `MarkdownMessage` (react-markdown + remark-gfm) với chặn HTML thô / `javascript:` / ảnh từ xa, link ngoài qua `openExternal`, main chặn điều hướng.
 
 Cố ý **chưa** làm — mở lại khi cần.
 
 ## UI / renderer
 
-- [ ] Render Markdown an toàn trên `Turn.ai.text` (streaming; fence chưa đóng).
-- [ ] Không bật HTML thô; chặn XSS / `javascript:` links.
-- [ ] Khi renderer hỗ trợ bảng (và GFM khác): đổi prompt “Markdown” → “GitHub-flavored Markdown”.
+- [x] Render Markdown an toàn trên `Turn.ai.text` (streaming; fence chưa đóng).
+- [x] Không bật HTML thô; chặn XSS / `javascript:` links; chặn ảnh từ xa.
+- [x] Renderer hỗ trợ GFM: prompt đã đổi sang “GitHub-flavored Markdown”.
+- [ ] Chip `path:line` cuộn tới dòng (hiện chỉ mở file).
 - [ ] Syntax highlight trong code fence (tùy chọn).
 - [ ] Copy từng code block riêng (tùy chọn).
 

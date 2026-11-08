@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../");
@@ -58,6 +59,17 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  // Link trong câu trả lời của model không được thay giao diện app hay mở cửa sổ mới:
+  // chặn mọi điều hướng, chỉ http(s) mới ra trình duyệt ngoài.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (e, url) => {
+    if (isAppNavigation(url, win?.webContents.getURL() ?? "", process.env.ELECTRON_RENDERER_URL)) return;
+    e.preventDefault();
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
+  });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("did-fail-load", code, desc, url);
     void win?.webContents.executeJavaScript(
@@ -186,6 +198,12 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("win-close", () => win?.close());
   ipcMain.handle("silence-rpc", (_e, method: string, params?: unknown) => rpc(method, params));
+  // Renderer không đáng tin để tự kiểm URL: main kiểm lại trước khi mở.
+  ipcMain.handle("silence-open-external", async (_e, url: unknown) => {
+    if (typeof url !== "string" || !isSafeExternalUrl(url)) return false;
+    await shell.openExternal(url);
+    return true;
+  });
   ipcMain.handle("silence-pick-folder", async () => {
     const res = await dialog.showOpenDialog({ properties: ["openDirectory"] });
     if (res.canceled || !res.filePaths[0]) return null;
