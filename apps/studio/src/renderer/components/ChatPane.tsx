@@ -21,6 +21,7 @@ import {
   type NarrateStep,
 } from "../chatMeta";
 import type { ChatLine, Diff, Perm } from "../models";
+import { MODE_LABEL, type SessionMode } from "../modes";
 import { ErrorCard } from "./ErrorCard";
 import { SoftScroll } from "./SoftScroll";
 
@@ -45,6 +46,7 @@ type Turn = {
   traces: ChatLine[];
   ai?: { text: string; at?: number };
   errors: Extract<ChatLine, { kind: "error" }>[];
+  suggest?: Extract<ChatLine, { kind: "mode_suggest" }>;
   live?: boolean;
   /** Index dòng cuối (inclusive) trong `lines` thuộc turn này — dùng Fork Chat */
   endLine: number;
@@ -107,6 +109,8 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
       else t.ai = { text: l.text, at: t.worked?.at };
     } else if (l.kind === "error") {
       ensure(i).errors.push(l);
+    } else if (l.kind === "mode_suggest") {
+      ensure(i).suggest = l;
     } else {
       ensure(i).traces.push(l);
     }
@@ -440,6 +444,10 @@ export function ChatPane(props: {
   busy?: boolean;
   onApprovePlan: () => void;
   onRevisePlan?: () => void;
+  /** Mode hiện tại của composer: thẻ gợi ý chỉ hiện khi vẫn đang ở mode chỉ đọc. */
+  mode?: SessionMode;
+  /** Bấm "Chuyển sang Agent": đổi mode và gửi lại đúng prompt của lượt đó. */
+  onSwitchAndRun?: (mode: SessionMode, prompt: string) => void;
   permBusy?: boolean;
   permError?: boolean;
   onAllow: (remember: boolean) => void;
@@ -457,6 +465,8 @@ export function ChatPane(props: {
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
   const logRef = useRef<HTMLDivElement>(null);
   const [copyToast, setCopyToast] = useState(false);
+  // endLine của các gợi ý đổi mode đã bị "Giữ …" (chỉ ẩn trong phiên UI này).
+  const [dismissedSuggest, setDismissedSuggest] = useState<Set<number>>(new Set());
   const [remember, setRemember] = useState(false);
   const permRequestId = props.perm?.request_id;
   // Remembering widens trust, so it is opt-in: unchecked for every new permission request.
@@ -579,6 +589,32 @@ export function ChatPane(props: {
                     onFork={() => props.onForkChat?.(t.endLine)}
                     onCopied={showCopyToast}
                   />
+                </div>
+              ) : null}
+              {t.suggest &&
+              props.onSwitchAndRun &&
+              i === turns.length - 1 &&
+              !props.busy &&
+              props.mode !== t.suggest.mode &&
+              !dismissedSuggest.has(t.endLine) ? (
+                <div className="mode-suggest" role="group" aria-label="Gợi ý chuyển mode">
+                  <p>{t.suggest.reason || `Chuyển sang ${MODE_LABEL[t.suggest.mode]} để áp dụng thay đổi này?`}</p>
+                  <div className="row">
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => props.onSwitchAndRun?.(t.suggest!.mode, t.suggest!.prompt)}
+                    >
+                      Chuyển sang {MODE_LABEL[t.suggest.mode]} và thực hiện
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setDismissedSuggest((s) => new Set(s).add(t.endLine))}
+                    >
+                      Giữ {props.mode ? MODE_LABEL[props.mode] : "mode hiện tại"}
+                    </button>
+                  </div>
                 </div>
               ) : null}
               {t.errors.map((e, j) => (

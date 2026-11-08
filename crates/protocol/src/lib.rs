@@ -172,6 +172,12 @@ pub enum SessionEvent {
     Plan {
         markdown: String,
     },
+    /// Read-only mode (Ask/Review) where the user wants a change: the model asks the UI to
+    /// offer a one-click switch. The Engine never switches modes itself.
+    ModeSuggestion {
+        mode: SessionMode,
+        reason: String,
+    },
     Diff {
         path: String,
         before: String,

@@ -8,7 +8,8 @@ import { BottomPanel, type PanelTab } from "./components/BottomPanel";
 import { ChatHistoryPanel, HISTORY_KEY, loadThreads, previewFrom, titleFrom } from "./components/ChatHistoryPanel";
 import { ChatPane } from "./components/ChatPane";
 import { ChatTabBar } from "./components/ChatTabBar";
-import { Composer, type SessionMode } from "./components/Composer";
+import { Composer } from "./components/Composer";
+import { routeText, type SessionMode } from "./modes";
 import { DiffPane } from "./components/DiffPane";
 import { NetworkPanel } from "./components/NetworkPanel";
 import { TitleBar } from "./components/TitleBar";
@@ -222,6 +223,8 @@ export function App() {
   const turnFilesRef = useRef<CheckpointFile[]>([]);
   const thoughtStartedAtRef = useRef(0);
   const lastPromptRef = useRef("");
+  /** Mode của lượt đang chạy (để ghi nhãn mode vào dòng route). */
+  const turnModeRef = useRef<SessionMode>("agent");
   const [termEl, setTermEl] = useState<HTMLDivElement | null>(null);
   const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs" | "preview">("changes");
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
@@ -362,7 +365,10 @@ export function App() {
       } else if (ev.type === "tool_end") {
         setLines((xs) => [...xs, { kind: "tool", name: ev.name, output: ev.output }]);
       } else if (ev.type === "route") {
-        setLines((xs) => [...xs, { kind: "route", text: `${ev.task_class} → ${ev.model_id}` }]);
+        setLines((xs) => [...xs, { kind: "route", text: routeText(turnModeRef.current, ev.task_class, ev.model_id) }]);
+      } else if (ev.type === "mode_suggestion") {
+        const prompt = lastPromptRef.current;
+        setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode, reason: ev.reason, prompt }]);
       } else if (ev.type === "plan") {
         setPlan(ev.markdown);
       } else if (ev.type === "diff") {
@@ -677,9 +683,12 @@ export function App() {
     setFileText(r.text);
   }
 
-  async function send(retryText?: string) {
+  async function send(retryText?: string, modeOverride?: SessionMode) {
     const text = (retryText ?? prompt).trim();
     if (!sessionId || !text || busy) return;
+    // `mode` là state nên không kịp cập nhật khi vừa setMode: dùng giá trị ghi đè cho lượt này.
+    const turnMode = modeOverride ?? mode;
+    turnModeRef.current = turnMode;
     lastPromptRef.current = text;
     if (retryText === undefined) setPrompt("");
     turnStartedAtRef.current = Date.now();
@@ -704,9 +713,9 @@ export function App() {
         await window.silence.rpc("session.set_model", { session_id: sid, model });
       }
       // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
-      await window.silence.rpc("session.set_mode", { session_id: sid, mode });
+      await window.silence.rpc("session.set_mode", { session_id: sid, mode: turnMode });
       // Debug: gửi kèm phần cuối tab Output (Engine lọc secret trước khi đưa cho model).
-      const context = mode === "debug" ? outputLog.slice(-60).join("\n") : undefined;
+      const context = turnMode === "debug" ? outputLog.slice(-60).join("\n") : undefined;
       await window.silence.rpc("session.prompt", { session_id: sid, text, context });
     } catch (e) {
       // RPC bị từ chối (vd. Engine chưa sẵn sàng): tắt busy, trả prompt, hiện thẻ lỗi chung.
@@ -909,6 +918,10 @@ export function App() {
       prompt={prompt}
       onPrompt={setPrompt}
       onSend={() => void send()}
+      onSendAs={(m) => {
+        setMode(m);
+        void send(undefined, m);
+      }}
       onChip={onChip}
       mode={mode}
       model={model}
@@ -938,6 +951,12 @@ export function App() {
           hasSession={Boolean(sessionId)}
           wsName={wsName}
           busy={busy}
+          mode={mode}
+          onSwitchAndRun={(m, text) => {
+            // Đổi mode rồi gửi lại đúng prompt cũ; vẫn qua xin quyền và diff như thường.
+            setMode(m);
+            void send(text, m);
+          }}
           onApprovePlan={() => void approvePlan()}
           onRevisePlan={revisePlan}
           permBusy={permBusy}
