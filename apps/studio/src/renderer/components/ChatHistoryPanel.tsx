@@ -20,9 +20,36 @@ export function titleFrom(lines: ChatLine[], fallback = "Đoạn chat mới"): s
   const u = lines.find((l) => l.kind === "user");
   if (u?.kind === "user" && u.text.trim()) {
     const t = u.text.trim().replace(/\s+/g, " ");
-    return t.length > 48 ? `${t.slice(0, 47)}…` : t;
+    // Viết hoa chữ đầu (Unicode: "sửa" → "Sửa"); chỉ đụng ký tự đầu, giữ nguyên phần còn lại.
+    const first = Array.from(t)[0] ?? "";
+    const cased = first.toLocaleUpperCase() + t.slice(first.length);
+    return cased.length > 48 ? `${cased.slice(0, 47)}…` : cased;
   }
   return fallback;
+}
+
+/** Tiêu đề đã chốt (AI sinh hoặc user đổi tay) thì không tính lại từ prompt. */
+export function titleLocked(t: Pick<ChatThread, "titleSource" | "forkedFromId">): boolean {
+  return t.titleSource === "ai" || t.titleSource === "user" || Boolean(t.forkedFromId);
+}
+
+/**
+ * Lượt đầu tiên có câu trả lời (câu hỏi + trả lời) để Engine sinh tiêu đề.
+ * Bỏ qua lượt lỗi không có chữ nào. `null` nếu chưa lượt nào được trả lời.
+ */
+export function firstExchange(lines: ChatLine[]): { user: string; reply: string } | null {
+  let user = "";
+  let reply = "";
+  for (const l of lines) {
+    if (l.kind === "user") {
+      if (user && reply.trim()) break;
+      user = l.text.trim();
+      reply = "";
+    } else if (l.kind === "token" && user) {
+      reply += l.text;
+    }
+  }
+  return user && reply.trim() ? { user, reply } : null;
 }
 
 export function previewFrom(lines: ChatLine[]): string {
@@ -81,10 +108,26 @@ export function ChatHistoryPanel(props: {
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
   onCustomize: () => void;
   onToggle: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [editingId, setEditingId] = useState("");
+  const [draft, setDraft] = useState("");
+
+  function startRename(t: ChatThread) {
+    setEditingId(t.id);
+    setDraft(t.title);
+  }
+
+  function commitRename() {
+    if (!editingId) return;
+    const id = editingId;
+    const t = props.threads.find((x) => x.id === id);
+    setEditingId("");
+    if (t && draft.trim() && draft.trim() !== t.title) props.onRename(id, draft);
+  }
   const [autoHint, setAutoHint] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -133,6 +176,8 @@ export function ChatHistoryPanel(props: {
     const needle = q.trim().toLowerCase();
     const items = props.threads
       .filter((t) => t.workspace === props.workspace)
+      // Chat chưa gửi gì thì chưa vào lịch sử (như Claude); vẫn hiện ở tab.
+      .filter((t) => t.lines.length > 0)
       .filter((t) => !needle || t.title.toLowerCase().includes(needle) || t.preview.toLowerCase().includes(needle))
       .sort((a, b) => b.updatedAt - a.updatedAt);
     const map = new Map<DayGroup, ChatThread[]>();
@@ -199,11 +244,36 @@ export function ChatHistoryPanel(props: {
             <span className="history-group">{g.label}</span>
             {g.items.map((t) => (
               <div key={t.id} className={`history-item ${t.id === props.activeId ? "active" : ""}`}>
-                <button type="button" className="history-open" onClick={() => props.onSelect(t.id)}>
-                  <span className={`history-dot ${t.id === props.activeId ? "on" : ""}`} />
-                  <strong>{t.title}</strong>
-                  <em>{relativeTime(t.updatedAt, now)}</em>
-                </button>
+                {editingId === t.id ? (
+                  <div className="history-open history-rename">
+                    <span className={`history-dot ${t.id === props.activeId ? "on" : ""}`} />
+                    <input
+                      autoFocus
+                      value={draft}
+                      aria-label="Đổi tên đoạn chat"
+                      maxLength={80}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        else if (e.key === "Escape") setEditingId("");
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="history-open"
+                    title="Double-click để đổi tên"
+                    onClick={() => props.onSelect(t.id)}
+                    onDoubleClick={() => startRename(t)}
+                  >
+                    <span className={`history-dot ${t.id === props.activeId ? "on" : ""}`} />
+                    <strong>{t.title}</strong>
+                    <em>{relativeTime(t.updatedAt, now)}</em>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="history-del"

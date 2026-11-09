@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { looksLikeDiff, parseUnifiedDiff } from "../unifiedDiff";
+import { CodeBlock, DiffBlock } from "./CodeView";
 
 /**
  * Nhận `src/calc.py`, `calc.py:4`, `src/a/b.rs:10-20`. Từ chối đường dẫn tuyệt đối, có ổ đĩa
@@ -54,7 +56,23 @@ export function MarkdownMessage(props: { text: string; onOpenFile?: (path: strin
       code({ className, children }) {
         const text = textOf(children);
         const inline = !className && !text.includes("\n");
-        if (!inline) return <code className={className}>{children}</code>;
+        if (!inline) {
+          const lang = /language-([\w+#.-]+)/.exec(className ?? "")?.[1];
+          const parsed = looksLikeDiff(lang, text) ? parseUnifiedDiff(text) : null;
+          if (parsed) {
+            const ref = parsed.path ? parsePathRef(parsed.path) : null;
+            return (
+              <DiffBlock
+                text={text}
+                parsed={parsed}
+                fenceLang={lang}
+                openPath={ref?.path ?? null}
+                onOpenFile={onOpenFile}
+              />
+            );
+          }
+          return <CodeBlock lang={lang} text={text} />;
+        }
         const ref = onOpenFile ? parsePathRef(text) : null;
         if (ref && onOpenFile) {
           return (
@@ -69,6 +87,10 @@ export function MarkdownMessage(props: { text: string; onOpenFile?: (path: strin
           );
         }
         return <code className="md-inline">{children}</code>;
+      },
+      pre({ children }) {
+        // Khối code đã tự bọc trong card (`CodeBlock`/`DiffBlock`), không lồng thêm <pre>.
+        return <>{children}</>;
       },
       table({ children }) {
         return (

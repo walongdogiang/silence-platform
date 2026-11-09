@@ -5,7 +5,15 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import mountains from "./assets/wallpapers/mountains.png";
 import { AppearancePanel } from "./components/AppearancePanel";
 import { BottomPanel, type PanelTab } from "./components/BottomPanel";
-import { ChatHistoryPanel, HISTORY_KEY, loadThreads, previewFrom, titleFrom } from "./components/ChatHistoryPanel";
+import {
+  ChatHistoryPanel,
+  HISTORY_KEY,
+  firstExchange,
+  loadThreads,
+  previewFrom,
+  titleFrom,
+  titleLocked,
+} from "./components/ChatHistoryPanel";
 import { ChatPane } from "./components/ChatPane";
 import { ChatTabBar } from "./components/ChatTabBar";
 import { Composer } from "./components/Composer";
@@ -34,7 +42,7 @@ import {
   type Appearance,
 } from "./theme/appearance";
 import { loadModelPrefs, saveModelPrefs, visibleModels } from "./theme/modelsPrefs";
-import type { ModelInfo, SessionEvent } from "./types";
+import type { ContextUsage, ModelInfo, SessionEvent } from "./types";
 
 function loadShellView(): ShellView {
   const v = localStorage.getItem("silence.shell.view");
@@ -223,13 +231,41 @@ export function App() {
   const turnFilesRef = useRef<CheckpointFile[]>([]);
   const thoughtStartedAtRef = useRef(0);
   const lastPromptRef = useRef("");
+  /** Thread đã gửi `chat.title` trong phiên này — chống gọi trùng / gọi lại sau lỗi. */
+  const titleRequestedRef = useRef(new Set<string>());
   /** Mode của lượt đang chạy (để ghi nhãn mode vào dòng route). */
   const turnModeRef = useRef<SessionMode>("agent");
   const [termEl, setTermEl] = useState<HTMLDivElement | null>(null);
+  const [showChangesSignal, setShowChangesSignal] = useState(0);
+  /** Panel Changes/file chỉ mở khi user chủ động (bấm card diff, chip file…), không tự bật khi có diff. */
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs" | "preview">("changes");
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => loadOpenTabs());
   const [activeThreadId, setActiveThreadId] = useState("");
+  /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+
+  // Làm mới khi đổi session / mode / model và khi lượt kết thúc (busy → false).
+  useEffect(() => {
+    if (!sessionId || busy || !window.silence) {
+      if (!sessionId) setContextUsage(null);
+      return;
+    }
+    let stale = false;
+    window.silence
+      .rpc("session.context", { session_id: sessionId, mode, model })
+      .then((r) => {
+        if (!stale) setContextUsage(r as ContextUsage);
+      })
+      .catch(() => {
+        // Engine restart → session cũ không còn; session mới được tạo ở lượt gửi kế tiếp.
+        if (!stale) setContextUsage(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sessionId, busy, mode, model]);
 
   useEffect(() => {
     applyAppearance(appearance);
@@ -283,7 +319,7 @@ export function App() {
               ...t,
               sessionId,
               lines,
-              title: titleFrom(lines, t.title),
+              title: titleLocked(t) ? t.title : titleFrom(lines, t.title),
               preview: previewFrom(lines),
               updatedAt: Date.now(),
             }
@@ -291,6 +327,18 @@ export function App() {
       ),
     );
   }, [lines, sessionId, activeThreadId]);
+
+  // Tiêu đề AI (như ChatGPT/Claude): một lần, sau khi lượt đầu có câu trả lời. Lỗi thì giữ tiêu đề tạm.
+  useEffect(() => {
+    if (busy || !activeThreadId) return;
+    const t = threads.find((x) => x.id === activeThreadId);
+    if (!t || t.titleSource === "ai" || t.titleSource === "user") return;
+    if (titleRequestedRef.current.has(t.id)) return;
+    const ex = firstExchange(lines);
+    if (!ex) return;
+    titleRequestedRef.current.add(t.id);
+    void requestTitle(t.id, sessionId, ex.user, ex.reply);
+  }, [busy, activeThreadId, lines, threads, sessionId]);
 
   useEffect(() => {
     if (activeThreadId) return;
@@ -517,7 +565,7 @@ export function App() {
     dir: string,
     liveSessionId: string,
     initial: ChatLine[] = [],
-    opts?: { forkedFromId?: string; title?: string },
+    opts?: { forkedFromId?: string; title?: string; titleSource?: ChatThread["titleSource"] },
   ) {
     const id = crypto.randomUUID();
     const baseTitle = opts?.title?.trim() || titleFrom(initial);
@@ -530,6 +578,7 @@ export function App() {
       updatedAt: Date.now(),
       lines: initial,
       forkedFromId: opts?.forkedFromId,
+      titleSource: opts?.titleSource ?? "auto",
     };
     setActiveThreadId(id);
     setSessionId(liveSessionId);
@@ -542,7 +591,7 @@ export function App() {
     setShowNetwork(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
-    setThreads((xs) => [thread, ...xs]);
+    setThreads((xs) => [thread, ...xs.filter((x) => x.lines.length > 0)]);
     focusComposer();
   }
 
@@ -556,9 +605,12 @@ export function App() {
     snapshotActive();
     const parent = threads.find((t) => t.id === parentId);
     const liveId = await createLiveSession(workspace);
+    // Cha đã có tiêu đề chốt (AI / user) thì fork dùng lại, không sinh thêm.
+    const parentLocked = parent?.titleSource === "ai" || parent?.titleSource === "user";
     beginThread(workspace, liveId, sliced, {
       forkedFromId: parentId,
-      title: titleFrom(sliced, parent?.title ?? "Đoạn chat"),
+      title: parentLocked && parent ? parent.title : titleFrom(sliced, parent?.title ?? "Đoạn chat"),
+      titleSource: parentLocked ? "ai" : "auto",
     });
     await refreshCost();
   }
@@ -574,8 +626,43 @@ export function App() {
     beginThread(dir, liveId);
   }
 
+  async function requestTitle(threadId: string, liveSessionId: string, userText: string, replyText: string) {
+    try {
+      const r = (await window.silence.rpc("chat.title", {
+        session_id: liveSessionId,
+        user_text: userText,
+        reply_text: replyText,
+      })) as { title?: string };
+      const title = r.title?.trim();
+      if (!title) return;
+      setThreads((xs) =>
+        xs.map((x) => {
+          // User có thể đã đổi tên tay trong lúc chờ: không ghi đè.
+          if (x.id !== threadId || x.titleSource === "user") return x;
+          return { ...x, title: x.forkedFromId ? `Fork · ${title}` : title, titleSource: "ai" };
+        }),
+      );
+      void refreshCost();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setOutputLog((xs) => [...xs.slice(-199), `[warn] không sinh được tiêu đề chat: ${message}`]);
+    }
+  }
+
+  function renameThread(id: string, title: string) {
+    const t = title.trim().replace(/\s+/g, " ");
+    if (!t) return;
+    setThreads((xs) => xs.map((x) => (x.id === id ? { ...x, title: t, titleSource: "user" } : x)));
+  }
+
   async function newChat() {
     if (!workspace) return;
+    // Đang ở chat trống thì dùng lại, không đẻ thêm chat rỗng.
+    if (activeThreadId && lines.length === 0 && threads.some((t) => t.id === activeThreadId)) {
+      setShellView("chat");
+      focusComposer();
+      return;
+    }
     const liveId = await createLiveSession(workspace);
     beginThread(workspace, liveId);
     await refreshCost();
@@ -596,7 +683,7 @@ export function App() {
               ...x,
               sessionId,
               lines,
-              title: titleFrom(lines, x.title),
+              title: titleLocked(x) ? x.title : titleFrom(lines, x.title),
               preview: previewFrom(lines),
               updatedAt: Date.now(),
             }
@@ -681,6 +768,7 @@ export function App() {
       // Đọc trước rồi mới đặt file: chip trong câu trả lời có thể trỏ tới file không tồn tại.
       const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
       setFile(rel);
+      setReviewOpen(true);
       setShowNetwork(false);
       setFileText(r.text);
     } catch (e) {
@@ -901,7 +989,11 @@ export function App() {
     .split("/")
     .filter(Boolean)
     .pop() ?? "";
-  const showReview = Boolean(diff || file);
+  const showReview = Boolean(diff || file) && reviewOpen;
+  // Diff mới chỉ hiện card trong chat; panel đóng lại trừ khi user đang xem một file.
+  useEffect(() => {
+    if (!file) setReviewOpen(false);
+  }, [diff]);
   const wsThreads = useMemo(
     () =>
       threads
@@ -936,7 +1028,7 @@ export function App() {
       busy={busy}
       disabled={!sessionId}
       files={tree}
-      tokens={cost.input_tokens}
+      context={contextUsage}
       onOpenFile={(p) => void openFile(p)}
       onAddModels={() => {
         setShowNetwork(true);
@@ -972,6 +1064,10 @@ export function App() {
           onDeny={() => void answerPerm(false, false)}
           onApplyDiff={() => void applyDiff()}
           onRejectDiff={() => void rejectDiff()}
+          onShowDiff={() => {
+            setReviewOpen(true);
+            setShowChangesSignal((n) => n + 1);
+          }}
           onRestoreCheckpoint={(id) => void restoreCheckpoint(id)}
           onForkChat={(endLine) => void forkChat(endLine)}
           onOpenWorkspace={() => void openWorkspace()}
@@ -990,7 +1086,14 @@ export function App() {
           language={editorLang}
           onOpenFile={(p) => void openFile(p)}
           onChange={setFileText}
+          onApply={() => void applyDiff()}
+          onReject={() => void rejectDiff()}
+          onClose={() => {
+            setReviewOpen(false);
+            if (!diff) setFile(null);
+          }}
           onReviewTab={setReviewSub}
+          showChangesSignal={showChangesSignal}
         />
       ) : null}
     </div>
@@ -1082,6 +1185,7 @@ export function App() {
             onNewChat={() => void newChat()}
             onSelect={selectThread}
             onDelete={deleteThread}
+            onRename={renameThread}
             onCustomize={() => setAppearOpen(true)}
             onToggle={toggleHistory}
           />

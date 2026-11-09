@@ -1,0 +1,43 @@
+name: docs-check
+
+# Docs và rule cho agent:
+# - rule đôi .claude/rules/*.md ↔ .cursor/rules/*.mdc phải khớp (thân + path);
+# - mọi docs/**/*.md (trừ archive/) có frontmatter hợp lệ và có trong mục lục.
+# Tách khỏi ci.yml vì ci.yml bỏ qua thay đổi chỉ chạm **/*.md. Không cần npm install.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".claude/rules/**"
+      - ".cursor/rules/**"
+      - "docs/**"
+      - "scripts/check-rules-sync.mjs"
+      - "scripts/check-docs-meta.mjs"
+      - ".github/workflows/docs-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".claude/rules/**"
+      - ".cursor/rules/**"
+      - "docs/**"
+      - "scripts/check-rules-sync.mjs"
+      - "scripts/check-docs-meta.mjs"
+      - ".github/workflows/docs-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: docs-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rule pairs (.claude ↔ .cursor)
+        run: node scripts/check-rules-sync.mjs
+      - name: Docs frontmatter and index
+        run: node scripts/check-docs-meta.mjs

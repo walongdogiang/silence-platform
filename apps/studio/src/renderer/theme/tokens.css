@@ -1,4 +1,22 @@
 :root {
+  --link: #79b0ff;
+  --link-hover: #a3c8ff;
+  --syn-keyword: #c99be6;
+  --syn-string: #a5d6a7;
+  --syn-comment: #7d8681;
+  --syn-number: #e5a05b;
+  --syn-type: #7cc7d9;
+  --syn-tag: #e5a05b;
+  --syn-attr: #9fc3e8;
+  --syn-regexp: #e28b8b;
+  --syn-punct: #b8b5b0;
+  /* Diff: đỏ/xanh lá bão hoà kiểu GitHub/Claude, tách khỏi --success/--error của UI. */
+  --diff-add: #3fb950;
+  --diff-del: #f85149;
+  --diff-add-bg: rgba(46, 160, 67, 0.17);
+  --diff-del-bg: rgba(248, 81, 73, 0.15);
+  --diff-add-chg: rgba(46, 160, 67, 0.42);
+  --diff-del-chg: rgba(248, 81, 73, 0.40);
   --app-bg: #171819;
   --workspace: #191a1c;
   --sidebar-bg: #1e1f21;
@@ -129,6 +147,23 @@
 }
 
 [data-theme="light"] {
+  --link: #1a64d6;
+  --link-hover: #0f4bab;
+  --syn-keyword: #8a3fb8;
+  --syn-string: #2f7d32;
+  --syn-comment: #7b8079;
+  --syn-number: #b0601a;
+  --syn-type: #1c7c92;
+  --syn-tag: #b0601a;
+  --syn-attr: #2d5f9e;
+  --syn-regexp: #b23b3b;
+  --syn-punct: #5f5b55;
+  --diff-add: #1a7f37;
+  --diff-del: #cf222e;
+  --diff-add-bg: rgba(46, 160, 67, 0.14);
+  --diff-del-bg: rgba(255, 129, 130, 0.22);
+  --diff-add-chg: rgba(46, 160, 67, 0.32);
+  --diff-del-chg: rgba(255, 129, 130, 0.50);
   --app-bg: #efe8df;
   --workspace: #f7f1ea;
   --sidebar-bg: #e7ddd2;

@@ -1,5 +1,5 @@
 use crate::audit::{now_event, AuditLog};
-use crate::compact::{compact_if_needed, messages_tokens};
+use crate::compact::{compact_if_needed, estimate_tokens, messages_tokens};
 use crate::gateway::{self, ToolCall};
 use crate::org::{self, OrgContext};
 use crate::permissions;
@@ -8,7 +8,9 @@ use crate::redact::redact;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use silence_mcp::McpHost;
-use silence_protocol::{ErrorInfo, PermissionMode, SessionEvent, SessionMode};
+use silence_protocol::{
+    ContextParts, ContextUsage, ErrorInfo, PermissionMode, SessionEvent, SessionMode,
+};
 use silence_router::{self, Catalog};
 use silence_tools::{self, Workspace};
 use std::collections::HashMap;
@@ -18,6 +20,9 @@ use uuid::Uuid;
 
 const SYSTEM: &str = r#"You are 5ilence, an internal AI engineer. You work in a local workspace on Windows.
 Use tools to read, search, and edit. Prefer grep/read before editing. Do not invent file contents.
+Find before you read: locate code with grep/glob (output_mode=files or count to scope a broad search),
+check a large file's structure with outline, then read only the line range you need (offset/limit).
+Do not read whole large files, and do not re-read ranges already in this conversation.
 Never commit unless asked. Never exfiltrate secrets. Apply the smallest correct change.
 
 ## User-facing response formatting
@@ -124,6 +129,11 @@ pub struct Session {
     pub pending_edits: HashMap<String, PendingEdit>,
     pub last_plan: Option<String>,
     pub abort: bool,
+    /// Model the last call actually used (after routing). For `session.context` on Auto.
+    pub last_model: Option<String>,
+    /// prompt + completion tokens of the last successful call, as reported by the provider.
+    /// That reply is now part of history, so this is the measured size of the context.
+    pub last_prompt_tokens: Option<u32>,
 }
 
 pub struct AppCtx {
@@ -172,6 +182,8 @@ pub async fn create_session(
         pending_edits: HashMap::new(),
         last_plan: None,
         abort: false,
+        last_model: None,
+        last_prompt_tokens: None,
     };
     ctx.sessions
         .lock()
@@ -278,18 +290,8 @@ async fn run_turn(
                 );
                 return Ok(());
             }
-            let last = text.as_str();
-            let mut decision = silence_router::route(&ctx.catalog, &s.model, last)?;
+            let decision = pick_model(&ctx.catalog, &s, text.as_str())?;
             let prof = profile(s.mode);
-            // On Auto, a mode may pin a tier (Debug/Review → strong). Explicit picks win.
-            if s.model == "auto" {
-                if let Some(tier) = prof.tier {
-                    if let Ok(m) = ctx.catalog.by_tier(tier) {
-                        decision.model_id = m.id.clone();
-                        decision.reason = format!("mode {:?} -> tier {tier}", s.mode);
-                    }
-                }
-            }
             let model = ctx.catalog.resolve(&decision.model_id)?;
             (
                 decision.model_id,
@@ -326,41 +328,11 @@ async fn run_turn(
             let mut s = session_arc.lock().await;
             compact_if_needed(&mut s.messages, context_window);
             let prof = profile(s.mode);
-            let mut tools = silence_tools::openai_tools(read_only);
-            if prof.submit_plan {
-                let arr = tools.as_array_mut().unwrap();
-                arr.push(json!({
-                    "type": "function",
-                    "function": {
-                        "name": "submit_plan",
-                        "description": "Submit an implementation plan. Do not edit files.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"markdown": {"type": "string"}},
-                            "required": ["markdown"]
-                        }
-                    }
-                }));
+            debug_assert_eq!(prof.read_only, read_only);
+            let mut tools = builtin_tools(s.mode);
+            if let Some(arr) = tools.as_array_mut() {
+                arr.extend(mcp_tools(&ctx, read_only).await);
             }
-            if prof.suggest_mode {
-                tools.as_array_mut().unwrap().push(json!({
-                    "type": "function",
-                    "function": {
-                        "name": "suggest_mode",
-                        "description": "Ask the UI to offer the user a one-click switch to Agent mode so a change you proposed can be applied. Does not change anything itself.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "mode": {"type": "string", "enum": ["agent"]},
-                                "reason": {"type": "string", "description": "One short sentence for the user, in their language."}
-                            },
-                            "required": ["mode", "reason"]
-                        }
-                    }
-                }));
-            }
-            arr_extend_mcp(&ctx, &mut tools, read_only).await;
-            arr_extend_task(&mut tools, read_only);
             (with_mode_system(&s.messages, prof.system), tools)
         };
 
@@ -448,7 +420,14 @@ async fn run_turn(
                 usd,
             },
         );
-        let sid = session_arc.lock().await.id.clone();
+        let sid = {
+            let mut s = session_arc.lock().await;
+            s.last_model = Some(model_id.clone());
+            if result.input_tokens > 0 {
+                s.last_prompt_tokens = Some(result.input_tokens + result.output_tokens);
+            }
+            s.id.clone()
+        };
         let _ = ctx
             .audit
             .append(now_event(
@@ -522,23 +501,209 @@ async fn run_turn(
     Ok(())
 }
 
-/// Read-only modes only get MCP tools the server marks `readOnlyHint: true`.
-async fn arr_extend_mcp(ctx: &AppCtx, tools: &mut Value, read_only: bool) {
-    let extra = ctx.mcp.all_tools().await;
-    if let Some(arr) = tools.as_array_mut() {
-        for (server, tool) in extra {
-            if read_only && !tool.read_only {
-                continue;
+/// Model for the next call: requested model, or on Auto the router's pick — where a mode
+/// may pin a tier (Debug/Review → strong). Explicit picks win.
+fn pick_model(
+    catalog: &Catalog,
+    s: &Session,
+    user_text: &str,
+) -> Result<silence_router::RouteDecision> {
+    pick_model_for(catalog, &s.model, s.mode, user_text)
+}
+
+fn pick_model_for(
+    catalog: &Catalog,
+    requested: &str,
+    mode: SessionMode,
+    user_text: &str,
+) -> Result<silence_router::RouteDecision> {
+    let mut decision = silence_router::route(catalog, requested, user_text)?;
+    if requested == "auto" {
+        if let Some(tier) = profile(mode).tier {
+            if let Ok(m) = catalog.by_tier(tier) {
+                decision.model_id = m.id.clone();
+                decision.reason = format!("mode {mode:?} -> tier {tier}");
             }
-            arr.push(json!({
+        }
+    }
+    Ok(decision)
+}
+
+/// Built-in tool definitions for a mode (no MCP): workspace tools, mode tools, `task`.
+fn builtin_tools(mode: SessionMode) -> Value {
+    let prof = profile(mode);
+    let mut tools = silence_tools::openai_tools(prof.read_only);
+    if prof.submit_plan {
+        let arr = tools.as_array_mut().unwrap();
+        arr.push(json!({
+            "type": "function",
+            "function": {
+                "name": "submit_plan",
+                "description": "Submit an implementation plan. Do not edit files.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"markdown": {"type": "string"}},
+                    "required": ["markdown"]
+                }
+            }
+        }));
+    }
+    if prof.suggest_mode {
+        tools.as_array_mut().unwrap().push(json!({
+            "type": "function",
+            "function": {
+                "name": "suggest_mode",
+                "description": "Ask the UI to offer the user a one-click switch to Agent mode so a change you proposed can be applied. Does not change anything itself.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {"type": "string", "enum": ["agent"]},
+                        "reason": {"type": "string", "description": "One short sentence for the user, in their language."}
+                    },
+                    "required": ["mode", "reason"]
+                }
+            }
+        }));
+    }
+    arr_extend_task(&mut tools, prof.read_only);
+    tools
+}
+
+/// Read-only modes only get MCP tools the server marks `readOnlyHint: true`.
+async fn mcp_tools(ctx: &AppCtx, read_only: bool) -> Vec<Value> {
+    ctx.mcp
+        .all_tools()
+        .await
+        .into_iter()
+        .filter(|(_, tool)| !read_only || tool.read_only)
+        .map(|(server, tool)| {
+            json!({
                 "type": "function",
                 "function": {
                     "name": format!("mcp__{}__{}", server, tool.name),
                     "description": tool.description,
                     "parameters": tool.schema
                 }
-            }));
+            })
+        })
+        .collect()
+}
+
+/// Size of what the session's next request sends (`session.context`). Built from the same
+/// pieces as `run_turn` so the number matches the real request. `mode` / `model` preview the
+/// UI's current pick (the UI only syncs them to the session right before a prompt).
+pub async fn context_usage(
+    ctx: &AppCtx,
+    session_id: &str,
+    mode: Option<SessionMode>,
+    model: Option<&str>,
+) -> Result<ContextUsage> {
+    let session_arc = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    let (est, model, measured, read_only) = {
+        let s = session_arc.lock().await;
+        let mode = mode.unwrap_or(s.mode);
+        let requested = model.unwrap_or(&s.model);
+        let est = estimate_parts(&s, mode);
+        let model = match (&s.last_model, requested) {
+            (Some(m), "auto") => m.clone(),
+            _ => pick_model_for(&ctx.catalog, requested, mode, "")?.model_id,
+        };
+        (est, model, s.last_prompt_tokens, profile(mode).read_only)
+    };
+    let mcp: usize = mcp_tools(ctx, read_only)
+        .await
+        .iter()
+        .map(|t| estimate_tokens(&t.to_string()))
+        .sum();
+    let window = ctx.catalog.resolve(&model)?.context_window;
+    Ok(build_usage(est, mcp as u32, measured, model, window))
+}
+
+/// Per-part estimates (chars/4) of a session, MCP tools excluded (they live on `AppCtx`).
+fn estimate_parts(s: &Session, mode: SessionMode) -> ContextParts {
+    let tok = |t: &str| if t.is_empty() { 0 } else { estimate_tokens(t) as u32 };
+    let rules_text = org::system_append(&s.org);
+    let mut system = tok(profile(mode).system);
+    let mut rules = 0;
+    let mut summarized = 0;
+    let mut conversation = 0;
+    for (i, m) in s.messages.iter().enumerate() {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
+        if i == 0 && role == "system" {
+            // First message = SYSTEM + workspace rules (`create_session`).
+            let base = content.strip_suffix(rules_text.as_str()).unwrap_or(content);
+            system += tok(base);
+            rules = tok(&rules_text).min(tok(content));
+        } else if role == "system" {
+            summarized += tok(content);
+        } else {
+            conversation += estimate_tokens(&m.to_string()) as u32;
         }
+    }
+    let tools = builtin_tools(mode)
+        .as_array()
+        .map(|a| a.iter().map(|t| estimate_tokens(&t.to_string()) as u32).sum())
+        .unwrap_or(0);
+    ContextParts {
+        system,
+        rules,
+        tools,
+        mcp_tools: 0,
+        summarized,
+        conversation,
+    }
+}
+
+/// Combine estimates with the provider's measured total: when measured, each part is scaled
+/// so the parts add up exactly to `used` (rounding goes to conversation).
+fn build_usage(
+    mut parts: ContextParts,
+    mcp_tools: u32,
+    measured: Option<u32>,
+    model: String,
+    window: u32,
+) -> ContextUsage {
+    parts.mcp_tools = mcp_tools;
+    let est = parts.system
+        + parts.rules
+        + parts.tools
+        + parts.mcp_tools
+        + parts.summarized
+        + parts.conversation;
+    let Some(total) = measured.filter(|_| est > 0) else {
+        return ContextUsage {
+            used: est,
+            window,
+            model,
+            measured: false,
+            parts,
+        };
+    };
+    let f = total as f64 / est as f64;
+    let scale = |n: u32| (n as f64 * f).round() as u32;
+    let mut scaled = ContextParts {
+        system: scale(parts.system),
+        rules: scale(parts.rules),
+        tools: scale(parts.tools),
+        mcp_tools: scale(parts.mcp_tools),
+        summarized: scale(parts.summarized),
+        conversation: 0,
+    };
+    let others = scaled.system + scaled.rules + scaled.tools + scaled.mcp_tools + scaled.summarized;
+    scaled.conversation = total.saturating_sub(others);
+    ContextUsage {
+        used: others + scaled.conversation,
+        window,
+        model,
+        measured: true,
+        parts: scaled,
     }
 }
 
@@ -1234,6 +1399,69 @@ mod permission_tests {
         .unwrap();
         let s = ctx.sessions.lock().await.get(&id).cloned().unwrap();
         (id, s)
+    }
+
+    #[tokio::test]
+    async fn empty_session_context_is_system_and_tools_only() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(data.path());
+        let (_, s) = new_session(&ctx, ws.path()).await;
+        let parts = estimate_parts(&*s.lock().await, SessionMode::Agent);
+        assert!(parts.system > 0 && parts.tools > 0, "{parts:?}");
+        // Read-only modes send fewer tools.
+        let ask = estimate_parts(&*s.lock().await, SessionMode::Ask);
+        assert!(ask.tools < parts.tools, "{ask:?} vs {parts:?}");
+        assert_eq!(parts.conversation, 0);
+        assert_eq!(parts.summarized, 0);
+        let u = build_usage(parts.clone(), 0, None, "m".into(), 1000);
+        assert!(!u.measured);
+        assert_eq!(u.used, parts.system + parts.rules + parts.tools);
+    }
+
+    #[tokio::test]
+    async fn conversation_and_summary_are_counted_apart() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(data.path());
+        let (_, s) = new_session(&ctx, ws.path()).await;
+        {
+            let mut g = s.lock().await;
+            g.messages.push(json!({"role":"system","content":"Older tool results were compacted."}));
+            g.messages.push(json!({"role":"user","content":"x".repeat(400)}));
+        }
+        let parts = estimate_parts(&*s.lock().await, SessionMode::Agent);
+        assert!(parts.summarized > 0);
+        assert!(parts.conversation >= 100, "{parts:?}");
+    }
+
+    #[test]
+    fn measured_total_is_split_and_adds_up() {
+        let parts = ContextParts {
+            system: 300,
+            rules: 0,
+            tools: 600,
+            mcp_tools: 0,
+            summarized: 0,
+            conversation: 100,
+        };
+        let u = build_usage(parts, 100, Some(2_200), "m".into(), 1_000_000);
+        assert!(u.measured);
+        assert_eq!(u.used, 2_200);
+        let p = &u.parts;
+        assert_eq!(
+            p.system + p.rules + p.tools + p.mcp_tools + p.summarized + p.conversation,
+            2_200
+        );
+        assert_eq!(p.tools, 1_200);
+        assert_eq!(p.mcp_tools, 200);
+    }
+
+    #[tokio::test]
+    async fn context_of_unknown_session_errors() {
+        let data = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(data.path());
+        assert!(context_usage(&ctx, "nope", None, None).await.is_err());
     }
 
     /// Run `ask_perm` for `tool`, wait for the pending request, then answer it.

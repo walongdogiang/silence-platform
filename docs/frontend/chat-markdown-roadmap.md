@@ -1,3 +1,10 @@
+---
+description: Backlog Markdown trong chat — việc đã làm và việc cố ý chưa làm (renderer, agent/protocol, chất lượng).
+type: roadmap
+code:
+  - apps/studio/src/renderer/components/MarkdownMessage.tsx
+  - crates/runtime/src/agent.rs
+---
 # Roadmap — Markdown chat (sau năm 1 tối thiểu)
 
 Đã làm: quy tắc user-facing GitHub-flavored Markdown trong `SYSTEM` (`crates/runtime/src/agent.rs`); Copy = nguồn `ai.text`; docs hợp đồng trong `chat.md`; renderer `MarkdownMessage` (react-markdown + remark-gfm) với chặn HTML thô / `javascript:` / ảnh từ xa, link ngoài qua `openExternal`, main chặn điều hướng.
@@ -10,8 +17,9 @@ Cố ý **chưa** làm — mở lại khi cần.
 - [x] Không bật HTML thô; chặn XSS / `javascript:` links; chặn ảnh từ xa.
 - [x] Renderer hỗ trợ GFM: prompt đã đổi sang “GitHub-flavored Markdown”.
 - [ ] Chip `path:line` cuộn tới dòng (hiện chỉ mở file).
-- [ ] Syntax highlight trong code fence (tùy chọn).
-- [ ] Copy từng code block riêng (tùy chọn).
+- [x] Syntax highlight trong code fence (`syntax.ts`, tokenizer Monaco, màu `--syn-*`).
+- [x] Copy từng code block riêng (`CopyButton` trong `CodeView.tsx`).
+- [x] Khối ```diff render như diff (vạch màu, số dòng, tô phần chữ đổi).
 
 ## Agent / protocol (không redesign sớm)
 

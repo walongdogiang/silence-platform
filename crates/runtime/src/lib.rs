@@ -10,3 +10,4 @@ pub mod provider_error;
 pub mod pty;
 pub mod redact;
 pub mod rpc;
+pub mod title;

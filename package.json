@@ -12,6 +12,8 @@
     "studio": "npm run dev --workspace @silence/studio",
     "build:engine": "scripts\\cargo-msvc.bat build -p silence-engine",
     "runtime": "cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420",
-    "evals": "cargo run -p silence-engine -- evals --dir evals/v0 --repo-root ."
+    "evals": "cargo run -p silence-engine -- evals --dir evals/v0 --repo-root .",
+    "check:rules": "node scripts/check-rules-sync.mjs",
+    "check:docs": "node scripts/check-docs-meta.mjs"
   }
 }

@@ -13,4 +13,4 @@ Full spec: `docs/frontend/composer.md`.
 - Files+Review row only if `files.length > 0`.
 - Empty tools: context **gauge** (not Image), paperclip, mic stub, waveform stub.
 - Any text in the input: hide mic+waveform, show Enter (arrow up). Clear the input **before** `session.prompt`.
-- Gauge = Show context usage. Fill = `input_tokens / 256000` (0 = empty track, 256k = full). Opens the report panel above the input.
+- Gauge = Show context usage of the **current session** (`session.context` with the UI's mode/model), never `cost.summary` (global cost). Fill = `used / window` (window = that model's `context_window`). Warning color ≥70% (engine auto-compacts there), error ≥90%. `~` prefix = estimate. Opens the report panel above the input.

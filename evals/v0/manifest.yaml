@@ -1,4 +1,4 @@
-# Eval v0 — 20 task trên fixture sample-app (thay bằng repo nội bộ khi có).
+# Eval v0 — 22 task trên fixture sample-app (thay bằng repo nội bộ khi có).
 # kinds: edit | bugfix | explore | plan
 # Runner: silence-engine evals --dir evals/v0
 
@@ -135,6 +135,26 @@ tasks:
     pass_if:
       report_mentions:
         - Authorization
+
+  # Tìm trong file lớn (vendor/legacy_report.py ~1500 dòng): đo agent có grep/outline rồi đọc
+  # theo khoảng dòng thay vì nạp cả file. So token trước/sau khi đổi tool tìm kiếm.
+  - id: X21-explore-large-file-def
+    kind: explore
+    prompt: "Hàm compute_tax_bracket định nghĩa ở dòng nào, và với income lớn hơn 40125 thì trả về gì? Không sửa file."
+    read_only: true
+    pass_if:
+      report_mentions:
+        - "1205"
+        - BRACKET_ZETA
+
+  - id: X22-explore-large-file-const
+    kind: explore
+    prompt: "Hằng số MAX_RETRY_BUDGET nằm ở file nào và có giá trị bao nhiêu? Không sửa file."
+    read_only: true
+    pass_if:
+      report_mentions:
+        - legacy_report.py
+        - "37"
 
   - id: P17-plan-fix-calc
     kind: plan

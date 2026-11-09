@@ -22,6 +22,7 @@ import {
 } from "../chatMeta";
 import type { ChatLine, Diff, Perm } from "../models";
 import { MODE_LABEL, type SessionMode } from "../modes";
+import { DiffCard } from "./DiffCard";
 import { ErrorCard } from "./ErrorCard";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { SoftScroll } from "./SoftScroll";
@@ -457,6 +458,7 @@ export function ChatPane(props: {
   onDeny: () => void;
   onApplyDiff: () => void;
   onRejectDiff: () => void;
+  onShowDiff: () => void;
   onRestoreCheckpoint?: (id: string) => void;
   onForkChat?: (endLineInclusive: number) => void;
   onOpenWorkspace?: () => void;
@@ -702,17 +704,12 @@ export function ChatPane(props: {
         )}
 
         {props.diff && (
-          <div className="banner">
-            <h4>Diff {props.diff.path}</h4>
-            <div className="row">
-              <button type="button" className="primary" onClick={props.onApplyDiff}>
-                Apply
-              </button>
-              <button type="button" className="ghost" onClick={props.onRejectDiff}>
-                Reject
-              </button>
-            </div>
-          </div>
+          <DiffCard
+            diff={props.diff}
+            onApply={props.onApplyDiff}
+            onReject={props.onRejectDiff}
+            onShow={props.onShowDiff}
+          />
         )}
       </div>
       </SoftScroll>

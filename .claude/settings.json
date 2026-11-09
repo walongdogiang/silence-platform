@@ -35,8 +35,13 @@
     "deny": [
       "Read(./target/**)",
       "Read(./**/node_modules/**)",
-      "Read(./Cargo.lock)",
-      "Read(./package-lock.json)",
+      "Read(./**/Cargo.lock)",
+      "Read(./**/package-lock.json)",
+      "Read(./apps/studio/out/**)",
+      "Read(./docs/archive/**)",
+      "Read(./.cursor/agents/**)",
+      "Read(./.cursor/skills/**)",
+      "Read(./.cursor/gsd-core/**)",
       "Read(./.env)",
       "Read(./.env.*)"
     ]

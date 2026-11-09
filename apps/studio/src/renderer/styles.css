@@ -836,29 +836,27 @@ body.soft-scroll-dragging {
   color: var(--text-primary);
   border-bottom-color: var(--accent);
 }
+/* Cần `.diff-subtabs` đứng trước để thắng rule `.diff-subtabs button` (padding, viền dưới của tab). */
+.diff-subtabs .diff-close {
+  margin-left: auto;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+.diff-subtabs .diff-close:hover { background: var(--surface-hover); color: var(--text-primary); }
 .diff-body {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
 }
-.diff-files { overflow: auto; border-right: 1px solid var(--border-subtle); background: var(--surface-2); }
-.diff-files button {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  padding: 6px 10px;
-}
-.diff-files button.active, .diff-files button:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-.diff-files b { color: var(--warning); width: 12px; }
-.diff-editor { min-width: 0; background: var(--workspace); }
 
 .log {
   flex: 1;
@@ -1772,6 +1770,14 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   box-shadow: 0 8px 22px color-mix(in srgb, #000 45%, transparent);
 }
 .composer-tool:disabled { opacity: 0.55; cursor: default; }
+/* Gauge: ≥70% = ngưỡng Engine tự tóm tắt; ≥90% sắp đầy. */
+.composer-tool.ctx-warn { color: var(--warning); }
+.composer-tool.ctx-full { color: var(--error); }
+.ctx-report-note {
+  margin: -6px 0 10px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
 .ctx-report {
   border: 1px solid var(--border-ui);
   border-radius: 16px;
@@ -1985,6 +1991,22 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.history-rename {
+  grid-template-columns: 8px minmax(0, 1fr);
+}
+.history-rename input {
+  min-width: 0;
+  width: 100%;
+  font: inherit;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  padding: 1px 4px;
+  outline: none;
 }
 .history-open em {
   font-style: normal;
@@ -2330,16 +2352,240 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .msg-md li > p { margin: 0; }
 .msg-md blockquote { margin: 0 0 0.7em; padding: 2px 0 2px 10px; border-left: 2px solid var(--border-subtle); color: var(--text-secondary); }
 .msg-md hr { border: 0; border-top: 1px solid var(--border-subtle); margin: 1em 0; }
-.msg-md a { color: var(--accent-soft); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.msg-md a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.msg-md a:hover { color: var(--link-hover); }
 .msg-md code { font-family: var(--mono); font-size: 0.92em; }
 .msg-md code.md-inline { padding: 1px 5px; border-radius: var(--radius-xs); background: var(--surface-3); }
 .msg-md pre { margin: 0 0 0.8em; padding: 10px 12px; overflow: auto; border-radius: var(--radius-md); background: var(--surface-2); border: 1px solid var(--border-subtle); }
 .msg-md pre code { padding: 0; background: transparent; white-space: pre; }
-.msg-md .md-path { font-family: var(--mono); font-size: 0.92em; padding: 1px 5px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-soft); cursor: pointer; }
-.msg-md .md-path:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.msg-md .md-path { display: inline; text-align: left; font: inherit; font-weight: var(--font-weight-normal); padding: 0; border: 0; background: transparent; color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.msg-md .md-path:hover { color: var(--link-hover); }
+.msg-md .md-path:focus-visible { outline: 1px solid var(--link); outline-offset: 2px; border-radius: var(--radius-xs); }
 .msg-md .md-img-blocked { color: var(--text-muted); font-style: italic; }
 .msg-md .md-table-wrap { overflow-x: auto; margin: 0 0 0.8em; }
 .msg-md table { border-collapse: collapse; font-size: 0.95em; }
 .msg-md th, .msg-md td { padding: 4px 10px; border: 1px solid var(--border-subtle); text-align: left; }
 .msg-md th { background: var(--surface-2); font-weight: var(--font-weight-semibold); }
 .msg-md input[type="checkbox"] { margin-right: 6px; }
+
+/* ---- Diff: dùng chung ---- */
+.diff-path { display: inline-flex; min-width: 0; font-family: var(--mono); font-size: var(--font-size-sm); }
+.diff-path .dir { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-path .name { color: var(--text-primary); font-weight: var(--font-weight-semibold); white-space: nowrap; }
+.diff-stat { display: inline-flex; gap: 6px; font-family: var(--mono); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); }
+.diff-stat .add { color: var(--diff-add); }
+.diff-stat .del { color: var(--diff-del); }
+.ghost.sm, .primary.sm { height: var(--control-h-md); padding: 0 10px; font-size: var(--font-size-sm); border-radius: var(--radius-sm); }
+
+/* ---- Thẻ Diff trong chat ---- */
+.diff-card {
+  max-width: 720px;
+  border: 1px solid var(--border-ui);
+  border-radius: var(--radius-md);
+  background: var(--workspace);
+  overflow: hidden;
+}
+.diff-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 6px 0 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.diff-card-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.diff-card-file:hover .name { text-decoration: underline; text-underline-offset: 3px; }
+.diff-card-open { padding: 0; margin-left: auto; width: var(--control-h-sm); height: var(--control-h-sm); background: transparent; border-color: transparent; }
+.diff-card-body { max-height: 360px; overflow: auto; }
+/* ---- Bảng diff dùng chung (thẻ Diff + khối ```diff) ---- */
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 20px;
+  padding: 4px 0;
+}
+.diff-table td { padding: 0; vertical-align: top; }
+.diff-table .mk { width: 4px; min-width: 4px; padding: 0; }
+.diff-table .ln {
+  width: 1%;
+  min-width: 34px;
+  padding: 0 14px 0 8px;
+  text-align: right;
+  color: var(--text-muted);
+  opacity: 0.75;
+  user-select: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.diff-table.no-ln .code { padding-left: 12px; }
+.diff-table .code { white-space: pre; color: var(--text-primary); padding-right: 16px; width: 99%; }
+.diff-table tr:first-child td { padding-top: 6px; }
+.diff-table tr:last-child td { padding-bottom: 6px; }
+.diff-table tr:first-child .mk, .diff-table tr:last-child .mk { padding: 0; }
+.diff-row.add { background: var(--diff-add-bg); }
+.diff-row.del { background: var(--diff-del-bg); }
+.diff-row.add .mk { background: var(--diff-add); }
+.diff-row.del .mk {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--diff-del) 0 1.5px,
+    transparent 1.5px 4px
+  );
+}
+.diff-row mark.chg { color: inherit; border-radius: 3px; padding: 1px 0; }
+.diff-row.add mark.chg { background: var(--diff-add-chg); }
+.diff-row.del mark.chg { background: var(--diff-del-chg); }
+.diff-skip td {
+  padding: 3px 12px;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  font-family: var(--font);
+  font-size: var(--font-size-xs);
+  border-block: 1px solid var(--border-subtle);
+}
+
+/* ---- Code card trong câu trả lời (```lang và ```diff) ---- */
+.msg-md .code-card {
+  margin: 0 0 0.9em;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.code-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+.code-card-head .code-icon { flex: none; color: var(--text-muted); }
+.code-lang { color: var(--text-muted); font-family: var(--mono); letter-spacing: 0.02em; }
+.code-path-btn { display: inline-flex; min-width: 0; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.code-path-btn:hover .name { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+.code-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+.code-copy:hover { background: var(--surface-hover); color: var(--text-primary); }
+.code-card-body { max-height: 420px; overflow: auto; }
+.msg-md .code-body {
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: auto;
+  max-height: 480px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+.msg-md .code-body code { font-size: inherit; color: var(--text-primary); }
+
+/* ---- Màu syntax (token --syn-*) ---- */
+.tk-keyword { color: var(--syn-keyword); }
+.tk-string { color: var(--syn-string); }
+.tk-comment { color: var(--syn-comment); font-style: italic; }
+.tk-number { color: var(--syn-number); }
+.tk-type { color: var(--syn-type); }
+.tk-tag { color: var(--syn-tag); }
+.tk-attr { color: var(--syn-attr); }
+.tk-regexp { color: var(--syn-regexp); }
+.tk-punct { color: var(--syn-punct); }
+.diff-more {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.diff-more:hover { color: var(--text-primary); background: var(--surface-1); }
+.diff-card-empty { margin: 0; padding: 10px; color: var(--text-muted); font-size: var(--font-size-sm); }
+.diff-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+}
+
+/* ---- Panel Changes ---- */
+.diff-files { overflow: auto; border-right: 1px solid var(--border-subtle); background: var(--surface-1); padding: 4px 0; }
+.diff-files button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 10px 4px 8px;
+}
+.diff-files button:hover { background: var(--surface-hover); color: var(--text-primary); }
+.diff-files button.active { background: var(--surface-3); color: var(--text-primary); border-left-color: var(--accent); }
+.diff-file-name { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.diff-file-name .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); }
+.diff-file-name .dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
+.diff-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-xs);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  font-family: var(--mono);
+}
+.diff-badge.mod { color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+.diff-badge.new { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+.diff-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--workspace); }
+.diff-filehead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.diff-filehead-actions { margin-left: auto; display: flex; gap: 6px; }
+.diff-editor { flex: 1; min-width: 0; min-height: 0; background: var(--workspace); }

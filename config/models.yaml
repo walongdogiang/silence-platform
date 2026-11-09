@@ -60,13 +60,13 @@ models:
     input_cost_per_1m: 0
     output_cost_per_1m: 0
 
-  - id: flint
-    label: Flint
+  - id: nemotron-3-ultra
+    label: Nemotron 3 Ultra
     provider: company-gateway
-    api_model: recursive/flint:free
+    api_model: nvidia/nemotron-3-ultra-550b-a55b:free
     tier: free
-    context_window: 128000
-    max_output_tokens: 8192
+    context_window: 1000000
+    max_output_tokens: 65536
     tools: true
     vision: false
     input_cost_per_1m: 0

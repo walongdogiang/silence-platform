@@ -1,3 +1,14 @@
+---
+description: Spec khung cửa sổ Studio — TitleBar, Chat Workspace, tab, lịch sử, DiffPane, grid, cờ shell trong localStorage.
+type: spec
+code:
+  - apps/studio/src/renderer/App.tsx
+  - apps/studio/src/renderer/components/TitleBar.tsx
+  - apps/studio/src/renderer/components/ChatTabBar.tsx
+  - apps/studio/src/renderer/components/ChatHistoryPanel.tsx
+  - apps/studio/src/renderer/components/DiffPane.tsx
+  - apps/studio/src/renderer/monaco.ts
+---
 # Layout & shell
 
 Tham chiếu Cursor IDE (không phải Agents Window). Viewport desktop; không scale cả cửa sổ như ảnh.
@@ -23,7 +34,7 @@ flowchart LR
 - **Tab ngang** (`ChatTabBar.tsx`): icon bong bóng + tiêu đề + nút đóng; nút + = New Agent. Đóng tab không xóa lịch sử. Click lịch sử → mở/focus tab.
 - **History** (`ChatHistoryPanel.tsx`): New Agent, Search, Automations (chưa gắn), Customize → Appearance, list thread theo ngày.
 - **Workspace chat:** chỉ hội thoại + composer. **Không** ProjectHeader. `ProjectHeader.tsx` / `ContextPanel.tsx` / `Sidebar.tsx` không mount.
-- **DiffPane:** chỉ khi `diff || file` (không hiện Changes rỗng).
+- **DiffPane:** chỉ khi `(diff || file)` **và user chủ động mở** (`reviewOpen`): bấm card diff trong chat, chip file, hoặc mở file. Có diff mới thì chỉ hiện card trong chat, panel **không tự bật** (đang đóng thì giữ đóng; đang xem một file thì giữ). Đóng bằng ✕. Không hiện Changes rỗng. Có `diff` → `DiffEditor` before/after (readOnly, ẩn vùng không đổi, không overview ruler) kèm header file (`+N −M`, Reject/Apply); chỉ có `file` → editor thường. Danh sách file có badge `M`/`A` và `+N −M`. Monaco nạp cục bộ (`renderer/monaco.ts`), không dùng CDN vì CSP chặn; theme `silence-dark`/`silence-light` đọc màu từ token CSS và đổi theo Appearance.
 - Mở folder: File → Mở workspace (vẫn cần cho agent).
 
 ## Grid

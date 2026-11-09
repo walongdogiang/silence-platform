@@ -1,3 +1,7 @@
+---
+description: Mục lục build cho agent — brand ↔ code, danh sách docs kèm khi nào đọc, quy ước viết docs.
+type: index
+---
 # Tài liệu 5ilence (mục lục build)
 
 Đọc file này trước khi đọc sâu docs khác. Đây là **mục lục cho Cursor khi xây repo `5ilence`**, không phải sách hướng dẫn end-user.
@@ -5,6 +9,28 @@
 Cách dùng: chọn **một hoặc hai** file theo việc → đọc file đó. Không đọc hết catalog mỗi lần.
 
 Playbook vận hành (stack, lệnh, ràng buộc): [`AGENTS.md`](../AGENTS.md) ở gốc repo.
+
+Tìm code ("X nằm ở đâu?"): [`codemap.md`](codemap.md) — câu hỏi → file + tên hàm. Đọc bảng đó trước khi grep rộng.
+
+Xem nhanh mọi file là gì mà không mở file: `rg -m1 "^description:" docs`.
+
+Quy ước viết docs (để agent đọc từng phần, không đọc cả file):
+
+- Mỗi file mở đầu bằng frontmatter (CI kiểm tra bằng `npm run check:docs`):
+
+  ```yaml
+  ---
+  description: Một câu ≤ 200 ký tự nói file CHỨA GÌ (không viết ": " — YAML không cho).
+  type: index | prd | adr | spec | roadmap | reference
+  status: draft | superseded   # chỉ ghi khi không còn active
+  code:                        # tuỳ chọn — path code mà tài liệu mô tả; phải tồn tại
+    - apps/studio/src/renderer/components/ChatPane.tsx
+  ---
+  ```
+
+- Mỗi file một chủ đề. Heading `##` ổn định, đặt tên theo nội dung — `grep "^## " <file>` phải ra được dàn ý.
+- Trỏ tới path / tên hàm thay vì chép code. File quá ~150 dòng thì tách.
+- Thêm file mới thì thêm một dòng vào bảng dưới (hoặc `frontend/README.md`), có cột "Khi nào đọc".
 
 ---
 

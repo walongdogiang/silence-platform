@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.3";
+pub const PROTOCOL_VERSION: &str = "0.1.5";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
@@ -221,6 +221,40 @@ pub struct ErrorInfo {
     pub retryable: bool,
     #[serde(default)]
     pub detail: String,
+}
+
+/// Params of `chat.title`: first user message + first assistant reply. Result: `{ "title": String }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatTitleParams {
+    /// Only for the audit log; may be empty.
+    #[serde(default)]
+    pub session_id: String,
+    pub user_text: String,
+    #[serde(default)]
+    pub reply_text: String,
+}
+
+/// Result of `session.context` (`{ session_id, mode?, model? }`): what the next request of the
+/// session sends. `mode` / `model` preview the UI's pick before it is synced to the session.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContextUsage {
+    /// Tokens in context. Measured from the provider when `measured`, otherwise estimated.
+    pub used: u32,
+    /// `context_window` of the model the next turn uses.
+    pub window: u32,
+    pub model: String,
+    pub measured: bool,
+    pub parts: ContextParts,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContextParts {
+    pub system: u32,
+    pub rules: u32,
+    pub tools: u32,
+    pub mcp_tools: u32,
+    pub summarized: u32,
+    pub conversation: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

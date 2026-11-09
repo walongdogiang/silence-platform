@@ -79,7 +79,7 @@ export function narrateToolLive(name: string, input: unknown): NarrateStep {
     if (query) return { verb: "Searching", detail: `\`${clip(query, 48)}\`` };
     return { verb: "Searching", detail: short ?? "codebase" };
   }
-  if (/read|cat|open|fs\.read|list|tree/.test(n)) {
+  if (/read|outline|cat|open|fs\.read|list|tree/.test(n)) {
     return { verb: "Reading", detail: short ?? "file" };
   }
   if (/write|edit|apply|patch|str_replace|create/.test(n)) {

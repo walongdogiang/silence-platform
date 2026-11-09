@@ -1,3 +1,9 @@
+---
+description: Mục lục spec UI Electron (renderer) — layout, chat, composer, tokens; không chứa backend hay Engine.
+type: index
+code:
+  - apps/studio/src/renderer
+---
 # Front-end 5ilence
 
 Chỉ tài liệu **UI Electron** (`apps/studio/src/renderer`). Backend, Engine, infra, evals **không** nằm đây.

@@ -1,3 +1,13 @@
+---
+description: Hợp đồng UI hội thoại — cấu trúc một lượt, câu trả lời Markdown, thought, bước, lỗi, thẻ diff, code block, link file.
+type: spec
+code:
+  - apps/studio/src/renderer/components/ChatPane.tsx
+  - apps/studio/src/renderer/components/MarkdownMessage.tsx
+  - apps/studio/src/renderer/components/CodeView.tsx
+  - apps/studio/src/renderer/components/DiffCard.tsx
+  - apps/studio/src/renderer/syntax.ts
+---
 # Hội thoại (ChatPane)
 
 Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked for** (Thought + **Explored** + bước) → chữ AI → chân tin nhắn.
@@ -38,6 +48,17 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 - Trước khi gửi: đang ở Ask/Review mà câu có động từ sửa (`looksLikeEditRequest`, `renderer/modes.ts`) → dòng nhỏ trên ô nhập "Đang ở Ask (chỉ đọc) … **Gửi bằng Agent**". Không chặn gửi.
 - Dòng route trong meta của lượt có nhãn mode: `Ask · chat → model`.
 - Ngôn ngữ trả lời theo tin nhắn user; code nhắc kèm `path:line` (`SYSTEM`).
+
+## Tiêu đề thread và lịch sử
+
+- Chat chưa gửi tin nào chỉ hiện ở tab, chưa vào lịch sử. New Agent khi đang ở chat trống thì dùng lại chat đó.
+- Tiêu đề tạm (`titleSource: "auto"`): 48 ký tự đầu của tin user (`titleFrom`), **viết hoa chữ đầu** (cả chữ có dấu: "sửa" → "Sửa"), phần còn lại giữ nguyên.
+- Chat chưa có tin nào: không vào lịch sử/Search (`ChatHistoryPanel` lọc `lines.length > 0`), chỉ hiện ở tab. Tạo thread mới thì bỏ các thread trống cũ.
+- Sau lượt đầu có trả lời, renderer gọi `chat.title` một lần (`firstExchange` → Engine, model tier `fast`, `max_tokens` 48, đã `redact`). Kết quả 3–6 từ, cùng ngôn ngữ với user → `titleSource: "ai"`, không tính lại nữa. Lỗi/không key: giữ tiêu đề tạm, ghi `[warn]` vào Output, không retry.
+- Đổi tên tay: double-click tiêu đề trong lịch sử → Enter lưu, Esc huỷ → `titleSource: "user"`; AI không ghi đè.
+- Fork: giữ tiền tố `Fork · `; cha đã có tiêu đề chốt thì fork dùng lại, không gọi `chat.title`.
+- Hết credit/token: nếu lượt đầu lỗi thì chưa có trả lời → không gọi `chat.title`, tên tạm giữ nguyên. Nếu chỉ lệnh `chat.title` lỗi thì cũng giữ tên tạm. Hạn chế đã biết: mở lại app sẽ thử sinh lại cho thread còn ở tên tạm. Việc chưa làm: lược bớt từ đệm ("giúp tôi", "please") ở tên tạm; thử model miễn phí khi tier `fast` lỗi credit; chỉ thử lại khi mở thread.
+- Protocol: `chat.title` (`ChatTitleParams` → `{ title }`), `PROTOCOL_VERSION` 0.1.4; Engine ở `crates/runtime/src/title.rs`.
 
 ## Fork Chat
 
@@ -82,3 +103,29 @@ Gửi → Planning + bắt đầu đo thought. `thinking` → Thinking + body. `
 - "Chi tiết kỹ thuật" thu gọn (mã · HTTP · `detail` đã lọc secret ở Engine). Output log ghi cùng dòng.
 - Nút "Thử lại" chỉ khi `retryable` (rate/5xx/mạng/timeout) và chỉ ở lượt cuối. Credit/key sai: không retry, không auto-retry.
 - Sau lỗi: `busy` tắt; prompt vừa gửi được trả lại composer nếu đang trống. Copy: `renderer/errorCopy.ts`.
+
+## Thẻ Diff
+
+- Card phẳng (`DiffCard.tsx`), viền `--border-ui`, bo `--radius-md`; không dùng `.banner`.
+- Header: icon file, đường dẫn mono (thư mục muted, tên đậm), `+N −M`, icon mở panel Changes. Bấm tên file cũng mở panel.
+- Body: `DiffTable` dùng chung (xem mục dưới), 3 dòng ngữ cảnh mỗi bên. Hiện tối đa 14 hàng, có "Hiện thêm N dòng".
+- Footer căn phải: **Reject** (ghost) rồi **Apply** (primary). Không ghi file nếu chưa Apply.
+- Panel Changes dùng `DiffEditor` before/after; Monaco nạp cục bộ, không qua CDN.
+
+## Code block và diff trong câu trả lời
+
+`CodeView.tsx`, gọi từ `MarkdownMessage` cho mọi code fence (không inline).
+
+- **Code thường** (```` ```python ````): card `--surface-1`, viền `--border-subtle`, bo `--radius-md`. Header mảnh ghi tên ngôn ngữ (mono, muted) và nút **Copy** (đổi thành "Đã chép" 1,5 giây). Body mono 12.5px / 20px, syntax highlight, không đánh số dòng.
+- **Diff** (```` ```diff ````/`patch`, hoặc nội dung có `@@ -`/`---`+`+++`): parse bằng `unifiedDiff.ts`. Header gồm icon, đường dẫn (bấm mở file nếu hợp lệ theo `parsePathRef`), `+N −M`, Copy (chép diff gốc). Không hiện `diff --git`/`index`/`---`/`+++`/`@@`. Không parse được (không có dòng +/−) thì render như code thường.
+- **`DiffTable`** (dùng chung với thẻ Diff):
+  - cột vạch 4px: xoá là sọc chéo `--diff-del`, thêm là `--diff-add` đặc; nền dòng `--diff-*-bg`; số dòng giữ màu muted;
+  - số dòng lấy từ `@@` (xoá dùng số cũ, thêm dùng số mới), không có `@@` thì ẩn cột số;
+  - phần chữ khác nhau giữa cặp dòng xoá/thêm (nới tới ranh giới từ) tô `mark.chg` màu `--diff-*-chg`;
+  - hàng "⋯ N dòng không đổi" giữa các hunk;
+  - không hiện ký tự `+`/`−`, có `aria-label` "thêm"/"xoá".
+- **Syntax highlight**: `syntax.ts` nạp Monaco động và dùng `monaco.editor.tokenize`, ánh xạ sang class `tk-*` với màu `--syn-*`. Không dùng `innerHTML`. Đang stream thì debounce 120ms; dòng chưa có token hiện chữ thường.
+
+## Link và đường dẫn file
+
+- Link http(s) và đường dẫn file trong `code` (`calc.py:4`) dùng cùng font và cỡ với chữ thường (không mono), nét mảnh `font-weight: 400`, màu xanh `--link`, không nền, gạch chân 1px; hover đổi sang `--link-hover`. Token `--link` có bản dark và light trong `theme/tokens.css`. Bấm đường dẫn mở file trong workspace.

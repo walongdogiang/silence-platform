@@ -1,8 +1,12 @@
+---
+description: Yêu cầu năm 1 của 5ilence — mục đích, persona, 6 job lõi, backlog, non-goals, NFR Windows, chỉ số thành công.
+type: prd
+---
 # PRD — 5ilence AI Engineer Platform
 
 **Status:** Phase 0  
 **Audience:** kỹ sư nội bộ, Windows  
-**Success:** app lập trình AI đầy đủ như Cursor / Claude Code; agent nói chuyện với **model cloud** (OpenAI-compatible / nhà cung cấp cloud). Không khóa “chỉ model công ty”.
+**Success:** app lập trình AI đầy đủ như Cursor / Claude Code; agent dùng **model do người vận hành đưa vào** — **cloud** (OpenRouter, nhà cung cấp cloud) hoặc **local** (Ollama, LM Studio, server nội bộ), qua endpoint OpenAI-compatible. Không khoá vào một nhà cung cấp.
 
 ## Mục đích
 
@@ -20,7 +24,7 @@ Hướng bắc: **Cursor và Claude Code có chức năng gì thì 5ilence cũng
 
 1. Mở workspace → prompt AI → agent đọc/grep/sửa file / chạy shell → xem diff → apply/reject.
 2. Plan mode: agent lập kế hoạch, người Approve, rồi mới edit.
-3. Gắn **model cloud** và/hoặc Auto (harness route fast/mid/strong).
+3. Gắn **model cloud hoặc local** (khai báo provider trong `config/models.yaml`) và/hoặc Auto (harness route fast/mid/strong).
 4. Bật MCP stdio (Git, ticket, CI, DB tools, …) theo allowlist workspace.
 5. Ủy thác explore / implement / review cho sub-agent, nhận summary.
 6. Xem cost/token và audit trail của session.
@@ -60,11 +64,11 @@ Tab autocomplete, RAG mặc định, CLI: **không cấm** — để backlog, kh
 
 | Metric | Mục tiêu Phase 1 | Mục tiêu năm 1 |
 | --- | --- | --- |
-| Eval pass rate (20 task v0) | ≥ 40% trên 1 model cloud mạnh | ≥ 70% với Auto |
-| Latency time-to-first-token | < 2s khi mạng cloud ổn | < 1.5s |
+| Eval pass rate (22 task v0) | ≥ 40% trên 1 model cloud mạnh | ≥ 70% với Auto |
+| Latency time-to-first-token | < 2s khi mạng cloud ổn (model local: tuỳ phần cứng, không đặt mục tiêu) | < 1.5s |
 | Cost/task (median) | đo được, log 100% | Auto rẻ hơn strong-only ≥ 30% |
 | Tool reliability Windows | edit/grep không lỗi encoding | shell/ConPTY ổn định |
 
 ## Principles
 
-UI không gọi model. Mọi sửa file đi qua tool runtime (diff + audit). Mỗi thay đổi harness kèm eval, không “feel better”. Model = cloud (gateway OpenAI-compatible).
+UI không gọi model. Mọi sửa file đi qua tool runtime (diff + audit). Mỗi thay đổi harness kèm eval, không “feel better”. Model = do người vận hành cung cấp, cloud hoặc local, qua gateway OpenAI-compatible; Engine không gắn cứng nhà cung cấp nào.

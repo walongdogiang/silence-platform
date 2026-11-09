@@ -30,7 +30,7 @@ const KNOWN_NAMES: Record<string, string> = {
   "claude-sonnet": "Claude Sonnet 5.5",
   "claude-opus": "Claude Opus 5.5",
   "north-mini-code": "North Mini Code",
-  flint: "Flint",
+  "nemotron-3-ultra": "Nemotron 3 Ultra",
   "xing4-29b": "Xing4.0 29B A4B",
 };
 

@@ -17,9 +17,31 @@ describe("MarkdownMessage render", () => {
 
   it("code fence chưa đóng (đang stream) vẫn ra khối code, không vỡ", () => {
     const out = html("Đây là diff:\n\n```diff\n- so_a = 35\n+ so_a = 25");
-    expect(out).toContain("<pre>");
-    expect(out).toContain("so_a = 25");
+    expect(out).toContain('class="code-card diff-block"');
+    expect(out).toContain('so_a = <mark class="chg">25</mark>');
     expect(out).not.toContain("```");
+  });
+
+  it("khối diff: header đường dẫn, +/−, số dòng; không hiện ---/+++/@@", () => {
+    const out = html(
+      "```diff\n--- a/calculator.py\n+++ b/calculator.py\n@@ -5 +5 @@\n-b = 10\n+b = 120\n```",
+      () => {},
+    );
+    expect(out).toContain('class="code-path-btn"');
+    expect(out).toContain('<span class="name">calculator.py</span>');
+    expect(out).toContain("+1");
+    expect(out).toContain('<td class="ln">5</td>');
+    expect(out).toContain('<mark class="chg">120</mark>');
+    expect(out).not.toContain("@@");
+    expect(out).not.toContain("+++");
+  });
+
+  it("code block thường: card có tên ngôn ngữ, nút Copy, không lồng <pre>", () => {
+    const out = html("```python\nprint(1)\n```");
+    expect(out).toContain('<span class="code-lang">python</span>');
+    expect(out).toContain('aria-label="Chép code"');
+    expect(out).toContain("print(1)");
+    expect(out.match(/<pre/g)?.length).toBe(1);
   });
 
   it("HTML thô không được render thành phần tử", () => {
