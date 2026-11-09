@@ -23,7 +23,8 @@ Cố ý **chưa** làm — mở lại khi cần.
 
 ## Agent / protocol (không redesign sớm)
 
-- [ ] Abort từ UI (`session.abort` runtime đã có).
+- [x] Abort từ UI: nút Stop thay nút gửi khi `busy` (`Composer.onStop` → `session.abort`). Engine chỉ kiểm cờ ở đầu mỗi vòng tool, nên Stop có hiệu lực sau khi lượt model/tool hiện tại xong.
+- [ ] Abort ngắt ngay giữa stream / giữa các tool call (cần sửa `gateway::chat` + vòng tool; kèm eval).
 - [ ] Regenerate tin nhắn.
 - [ ] Tách “câu trả lời cuối” khỏi prose giữa các vòng tool (chỉ nếu UX đòi).
 - [ ] Enum `format` / content-block framework — **chỉ** khi có mode sản phẩm thật sự cần, không làm phòng xa.

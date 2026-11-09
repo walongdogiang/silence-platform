@@ -823,6 +823,17 @@ export function App() {
     }
   }
 
+  /** Yêu cầu Engine dừng lượt: cờ abort được kiểm ở đầu mỗi vòng; `done` (stop=abort) sẽ tắt busy. */
+  async function stop() {
+    if (!sessionId || !busy) return;
+    try {
+      await window.silence.rpc("session.abort", { session_id: sessionId });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] không dừng được lượt: ${message}`]);
+    }
+  }
+
   async function applyDiff() {
     if (!sessionId || !diff) return;
     try {
@@ -1026,6 +1037,7 @@ export function App() {
       models={pickerModels}
       onModel={setModel}
       busy={busy}
+      onStop={() => void stop()}
       disabled={!sessionId}
       files={tree}
       context={contextUsage}

@@ -1856,6 +1856,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   opacity: 0.38;
   cursor: default;
 }
+.send-stop { cursor: pointer; }
 .send-idle {
   background: transparent;
   color: var(--text-muted);

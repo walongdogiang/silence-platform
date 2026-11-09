@@ -15,6 +15,7 @@ import {
   Paperclip,
   Plus,
   Search,
+  Square,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -89,6 +90,8 @@ export function Composer(props: {
   models: ModelInfo[];
   onModel: (id: string) => void;
   busy: boolean;
+  /** Dừng lượt đang chạy (`session.abort`); nút Stop thay nút gửi khi `busy`. */
+  onStop?: () => void;
   disabled: boolean;
   files?: string[];
   /** `session.context` của session hiện tại; null khi chưa có session. */
@@ -485,12 +488,22 @@ export function Composer(props: {
             </button>
             {files.length === 0 ? filesMenu : null}
           </div>
-          {hasText ? null : (
+          {props.busy && props.onStop ? null : hasText ? null : (
             <button type="button" className="composer-tool" title="Voice (chưa gắn)" disabled>
               <Mic size={15} />
             </button>
           )}
-          {hasText ? (
+          {props.busy && props.onStop ? (
+            <button
+              type="button"
+              className="send send-stop"
+              title="Dừng"
+              aria-label="Dừng"
+              onClick={props.onStop}
+            >
+              <Square size={13} fill="currentColor" />
+            </button>
+          ) : hasText ? (
             <button className="send" disabled={!canSend} type="submit" title="Enter">
               <ArrowUp size={16} />
             </button>

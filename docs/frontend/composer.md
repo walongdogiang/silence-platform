@@ -55,6 +55,7 @@ Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat
 - Panel usage: tổng `used / window`, thanh màu theo phần, chỉ liệt kê phần > 0, dòng ghi chú "Số đo từ lượt gần nhất" / "Ước lượng".
 - Hạn chế đã biết: mở lại thread sau khi khởi động lại app → Engine tạo session mới chưa replay lịch sử, nên context chỉ còn phần nền (đúng với cái model thấy). Chi phí `cost.summary` vẫn là tổng toàn cục.
 - Enter xóa ô **ngay**. Nút gửi disable nếu chưa session/busy.
+- Khi `busy`: nút gửi đổi thành nút **Dừng** (hình vuông, `aria-label="Dừng"`) → `session.abort`; Engine phát `done` (stop=abort) thì tắt busy. Mic/waveform ẩn trong lúc chạy.
 
 ## Files menu
 
