@@ -63,16 +63,49 @@ impl Workspace {
             self.root.join(rel)
         };
         let canon = dunce::canonicalize(&candidate).unwrap_or(candidate);
+        // dunce keeps `\\?\` on paths too long to simplify; compare the plain form with the root.
+        let canon = strip_extended(&canon);
         if !canon.starts_with(&self.root) {
             return Err(anyhow!("path escapes workspace: {}", canon.display()));
         }
-        Ok(canon)
+        // The jail check above uses the plain path; only the returned IO path is extended.
+        Ok(extended_path(canon))
     }
 
     pub fn rel(&self, path: &Path) -> String {
-        path.strip_prefix(&self.root)
+        let plain = strip_extended(path);
+        plain
+            .strip_prefix(&self.root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| path.display().to_string())
+    }
+}
+
+/// Paths at or beyond this length (chars) get the `\\?\` prefix on Windows; classic `MAX_PATH`
+/// is 260 and directory creation fails earlier (248), so leave headroom.
+#[cfg(windows)]
+const LONG_PATH_THRESHOLD: usize = 240;
+
+/// Windows extended-length form (`\\?\C:\...`) for long absolute paths so file tools do not hit
+/// `MAX_PATH`. Normalises `/` to `\` because the prefix disables Win32 path normalisation.
+/// No-op elsewhere, for short paths, and for UNC / already-extended paths.
+pub fn extended_path(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if p.is_absolute() && s.len() >= LONG_PATH_THRESHOLD && !s.starts_with(r"\\") {
+            return PathBuf::from(format!(r"\\?\{}", s.replace('/', "\\")));
+        }
+    }
+    p
+}
+
+/// Inverse of [`extended_path`] for display / relative-path computation.
+fn strip_extended(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+        _ => p.to_path_buf(),
     }
 }
 
@@ -328,13 +361,13 @@ fn write(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let path = if Path::new(rel).is_absolute() {
         ws.resolve(rel)?
     } else {
-        let p = ws.root.join(rel);
+        let p = extended_path(ws.root.join(rel));
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)?;
         }
         p
     };
-    if !path.starts_with(&ws.root) {
+    if !strip_extended(&path).starts_with(&ws.root) {
         return Err(anyhow!("path escapes workspace"));
     }
     if let Some(parent) = path.parent() {
@@ -738,6 +771,16 @@ fn glob_to_regex(pattern: &str) -> Result<Regex> {
     Ok(Regex::new(&out)?)
 }
 
+/// Windows PowerShell 5.1 defaults to the OEM/ANSI code page, which garbles Vietnamese. Force
+/// UTF-8 for the pipe to this process and for the text cmdlets' default encoding. (`utf8` writes a
+/// BOM on 5.1 — still correct, unlike ANSI; PowerShell 7 writes none.)
+#[cfg(windows)]
+const POWERSHELL_UTF8_PREAMBLE: &str = "try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}; \
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false); \
+foreach ($c in 'Set-Content','Add-Content','Out-File','Get-Content') { $PSDefaultParameterValues[\"${c}:Encoding\"] = 'utf8' };";
+#[cfg(not(windows))]
+const POWERSHELL_UTF8_PREAMBLE: &str = "";
+
 async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let command = args["command"].as_str().unwrap_or("");
     if command.is_empty() {
@@ -750,7 +793,8 @@ async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     );
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("powershell");
-        c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+        let script = format!("{POWERSHELL_UTF8_PREAMBLE}\n{command}");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
         c
     } else {
         let mut c = Command::new("bash");
@@ -1017,8 +1061,8 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[tokio::test]
-    #[ignore = "RED until Plan 01-04: shell must read/write UTF-8 on Windows PowerShell 5.x"]
     async fn vietnamese_utf8_round_trip() {
         let (_d, ws) = tmp_ws();
         let phrase = "Xin chào thế giới";
@@ -1050,7 +1094,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RED until Plan 01-04: extended-length (\\\\?\\) path support"]
     fn long_nested_path_tool_io() {
         let (_d, ws) = tmp_ws();
         // Nested relative path whose absolute form exceeds classic MAX_PATH (260).
