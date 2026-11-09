@@ -43,7 +43,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 01-03-PLAN.md — PERM-01 remember (name_hint + workspace store + Studio checkbox)
-- [ ] 01-04-PLAN.md — WIN/NET/METR-04 shell UTF, ConPTY keep, loopback bind guard
+- [x] 01-04-PLAN.md — WIN/NET/METR-04 shell UTF, ConPTY keep, loopback bind guard
 
 **UI hint**: yes
 

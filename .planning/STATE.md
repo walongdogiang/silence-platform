@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: Trusted edit loop
 status: executing
-stopped_at: Phase 1 plans 01-01..01-03 done — next 01-04 (Windows shell UTF/long-path + loopback bind guard)
-last_updated: "2026-11-09T00:00:00.000Z"
-last_activity: 2026-11-09
-last_activity_desc: Synced STATE with git history (01-02 and 01-03 shipped)
+stopped_at: Phase 1 plans 01-01..01-04 shipped — manual verifications + live evals pending before closing the phase
+last_updated: "2026-11-10T00:00:00.000Z"
+last_activity: 2026-11-10
+last_activity_desc: 01-04 merged (#6) — shell UTF-8, long paths, loopback bind guard
 state_head: b3fa642b4e4a31df7df969e9f23f91a283fecf16
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 3
-  percent: 12
+  completed_plans: 4
+  percent: 16
 ---
 
 # Project State
@@ -27,14 +27,18 @@ See: `.planning/PROJECT.md` and `docs/PRD.md`.
 
 ## Current Position
 
-Phase: 1 (Trusted edit loop) — EXECUTING
-Plan: 4 of 4 (01-01, 01-02, 01-03 done; 01-02 has no SUMMARY file yet)
-Status: Ready to execute 01-04
-Last activity: 2026-11-09 — STATE synced with git history
+Phase: 1 (Trusted edit loop) — all 4 plans shipped, phase not yet signed off
+Plan: 4 of 4 done (01-02 has no SUMMARY file yet)
+Status: Pending phase close-out
+Last activity: 2026-11-10 — 01-04 merged (#6)
 
-Progress: [█░░░░░░░░░] 12% (3 of 4 plans in Phase 1; 0 of 6 phases complete)
+Progress: [██░░░░░░░░] 16% (4 of 4 plans in Phase 1; 0 of 6 phases signed off)
 
-Still RED (`#[ignore]` until 01-04): `vietnamese_utf8_round_trip`, `long_nested_path_tool_io` (`crates/tools/src/lib.rs`), `bind_refuses_non_loopback` (`crates/runtime/tests/bind_guard.rs`).
+Wave 0 RED tests are all green (no `#[ignore]` left). Open before closing Phase 1:
+- Manual checks in `01-VALIDATION.md` (Diff Apply/Reject UX, Permission Remember UX, Engine survives UI crash).
+- Live `npm run evals` never run (no API key) — incl. new `S23-shell-utf8-vietnamese`.
+- Missing `01-02-SUMMARY.md`.
+- Known gap: `write()` relative-path branch in `crates/tools/src/lib.rs` does not reject `..` (path escape).
 
 ## Performance Metrics
 
@@ -89,6 +93,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-09
-Stopped at: Phase 1 plans 01-01..01-03 done — next 01-04
-Resume file: .planning/phases/01-trusted-edit-loop/01-04-PLAN.md
+Last session: 2026-11-10
+Stopped at: Phase 1 plans 01-01..01-04 shipped — close-out items above, then Phase 2
+Resume file: .planning/phases/01-trusted-edit-loop/01-04-SUMMARY.md
