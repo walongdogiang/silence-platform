@@ -39,7 +39,7 @@ Plans:
 - [x] 01-01-PLAN.md — Wave 0 Nyquist failing tests (stage, permission, UTF/long-path, bind)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 01-02-PLAN.md — Walking Skeleton tracer: stage-then-apply Diff Apply/Reject + audit
+- [x] 01-02-PLAN.md — Walking Skeleton tracer: stage-then-apply Diff Apply/Reject + audit
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 01-03-PLAN.md — PERM-01 remember (name_hint + workspace store + Studio checkbox)

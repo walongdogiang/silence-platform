@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: Trusted edit loop
 status: executing
-stopped_at: Phase 1 plans verified — ready to execute
-last_updated: "2026-11-05T01:04:58.554Z"
-last_activity: 2026-11-05
-last_activity_desc: Phase 1 execution started
+stopped_at: Phase 1 plans 01-01..01-03 done — next 01-04 (Windows shell UTF/long-path + loopback bind guard)
+last_updated: "2026-11-09T00:00:00.000Z"
+last_activity: 2026-11-09
+last_activity_desc: Synced STATE with git history (01-02 and 01-03 shipped)
 state_head: b3fa642b4e4a31df7df969e9f23f91a283fecf16
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 0
+  completed_plans: 3
+  percent: 12
 ---
 
 # Project State
@@ -28,11 +28,13 @@ See: `.planning/PROJECT.md` and `docs/PRD.md`.
 ## Current Position
 
 Phase: 1 (Trusted edit loop) — EXECUTING
-Plan: 2 of 4
-Status: Ready to execute
-Last activity: 2026-11-05 — Phase 1 execution started
+Plan: 4 of 4 (01-01, 01-02, 01-03 done; 01-02 has no SUMMARY file yet)
+Status: Ready to execute 01-04
+Last activity: 2026-11-09 — STATE synced with git history
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 12% (3 of 4 plans in Phase 1; 0 of 6 phases complete)
+
+Still RED (`#[ignore]` until 01-04): `vietnamese_utf8_round_trip`, `long_nested_path_tool_io` (`crates/tools/src/lib.rs`), `bind_refuses_non_loopback` (`crates/runtime/tests/bind_guard.rs`).
 
 ## Performance Metrics
 
@@ -87,6 +89,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T00:07:27.181Z
-Stopped at: Phase 1 plans verified — ready to execute
-Resume file: .planning/phases/01-trusted-edit-loop/01-01-PLAN.md
+Last session: 2026-11-09
+Stopped at: Phase 1 plans 01-01..01-03 done — next 01-04
+Resume file: .planning/phases/01-trusted-edit-loop/01-04-PLAN.md
