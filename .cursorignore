@@ -1,0 +1,8 @@
+# Cursor không đọc / index các path này (đồng bộ với permissions.deny trong .claude/settings.json).
+# Không thêm .cursor/ vào đây: GSD trong Cursor cần đọc .cursor/agents|skills|gsd-core.
+target/
+**/node_modules/
+**/Cargo.lock
+**/package-lock.json
+apps/studio/out/
+docs/archive/

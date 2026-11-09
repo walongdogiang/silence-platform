@@ -3,7 +3,7 @@ use crate::pty::TerminalSession;
 use anyhow::Result;
 use serde_json::{json, Value};
 use silence_protocol::{
-    ApprovePlanParams, DiffApplyParams, DiffRejectParams, FsReadParams, FsTreeParams,
+    ApprovePlanParams, ChatTitleParams, DiffApplyParams, DiffRejectParams, FsReadParams, FsTreeParams,
     McpServerConfig, PermissionDecision, PromptParams, RpcNotification, RpcRequest, RpcResponse,
     SessionCreateParams, SessionEvent, TerminalStartParams, TerminalWriteParams,
 };
@@ -143,6 +143,24 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             let p: ApprovePlanParams = serde_json::from_value(req.params)?;
             agent::approve_plan(state.ctx.clone(), &p.session_id).await?;
             Ok(json!({"ok": true}))
+        }
+        "session.context" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let mode: Option<silence_protocol::SessionMode> = match req.params.get("mode") {
+                Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
+                _ => None,
+            };
+            let model = req.params.get("model").and_then(|v| v.as_str());
+            Ok(serde_json::to_value(
+                agent::context_usage(&state.ctx, sid, mode, model).await?,
+            )?)
+        }
+        "chat.title" => {
+            let p: ChatTitleParams = serde_json::from_value(req.params)?;
+            let title =
+                crate::title::generate_title(&state.ctx, &p.session_id, &p.user_text, &p.reply_text)
+                    .await?;
+            Ok(json!({"title": title}))
         }
         "models.list" => Ok(json!({"models": state.ctx.catalog.infos(), "default": "auto"})),
         "fs.tree" => {
@@ -337,6 +355,20 @@ mod tests {
         )
         .await;
         assert_eq!(v["id"], 8);
+        assert!(v["error"]["message"].is_string(), "got {v}");
+    }
+
+    #[tokio::test]
+    async fn chat_title_errors_without_text_or_fast_model() {
+        let v = roundtrip(r#"{"jsonrpc":"2.0","id":9,"method":"chat.title","params":{}}"#).await;
+        assert_eq!(v["id"], 9);
+        assert!(v["error"]["message"].is_string(), "got {v}");
+        // Empty catalog: no `fast` tier, so the engine must reply with an error, not hang.
+        let v = roundtrip(
+            r#"{"jsonrpc":"2.0","id":10,"method":"chat.title","params":{"user_text":"hi"}}"#,
+        )
+        .await;
+        assert_eq!(v["id"], 10);
         assert!(v["error"]["message"].is_string(), "got {v}");
     }
 

@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("silence", {
   rpc: (method: string, params?: unknown) => ipcRenderer.invoke("silence-rpc", method, params),
   pickFolder: () => ipcRenderer.invoke("silence-pick-folder") as Promise<string | null>,
+  openExternal: (url: string) => ipcRenderer.invoke("silence-open-external", url) as Promise<boolean>,
   onEvent: (cb: (payload: unknown) => void) => {
     const listener = (_: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on("silence-event", listener);

@@ -1,3 +1,13 @@
+---
+description: Mô hình đe doạ cho local agent trên Windows — tài sản, trust boundary, các mối đe doạ và biện pháp giảm thiểu.
+type: spec
+code:
+  - crates/runtime/src/permissions.rs
+  - crates/runtime/src/bind_policy.rs
+  - crates/runtime/src/redact.rs
+  - crates/sandbox/src/lib.rs
+  - apps/studio/src/preload/index.ts
+---
 # Threat model — Windows local agent
 
 ## Assets

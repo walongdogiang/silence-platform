@@ -32,7 +32,26 @@ pub async fn chat(
     on_token: impl FnMut(&str),
     on_thinking: impl FnMut(&str),
 ) -> Result<ChatResult> {
-    chat_inner(catalog, model_id, messages, tools, on_token, on_thinking).await
+    chat_inner(catalog, model_id, messages, tools, None, on_token, on_thinking).await
+}
+
+/// Một lượt ngắn không tools, giới hạn `max_tokens` (vd sinh tiêu đề chat).
+pub async fn chat_short(
+    catalog: &Catalog,
+    model_id: &str,
+    messages: &[Value],
+    max_tokens: u32,
+) -> Result<ChatResult> {
+    chat_inner(
+        catalog,
+        model_id,
+        messages,
+        &Value::Null,
+        Some(max_tokens),
+        |_| {},
+        |_| {},
+    )
+    .await
 }
 
 async fn chat_inner(
@@ -40,6 +59,7 @@ async fn chat_inner(
     model_id: &str,
     messages: &[Value],
     tools: &Value,
+    max_tokens: Option<u32>,
     mut on_token: impl FnMut(&str),
     mut on_thinking: impl FnMut(&str),
 ) -> Result<ChatResult> {
@@ -55,7 +75,7 @@ async fn chat_inner(
         "messages": messages,
         "stream": true,
         "stream_options": {"include_usage": true},
-        "max_tokens": model.max_output_tokens.max(1024),
+        "max_tokens": max_tokens.unwrap_or_else(|| model.max_output_tokens.max(1024)),
     });
     if model.tools && tools.is_array() && !tools.as_array().unwrap().is_empty() {
         body["tools"] = tools.clone();

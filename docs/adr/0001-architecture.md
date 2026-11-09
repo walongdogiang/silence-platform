@@ -1,11 +1,21 @@
+---
+description: Quyết định kiến trúc — Electron Studio + Rust sidecar silence-engine, JSON-RPC loopback hoặc named pipe, Monaco, không fork VS Code.
+type: adr
+code:
+  - apps/studio
+  - crates/runtime
+  - crates/protocol
+  - packages/protocol
+---
 # ADR 0001 — Desktop Electron + Rust sidecar, không fork VS Code
 
 **Status:** Accepted  
-**Date:** 2026-10-23
+**Date:** 2026-10-23  
+**Cập nhật 2026-11-09:** nguồn model đổi từ "chỉ model công ty" thành "model do người vận hành đưa vào, cloud hoặc local" cho khớp PRD. Các quyết định khác giữ nguyên.
 
 ## Context
 
-Cần AI Engineer OS nội bộ trên Windows: agent loop, MCP, sub-agent, auto-model, chỉ nói chuyện với model công ty. Team nhỏ không thắng nếu clone IDE.
+Cần AI Engineer OS nội bộ trên Windows: agent loop, MCP, sub-agent, auto-model. Model do người vận hành đưa vào — cloud hoặc local — không khoá vào một nhà cung cấp. Team nhỏ không thắng nếu clone IDE.
 
 ## Decision
 
@@ -14,7 +24,7 @@ Cần AI Engineer OS nội bộ trên Windows: agent loop, MCP, sub-agent, auto-
 3. **JSON-RPC 2.0** qua **named pipe** Windows (`\\.\pipe\silence-<pid>`). Dev/non-Windows: TCP `127.0.0.1` loopback.
 4. **Không napi-rs** làm đường chính — crash native không được kéo theo cả Electron.
 5. **Editor = Monaco**, không fork VS Code / Code-OSS năm 1.
-6. **Model gateway** OpenAI-compatible (`/v1/chat/completions`) + adapter Anthropic Messages.
+6. **Model gateway** OpenAI-compatible (`/v1/chat/completions`) + adapter Anthropic Messages. Provider khai báo trong `config/models.yaml` (`base_url`, `api_key_env`): cloud (OpenRouter, …) hoặc local (Ollama, LM Studio, server nội bộ); provider local không cần key.
 7. **Protocol** một nguồn sự thật: `packages/protocol` (JSON Schema + TS) và `crates/protocol` (serde).
 
 ## Consequences

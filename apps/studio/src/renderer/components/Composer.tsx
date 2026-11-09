@@ -20,7 +20,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { modelParts, modelTitle, speedLabel } from "../theme/modelsPrefs";
 import { MODE_LABEL, looksLikeEditRequest, type SessionMode } from "../modes";
-import type { ModelInfo } from "../types";
+import type { ContextUsage, ModelInfo } from "../types";
+import { contextLevel, contextPct, contextTip, fmtTok, usageRows as contextRows } from "../contextUsage";
 
 export type { SessionMode };
 
@@ -34,8 +35,6 @@ const MODES = [
 ] as const;
 
 const modeLabel = (mode: SessionMode) => MODES.find((m) => m.mode === mode)?.id ?? "Agent";
-
-const CTX_MAX = 256_000;
 
 function modelTip(id: string, models: ModelInfo[]) {
   if (id === "auto") {
@@ -51,12 +50,6 @@ function modelTip(id: string, models: ModelInfo[]) {
   if (m.tools) bits.push("tools");
   if (m.vision) bits.push("vision");
   return { body: bits.join(" · "), kicker: speedLabel(m.tier) || "Model", name: modelTitle(m) };
-}
-
-function fmtTok(n: number): string {
-  if (n >= 10_000) return `${Math.round(n / 1000)}K`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
 }
 
 function UsageRing(props: { pct: number; size?: number }) {
@@ -98,7 +91,8 @@ export function Composer(props: {
   busy: boolean;
   disabled: boolean;
   files?: string[];
-  tokens?: number;
+  /** `session.context` của session hiện tại; null khi chưa có session. */
+  context?: ContextUsage | null;
   onOpenFile?: (path: string) => void;
   onAddModels?: () => void;
 }) {
@@ -173,18 +167,11 @@ export function Composer(props: {
   const canSend = !props.busy && !props.disabled && hasText;
   const files = props.files ?? [];
   const listed = files.slice(0, 12);
-  const tokens = props.tokens ?? 0;
-  const ctxPct = Math.min(100, Math.round((tokens / CTX_MAX) * 100));
-  const usageRows = [
-    { label: "System prompt", color: "#9aa0a6", n: 0 },
-    { label: "Tool definitions", color: "#a78bfa", n: 0 },
-    { label: "Rules", color: "#4ccb91", n: 0 },
-    { label: "Skills", color: "#e5a05b", n: 0 },
-    { label: "MCP & dynamic tools", color: "#c084fc", n: 0 },
-    { label: "Subagent definitions", color: "#f0abfc", n: 0 },
-    { label: "Summarized conversation", color: "#e87979", n: 0 },
-    { label: "Conversation", color: "#a67c7c", n: tokens },
-  ];
+  const ctx = props.context ?? null;
+  const ctxPct = contextPct(ctx);
+  const ctxLevel = contextLevel(ctxPct);
+  const ctxWindow = ctx?.window ?? 0;
+  const usageRows = contextRows(ctx);
 
   function toggleFiles() {
     setFilesOpen((v) => !v);
@@ -241,18 +228,23 @@ export function Composer(props: {
           <div className="ctx-report-meta">
             <span>{ctxPct}% Full</span>
             <span>
-              ~{fmtTok(tokens)} / {fmtTok(CTX_MAX)} Tokens
+              {ctx ? `${ctx.measured ? "" : "~"}${fmtTok(ctx.used)} / ${fmtTok(ctxWindow)} Tokens` : "Chưa có session"}
             </span>
           </div>
           <i className="ctx-report-bar">
-            {usageRows
-              .filter((r) => r.n > 0)
-              .map((r) => (
-                <b key={r.label} style={{ width: `${(r.n / CTX_MAX) * 100}%`, background: r.color }} />
-              ))}
+            {ctxWindow > 0
+              ? usageRows
+                  .filter((r) => r.n > 0)
+                  .map((r) => (
+                    <b key={r.label} style={{ width: `${(r.n / ctxWindow) * 100}%`, background: r.color }} />
+                  ))
+              : null}
           </i>
+          <p className="ctx-report-note">
+            {ctx?.measured ? "Số đo từ lượt gần nhất" : "Ước lượng"} · tự tóm tắt khi đạt 70%
+          </p>
           <ul className="ctx-report-list">
-            {usageRows.map((r) => (
+            {usageRows.filter((r) => r.n > 0).map((r) => (
               <li key={r.label}>
                 <i style={{ background: r.color }} />
                 <span>{r.label}</span>
@@ -476,8 +468,8 @@ export function Composer(props: {
         <div className="composer-tools">
           <button
             type="button"
-            className={`composer-tool composer-tip${showUsage ? " on" : ""}`}
-            data-tip={`Show context usage · ${fmtTok(tokens)} / 256K`}
+            className={`composer-tool composer-tip ctx-${ctxLevel}${showUsage ? " on" : ""}`}
+            data-tip={contextTip(ctx)}
             aria-label="Show context usage"
             aria-pressed={showUsage}
             onClick={() => {

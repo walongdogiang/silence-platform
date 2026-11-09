@@ -1,3 +1,12 @@
+---
+description: Spec ô nhập chat — context usage, danh sách file, textarea, chọn mode, Auto model, cụm tool bên phải.
+type: spec
+code:
+  - apps/studio/src/renderer/components/Composer.tsx
+  - apps/studio/src/renderer/modes.ts
+  - apps/studio/src/renderer/models.ts
+  - apps/studio/src/renderer/contextUsage.ts
+---
 # Composer
 
 Bám Cursor chat input. File: `components/Composer.tsx`.
@@ -35,8 +44,16 @@ Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat
 | Ô trống | gauge context · kẹp giấy (tệp) · mic (chưa gắn) · waveform (chưa gắn) |
 | Có chữ (`prompt.trim()`) | gauge · kẹp giấy · **mũi tên Enter** (ẩn mic + waveform) |
 
-- **Vòng gauge** = Show context usage, **không** phải Image. Tiến độ `input_tokens / 256_000`: 0 = chỉ track mờ, 256k = kín. Tooltip CSS (không native Windows).
-- Panel usage: hàng Conversation dùng token thật; các hàng System/Tools/Rules… = 0 cho đến khi runtime gửi breakdown.
+- **Vòng gauge** = Show context usage, **không** phải Image. Tooltip CSS (không native Windows): `Context · 6.2K / 1M (1%)`.
+- **Context của một đoạn chat** = những gì model nhận ở request kế tiếp của session đó. Lấy từ `session.context` (`{ session_id, mode, model }` — mode/model đang chọn trên UI, vì UI chỉ đồng bộ sang session lúc gửi). **Không** dùng `cost.summary`: đó là tổng input token mọi lần gọi của mọi session (số 382K cũ là lỗi này).
+  - Các phần: System prompt (`SYSTEM` + system theo mode) · Rules (workspace, `org::system_append`) · Tool definitions (built-in + `submit_plan`/`suggest_mode`/`task`) · MCP tools · Summarized (ghi chú do `compact_if_needed` chèn) · Conversation (user/assistant/tool).
+  - Mẫu số = `context_window` của model lượt kế tiếp (Auto → model đã route ở lượt trước; chưa có lượt nào thì router chọn). Không hard-code 256K.
+  - Đo vs ước lượng: sau mỗi lần gọi model, Engine lưu `input + output` provider báo về → tổng là số đo, các phần chia theo tỷ lệ ước lượng. Chưa có lượt nào → ước lượng chars/4, hiển thị `~`.
+  - Chat trống = System + Rules + Tools (vài nghìn token).
+  - Màu: thường < 70% · `--warning` ≥ 70% (Engine tự tóm tắt ở 70%) · `--error` ≥ 90%.
+  - Làm mới khi đổi session/thread, mode, model và khi lượt kết thúc. Lỗi (session không còn sau khi Engine restart) → gauge trống đến lượt gửi kế tiếp.
+- Panel usage: tổng `used / window`, thanh màu theo phần, chỉ liệt kê phần > 0, dòng ghi chú "Số đo từ lượt gần nhất" / "Ước lượng".
+- Hạn chế đã biết: mở lại thread sau khi khởi động lại app → Engine tạo session mới chưa replay lịch sử, nên context chỉ còn phần nền (đúng với cái model thấy). Chi phí `cost.summary` vẫn là tổng toàn cục.
 - Enter xóa ô **ngay**. Nút gửi disable nếu chưa session/busy.
 
 ## Files menu

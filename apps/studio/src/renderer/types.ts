@@ -43,6 +43,22 @@ export type ErrorInfo = {
 };
 
 
+/** Copy of `ContextUsage` in packages/protocol — result of `session.context`. */
+export type ContextUsage = {
+  used: number;
+  window: number;
+  model: string;
+  measured: boolean;
+  parts: {
+    system: number;
+    rules: number;
+    tools: number;
+    mcp_tools: number;
+    summarized: number;
+    conversation: number;
+  };
+};
+
 export type ModelInfo = {
   id: string;
   label?: string;

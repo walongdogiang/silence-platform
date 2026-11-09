@@ -7,6 +7,44 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
+/// Hard cap on any tool output handed back to the model (bytes). Longer output is cut with a note.
+pub const MAX_OUTPUT_BYTES: usize = 30_000;
+/// `read` without `limit` returns at most this many lines.
+pub const READ_DEFAULT_LINES: usize = 400;
+const READ_MAX_LINE_CHARS: usize = 500;
+const GREP_MAX_LINE_CHARS: usize = 300;
+const GREP_MAX_FILE_BYTES: u64 = 1_000_000;
+const GREP_MAX_CONTEXT: usize = 5;
+const OUTLINE_MAX_ENTRIES: usize = 300;
+
+/// Clip one line to `max` chars (char-boundary safe), noting how much was dropped.
+fn clip_line(line: &str, max: usize) -> String {
+    match line.char_indices().nth(max) {
+        None => line.to_string(),
+        Some((cut, _)) => {
+            let rest = line[cut..].chars().count();
+            format!("{}…[+{rest} chars]", &line[..cut])
+        }
+    }
+}
+
+/// Cap total output at `MAX_OUTPUT_BYTES` (char-boundary safe) with a visible note.
+pub fn cap_output(mut text: String) -> String {
+    if text.len() <= MAX_OUTPUT_BYTES {
+        return text;
+    }
+    let total = text.len();
+    let mut cut = MAX_OUTPUT_BYTES;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    text.truncate(cut);
+    text.push_str(&format!(
+        "\n…[output truncated: {cut} of {total} bytes shown; narrow the request]"
+    ));
+    text
+}
+
 #[derive(Debug, Clone)]
 pub struct Workspace {
     pub root: PathBuf,
@@ -48,6 +86,7 @@ pub struct ToolSpec {
 pub fn specs(read_only: bool) -> Vec<ToolSpec> {
     let mut tools = vec![
         spec_read(),
+        spec_outline(),
         spec_glob(),
         spec_grep(),
         spec_git_status(),
@@ -88,15 +127,27 @@ fn obj(props: Value, required: &[&str]) -> Value {
 fn spec_read() -> ToolSpec {
     ToolSpec {
         name: "read".into(),
-        description: "Read a UTF-8 text file. Optional offset/limit in lines.".into(),
+        description: "Read a UTF-8 text file with line numbers. Without `limit` returns at most 400 lines; \
+            for large files use grep or outline first, then read only the line range you need."
+            .into(),
         parameters: obj(
             json!({
                 "path": {"type": "string"},
-                "offset": {"type": "integer"},
-                "limit": {"type": "integer"}
+                "offset": {"type": "integer", "description": "1-based first line (default 1)."},
+                "limit": {"type": "integer", "description": "Number of lines (default 400)."}
             }),
             &["path"],
         ),
+    }
+}
+
+fn spec_outline() -> ToolSpec {
+    ToolSpec {
+        name: "outline".into(),
+        description: "List a file's structure with line numbers (Markdown headings; declarations in \
+            Rust, TS/JS, Python, Go) without reading the body. Use it to pick a line range for read."
+            .into(),
+        parameters: obj(json!({ "path": {"type": "string"} }), &["path"]),
     }
 }
 
@@ -147,12 +198,18 @@ fn spec_glob() -> ToolSpec {
 fn spec_grep() -> ToolSpec {
     ToolSpec {
         name: "grep".into(),
-        description: "Regex search in workspace text files.".into(),
+        description: "Regex search in workspace text files (respects .gitignore). Output modes: \
+            `content` (path:line:text, default), `files` (matching paths only), `count` (path:matches). \
+            Use `context` for surrounding lines instead of re-reading the file."
+            .into(),
         parameters: obj(
             json!({
                 "pattern": {"type": "string"},
-                "glob": {"type": "string"},
-                "head_limit": {"type": "integer"}
+                "glob": {"type": "string", "description": "Filter files, e.g. **/*.rs"},
+                "output_mode": {"type": "string", "enum": ["content", "files", "count"]},
+                "context": {"type": "integer", "description": "Lines of context around each match (0-5, content mode)."},
+                "case_insensitive": {"type": "boolean"},
+                "head_limit": {"type": "integer", "description": "Max matches (content) or entries (files/count). Default 80."}
             }),
             &["pattern"],
         ),
@@ -204,8 +261,15 @@ pub struct FileDiff {
 }
 
 pub async fn execute(ws: &Workspace, name: &str, args: &Value) -> Result<ToolOutput> {
+    let mut out = execute_uncapped(ws, name, args).await?;
+    out.output = cap_output(out.output);
+    Ok(out)
+}
+
+async fn execute_uncapped(ws: &Workspace, name: &str, args: &Value) -> Result<ToolOutput> {
     match name {
         "read" => read(ws, args),
+        "outline" => outline(ws, args),
         "write" => write(ws, args),
         "edit" => edit(ws, args),
         "glob" => glob_files(ws, args),
@@ -238,11 +302,19 @@ fn read(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         .get("limit")
         .and_then(|v| v.as_u64())
         .map(|n| n as usize)
-        .unwrap_or(lines.len());
-    let slice = &lines[start..lines.len().min(start + limit)];
+        .unwrap_or(READ_DEFAULT_LINES);
+    let end = lines.len().min(start.saturating_add(limit));
     let mut out = String::new();
-    for (i, line) in slice.iter().enumerate() {
-        out.push_str(&format!("{:>6}|{}\n", start + i + 1, line));
+    for (i, line) in lines[start..end].iter().enumerate() {
+        out.push_str(&format!("{:>6}|{}\n", start + i + 1, clip_line(line, READ_MAX_LINE_CHARS)));
+    }
+    if end < lines.len() {
+        out.push_str(&format!(
+            "…[{} more lines, {} total; call read with offset={} to continue, or grep/outline to find the part you need]\n",
+            lines.len() - end,
+            lines.len(),
+            end + 1
+        ));
     }
     Ok(ToolOutput {
         ok: true,
@@ -431,16 +503,46 @@ fn glob_files(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     })
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum GrepMode {
+    Content,
+    Files,
+    Count,
+}
+
 fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let pattern = args["pattern"].as_str().unwrap_or("");
-    let re = Regex::new(pattern).context("invalid regex")?;
+    let case_insensitive = args
+        .get("case_insensitive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let re = regex::RegexBuilder::new(pattern)
+        .case_insensitive(case_insensitive)
+        .build()
+        .context("invalid regex")?;
     let glob_pat = args.get("glob").and_then(|v| v.as_str());
     let glob = glob_pat.map(glob_to_regex).transpose()?;
     let limit = args
         .get("head_limit")
         .and_then(|v| v.as_u64())
-        .unwrap_or(80) as usize;
-    let mut hits = Vec::new();
+        .unwrap_or(80)
+        .max(1) as usize;
+    let mode = match args.get("output_mode").and_then(|v| v.as_str()) {
+        Some("files") => GrepMode::Files,
+        Some("count") => GrepMode::Count,
+        _ => GrepMode::Content,
+    };
+    let context = args
+        .get("context")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        .min(GREP_MAX_CONTEXT as u64) as usize;
+
+    let mut out: Vec<String> = Vec::new();
+    // Matches (content) or entries (files/count) emitted so far.
+    let mut emitted = 0usize;
+    let mut skipped_large = 0usize;
+    let mut hit_limit = false;
     let walker = ignore::WalkBuilder::new(&ws.root)
         .hidden(false)
         .git_ignore(true)
@@ -455,27 +557,147 @@ fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
                 continue;
             }
         }
+        if entry.metadata().map(|m| m.len()).unwrap_or(0) > GREP_MAX_FILE_BYTES {
+            skipped_large += 1;
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
         if text.bytes().take(1024).any(|b| b == 0) {
             continue;
         }
-        for (i, line) in text.lines().enumerate() {
-            if re.is_match(line) {
-                hits.push(format!("{}:{}:{}", rel, i + 1, line));
-                if hits.len() >= limit {
-                    break;
+        let lines: Vec<&str> = text.lines().collect();
+        let matches: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| re.is_match(l))
+            .map(|(i, _)| i)
+            .collect();
+        if matches.is_empty() {
+            continue;
+        }
+        match mode {
+            GrepMode::Files => {
+                out.push(rel);
+                emitted += 1;
+            }
+            GrepMode::Count => {
+                out.push(format!("{rel}:{}", matches.len()));
+                emitted += 1;
+            }
+            GrepMode::Content => {
+                let take = matches.len().min(limit - emitted);
+                if context > 0 && !out.is_empty() {
+                    out.push("--".into());
                 }
+                let mut last_printed: Option<usize> = None;
+                for &m in &matches[..take] {
+                    let from = m.saturating_sub(context);
+                    let to = (m + context).min(lines.len() - 1);
+                    let from = match last_printed {
+                        Some(lp) if from <= lp + 1 => lp + 1,
+                        Some(_) => {
+                            out.push("--".into());
+                            from
+                        }
+                        None => from,
+                    };
+                    for i in from..=to {
+                        let sep = if i == m || matches.binary_search(&i).is_ok() { ':' } else { '-' };
+                        out.push(format!(
+                            "{rel}{sep}{}{sep}{}",
+                            i + 1,
+                            clip_line(lines[i], GREP_MAX_LINE_CHARS)
+                        ));
+                    }
+                    last_printed = Some(to.max(last_printed.unwrap_or(0)));
+                }
+                emitted += take;
             }
         }
-        if hits.len() >= limit {
+        if emitted >= limit {
+            hit_limit = true;
             break;
         }
     }
+    if out.is_empty() {
+        out.push("No matches.".into());
+    }
+    if hit_limit {
+        out.push(format!(
+            "…[head_limit {limit} reached; narrow pattern/glob, use output_mode=files|count, or raise head_limit]"
+        ));
+    }
+    if skipped_large > 0 {
+        out.push(format!(
+            "…[skipped {skipped_large} file(s) over {} bytes]",
+            GREP_MAX_FILE_BYTES
+        ));
+    }
     Ok(ToolOutput {
         ok: true,
-        output: hits.join("\n"),
+        output: out.join("\n"),
+        diff: None,
+    })
+}
+
+/// File structure with line numbers: Markdown headings or top-level declarations.
+fn outline(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
+    let rel = args["path"].as_str().unwrap_or("");
+    let path = ws.resolve(rel)?;
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let re = match ext.as_str() {
+        "md" | "markdown" | "mdx" => Regex::new(r"^#{1,6}\s+\S"),
+        "rs" => Regex::new(
+            r"^\s{0,4}(pub(\([^)]*\))?\s+)?(async\s+)?(unsafe\s+)?(const\s+)?(fn|struct|enum|trait|impl|mod|type|static|macro_rules!)[\s<!]",
+        ),
+        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts" => Regex::new(
+            r"^(export\s+)?(default\s+)?(declare\s+)?(async\s+)?(abstract\s+)?(function\*?|class|interface|type|enum|const|let|var)\s",
+        ),
+        "py" => Regex::new(r"^\s*(async\s+)?(def|class)\s"),
+        "go" => Regex::new(r"^(func|type|var|const)\s"),
+        _ => {
+            return Ok(ToolOutput {
+                ok: false,
+                output: format!(
+                    "outline supports .md .rs .ts/.tsx/.js/.jsx .py .go; got `{rel}`. Use grep to locate code in this file."
+                ),
+                diff: None,
+            })
+        }
+    }?;
+    let markdown = matches!(ext.as_str(), "md" | "markdown" | "mdx");
+    let text = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
+    let total = text.lines().count();
+    let mut out = vec![format!("{} ({total} lines)", ws.rel(&path))];
+    let mut in_fence = false;
+    let mut entries = 0usize;
+    for (i, line) in text.lines().enumerate() {
+        if markdown && line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence || !re.is_match(line) {
+            continue;
+        }
+        if entries == OUTLINE_MAX_ENTRIES {
+            out.push(format!("…[more than {OUTLINE_MAX_ENTRIES} entries; use grep]"));
+            break;
+        }
+        let shown = line.trim_end().trim_end_matches('{').trim_end();
+        out.push(format!("{:>6}|{}", i + 1, clip_line(shown, 160)));
+        entries += 1;
+    }
+    if entries == 0 {
+        out.push("(no headings or declarations found; use grep or read)".into());
+    }
+    Ok(ToolOutput {
+        ok: true,
+        output: out.join("\n"),
         diff: None,
     })
 }
@@ -554,10 +776,7 @@ async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         text.push_str("\nSTDERR:\n");
         text.push_str(&String::from_utf8_lossy(&output.stderr));
     }
-    if text.len() > 80_000 {
-        text.truncate(80_000);
-        text.push_str("\n...truncated...");
-    }
+    // Total size is capped in `execute` (MAX_OUTPUT_BYTES).
     Ok(ToolOutput {
         ok: output.status.success(),
         output: text,
@@ -654,6 +873,105 @@ mod tests {
         let (_d, ws) = tmp_ws();
         let out = grep(&ws, &json!({"pattern":"hello"})).unwrap();
         assert!(out.output.contains("a.txt"));
+    }
+
+    fn numbered(n: usize) -> String {
+        (1..=n).map(|i| format!("line {i}\n")).collect()
+    }
+
+    #[test]
+    fn read_defaults_to_400_lines_with_continue_hint() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(ws.root.join("big.txt"), numbered(1000)).unwrap();
+        let out = read(&ws, &json!({"path":"big.txt"})).unwrap().output;
+        assert!(out.contains("   400|line 400"));
+        assert!(!out.contains("line 401\n"));
+        assert!(out.contains("600 more lines, 1000 total"), "{out}");
+        assert!(out.contains("offset=401"));
+        let tail = read(&ws, &json!({"path":"big.txt","offset":990})).unwrap().output;
+        assert!(tail.contains("  1000|line 1000"));
+        assert!(!tail.contains("more lines"));
+    }
+
+    #[test]
+    fn read_and_grep_clip_long_lines() {
+        let (_d, ws) = tmp_ws();
+        let long = format!("needle {}\n", "é".repeat(5000));
+        std::fs::write(ws.root.join("min.js"), &long).unwrap();
+        let r = read(&ws, &json!({"path":"min.js"})).unwrap().output;
+        assert!(r.len() < 2000 && r.contains("chars]"), "{r}");
+        let g = grep(&ws, &json!({"pattern":"needle"})).unwrap().output;
+        assert!(g.len() < 1200 && g.contains("chars]"), "{g}");
+    }
+
+    #[test]
+    fn grep_modes_context_and_case() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(ws.root.join("b.txt"), "x\nHello there\ny\nz\nw\nhello again\n").unwrap();
+        let files = grep(&ws, &json!({"pattern":"hello","output_mode":"files"})).unwrap().output;
+        assert!(files.lines().any(|l| l == "a.txt") && files.lines().any(|l| l == "b.txt"));
+        let count = grep(&ws, &json!({"pattern":"hello","output_mode":"count","glob":"b.txt"}))
+            .unwrap()
+            .output;
+        assert_eq!(count, "b.txt:1");
+        let ci = grep(
+            &ws,
+            &json!({"pattern":"hello","output_mode":"count","glob":"b.txt","case_insensitive":true}),
+        )
+        .unwrap()
+        .output;
+        assert_eq!(ci, "b.txt:2");
+        let ctx = grep(&ws, &json!({"pattern":"there","glob":"b.txt","context":1})).unwrap().output;
+        assert_eq!(ctx, "b.txt-1-x\nb.txt:2:Hello there\nb.txt-3-y");
+        let none = grep(&ws, &json!({"pattern":"zzz-not-here"})).unwrap().output;
+        assert_eq!(none, "No matches.");
+    }
+
+    #[test]
+    fn grep_reports_head_limit() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(ws.root.join("big.txt"), numbered(50)).unwrap();
+        let out = grep(&ws, &json!({"pattern":"line","glob":"big.txt","head_limit":5})).unwrap().output;
+        assert_eq!(out.lines().filter(|l| l.starts_with("big.txt:")).count(), 5);
+        assert!(out.contains("head_limit 5 reached"));
+    }
+
+    #[test]
+    fn outline_markdown_skips_fences() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(ws.root.join("d.md"), "# Title\ntext\n```sh\n# not a heading\n```\n## Part\n").unwrap();
+        let out = outline(&ws, &json!({"path":"d.md"})).unwrap().output;
+        assert!(out.contains("     1|# Title") && out.contains("     6|## Part"), "{out}");
+        assert!(!out.contains("not a heading"));
+    }
+
+    #[test]
+    fn outline_code_declarations() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(
+            ws.root.join("m.rs"),
+            "use x;\npub struct S {\n    a: u8,\n}\nimpl S {\n    pub async fn go(&self) {\n        let y = 1;\n    }\n}\n",
+        )
+        .unwrap();
+        let rs = outline(&ws, &json!({"path":"m.rs"})).unwrap().output;
+        assert!(rs.contains("     2|pub struct S"), "{rs}");
+        assert!(rs.contains("     5|impl S"));
+        assert!(rs.contains("     6|    pub async fn go(&self)"));
+        assert!(!rs.contains("let y"));
+        std::fs::write(ws.root.join("p.py"), "import os\nclass A:\n    def f(self):\n        pass\n").unwrap();
+        let py = outline(&ws, &json!({"path":"p.py"})).unwrap().output;
+        assert!(py.contains("     2|class A:") && py.contains("     3|    def f(self):"), "{py}");
+        let other = outline(&ws, &json!({"path":"a.txt"})).unwrap();
+        assert!(!other.ok && other.output.contains("Use grep"));
+    }
+
+    #[test]
+    fn cap_output_respects_char_boundary() {
+        let s = "é".repeat(MAX_OUTPUT_BYTES);
+        let capped = cap_output(s);
+        assert!(capped.contains("output truncated"));
+        assert!(capped.len() < MAX_OUTPUT_BYTES + 200);
+        assert_eq!(cap_output("short".into()), "short");
     }
 
     #[test]

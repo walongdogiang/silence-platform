@@ -1,9 +1,11 @@
 use crate::agent::{self, AppCtx};
 use crate::audit::AuditLog;
+use crate::compact::estimate_tokens;
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use silence_protocol::{PermissionMode, SessionEvent, SessionMode};
 use silence_router::Catalog;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -68,6 +70,7 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
     let fixture = repo_root.join("evals").join(&manifest.workspace);
     let mut failed = 0;
     let mut ran = 0;
+    let mut all_metrics: Vec<TaskMetrics> = Vec::new();
     for task in &manifest.tasks {
         ran += 1;
         let ws = results_dir.join(&task.id).join("workspace");
@@ -92,11 +95,20 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
             PermissionMode::Yolo,
         )
         .await?;
+        // Base context (system + rules + tool schemas): only used when the provider
+        // returns no usage and input tokens have to be estimated.
+        let base = agent::context_usage(&ctx, &sid, None, None)
+            .await
+            .map(|u| u.used as u64)
+            .unwrap_or(0);
+        let mut metrics = TaskMetrics::new(&task.id, &task.kind);
+        metrics.start_context(base + estimate_tokens(&task.prompt) as u64);
         let mut rx = agent::subscribe(&ctx, &sid).await;
         agent::prompt(ctx.clone(), sid.clone(), task.prompt.clone()).await?;
         let mut report = String::new();
         let mut plan = String::new();
-        let ok_run = wait_done(&mut rx, &mut report, &mut plan).await;
+        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics).await;
+        metrics.finish();
         let passed = if !ok_run {
             false
         } else {
@@ -111,9 +123,18 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         if !passed {
             failed += 1;
         }
+        metrics.passed = passed;
+        all_metrics.push(metrics);
         let _ = task.read_only;
     }
     println!("{}/{} passed", ran - failed, ran);
+    let summary = RunMetrics::new(all_metrics);
+    println!();
+    print!("{}", summary.table());
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let out = results_dir.join(format!("metrics-{stamp}.json"));
+    std::fs::write(&out, serde_json::to_string_pretty(&summary)?)?;
+    println!("metrics: {}", out.display());
     Ok(if failed > 0 { 1 } else { 0 })
 }
 
@@ -121,6 +142,7 @@ async fn wait_done(
     rx: &mut mpsc::UnboundedReceiver<SessionEvent>,
     report: &mut String,
     plan: &mut String,
+    metrics: &mut TaskMetrics,
 ) -> bool {
     let deadline = tokio::time::Duration::from_secs(180);
     let start = tokio::time::Instant::now();
@@ -128,7 +150,11 @@ async fn wait_done(
         if start.elapsed() > deadline {
             return false;
         }
-        match tokio::time::timeout(tokio::time::Duration::from_secs(120), rx.recv()).await {
+        let ev = tokio::time::timeout(tokio::time::Duration::from_secs(120), rx.recv()).await;
+        if let Ok(Some(e)) = &ev {
+            metrics.observe(e);
+        }
+        match ev {
             Ok(Some(SessionEvent::Token { text })) => report.push_str(&text),
             Ok(Some(SessionEvent::Plan { markdown })) => {
                 plan.push_str(&markdown);
@@ -142,6 +168,183 @@ async fn wait_done(
             Ok(None) => return false,
             Err(_) => return false,
         }
+    }
+}
+
+/// Per-task numbers collected from `SessionEvent`s (no change to the agent loop needed).
+///
+/// Tokens come from `SessionEvent::Cost` (the provider's usage, see `gateway::ChatResult`).
+/// When a model call reports 0/0 the provider sent no usage: input is then estimated as the
+/// running context size (base + everything streamed so far, chars/4) and output as the text
+/// plus tool-call arguments of that call; such calls are counted in `estimated_calls`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TaskMetrics {
+    pub id: String,
+    pub kind: String,
+    pub passed: bool,
+    pub model_calls: u32,
+    pub estimated_calls: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub tool_calls: u32,
+    pub tool_calls_by_name: BTreeMap<String, u32>,
+    pub tool_output_bytes: u64,
+    /// `SessionEvent::Error` of the task (already secret-filtered by the Engine).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Estimated size of the next request (chars/4), for calls without usage.
+    #[serde(skip)]
+    context_est: u64,
+    /// Text streamed since the last `Cost` (output of the *next* call to report).
+    #[serde(skip)]
+    text_since_cost: u64,
+    /// Tool-call args seen since the last `Cost` (output of the *previous* call).
+    #[serde(skip)]
+    args_since_cost: u64,
+    /// The previous call reported no usage: its tool-call args still count as its output.
+    #[serde(skip)]
+    prev_call_estimated: bool,
+}
+
+impl TaskMetrics {
+    pub fn new(id: &str, kind: &str) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Estimated tokens of the first request (system + rules + tools + prompt).
+    pub fn start_context(&mut self, tokens: u64) {
+        self.context_est = tokens;
+    }
+
+    pub fn observe(&mut self, ev: &SessionEvent) {
+        match ev {
+            SessionEvent::Token { text } => {
+                let t = estimate_tokens(text) as u64;
+                self.context_est += t;
+                self.text_since_cost += t;
+            }
+            // `run_turn` emits Cost after the call's text streamed and before its tools run.
+            SessionEvent::Cost {
+                input_tokens,
+                output_tokens,
+                ..
+            } => {
+                self.close_prev_call();
+                self.model_calls += 1;
+                let text = std::mem::take(&mut self.text_since_cost);
+                if *input_tokens == 0 && *output_tokens == 0 {
+                    self.estimated_calls += 1;
+                    self.input_tokens += self.context_est.saturating_sub(text);
+                    self.output_tokens += text;
+                    self.prev_call_estimated = true;
+                } else {
+                    self.input_tokens += *input_tokens as u64;
+                    self.output_tokens += *output_tokens as u64;
+                }
+            }
+            SessionEvent::ToolStart { input, .. } => {
+                let t = estimate_tokens(&input.to_string()) as u64;
+                self.context_est += t;
+                self.args_since_cost += t;
+            }
+            SessionEvent::ToolEnd { name, output, .. } => {
+                self.tool_calls += 1;
+                *self.tool_calls_by_name.entry(name.clone()).or_default() += 1;
+                self.tool_output_bytes += output.len() as u64;
+                self.context_est += estimate_tokens(output) as u64;
+            }
+            SessionEvent::Error { message, error } => {
+                let code = error.as_ref().map(|e| e.code.as_str()).unwrap_or("ERROR");
+                self.error = Some(format!("{code}: {message}"));
+            }
+            _ => {}
+        }
+    }
+
+    /// Flush the estimated output of the last call without usage.
+    pub fn finish(&mut self) {
+        self.close_prev_call();
+    }
+
+    fn close_prev_call(&mut self) {
+        let args = std::mem::take(&mut self.args_since_cost);
+        if std::mem::take(&mut self.prev_call_estimated) {
+            self.output_tokens += args;
+        }
+    }
+
+    fn add(&mut self, o: &TaskMetrics) {
+        self.model_calls += o.model_calls;
+        self.estimated_calls += o.estimated_calls;
+        self.input_tokens += o.input_tokens;
+        self.output_tokens += o.output_tokens;
+        self.tool_calls += o.tool_calls;
+        self.tool_output_bytes += o.tool_output_bytes;
+        for (k, v) in &o.tool_calls_by_name {
+            *self.tool_calls_by_name.entry(k.clone()).or_default() += v;
+        }
+    }
+}
+
+/// Whole-run summary, written to `evals/results/metrics-<time>.json`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunMetrics {
+    pub tasks: Vec<TaskMetrics>,
+    pub total: TaskMetrics,
+}
+
+impl RunMetrics {
+    pub fn new(tasks: Vec<TaskMetrics>) -> Self {
+        let mut total = TaskMetrics::new("TOTAL", "");
+        total.passed = tasks.iter().all(|t| t.passed);
+        for t in &tasks {
+            total.add(t);
+        }
+        Self { tasks, total }
+    }
+
+    pub fn table(&self) -> String {
+        let row = |a: &str, b: &str, c: &str, d: &str, e: &str, f: &str, g: &str, h: &str| {
+            format!("{a:<28} {b:>4} {c:>6} {d:>10} {e:>9} {f:>6} {g:>11}  {h}\n")
+        };
+        let mut s = row(
+            "task", "ok", "calls", "in_tok", "out_tok", "tools", "tool_bytes", "tools_by_name",
+        );
+        for t in self.tasks.iter().chain(std::iter::once(&self.total)) {
+            let calls = if t.estimated_calls > 0 {
+                format!("{}~{}", t.model_calls, t.estimated_calls)
+            } else {
+                t.model_calls.to_string()
+            };
+            let by_name = t
+                .tool_calls_by_name
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            s.push_str(&row(
+                &t.id,
+                if t.passed { "PASS" } else { "FAIL" },
+                &calls,
+                &t.input_tokens.to_string(),
+                &t.output_tokens.to_string(),
+                &t.tool_calls.to_string(),
+                &t.tool_output_bytes.to_string(),
+                &by_name,
+            ));
+        }
+        for t in self.tasks.iter().filter(|t| t.error.is_some()) {
+            let e = t.error.as_deref().unwrap_or_default();
+            s.push_str(&format!("  {} error: {}\n", t.id, e.chars().take(160).collect::<String>()));
+        }
+        if self.total.estimated_calls > 0 {
+            s.push_str("(calls N~M: M calls had no provider usage, their tokens are chars/4 estimates)\n");
+        }
+        s
     }
 }
 
@@ -224,4 +427,116 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn cost(i: u32, o: u32) -> SessionEvent {
+        SessionEvent::Cost {
+            input_tokens: i,
+            output_tokens: o,
+            usd: 0.0,
+        }
+    }
+
+    fn tool(name: &str, out: &str) -> [SessionEvent; 2] {
+        [
+            SessionEvent::ToolStart {
+                call_id: "c".into(),
+                name: name.into(),
+                input: json!({"path": "a.rs"}),
+            },
+            SessionEvent::ToolEnd {
+                call_id: "c".into(),
+                name: name.into(),
+                ok: true,
+                output: out.into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn sums_provider_usage_and_tools() {
+        let mut m = TaskMetrics::new("t1", "edit");
+        m.start_context(1000);
+        m.observe(&cost(1200, 50));
+        for e in tool("grep", "hello").iter().chain(tool("read", "0123456789").iter()) {
+            m.observe(e);
+        }
+        m.observe(&cost(1500, 30));
+        for e in &tool("grep", "x") {
+            m.observe(e);
+        }
+        m.observe(&SessionEvent::Token { text: "done".into() });
+        m.observe(&cost(1600, 10));
+        m.observe(&SessionEvent::Done { stop: "stop".into() });
+        m.finish();
+        assert_eq!(m.model_calls, 3);
+        assert_eq!(m.estimated_calls, 0);
+        assert_eq!(m.input_tokens, 4300);
+        assert_eq!(m.output_tokens, 90);
+        assert_eq!(m.tool_calls, 3);
+        assert_eq!(m.tool_calls_by_name["grep"], 2);
+        assert_eq!(m.tool_calls_by_name["read"], 1);
+        assert_eq!(m.tool_output_bytes, 16);
+    }
+
+    #[test]
+    fn estimates_when_provider_sends_no_usage() {
+        let mut m = TaskMetrics::new("t2", "ask");
+        m.start_context(100);
+        let args = estimate_tokens(&json!({"path": "a.rs"}).to_string()) as u64;
+        // Call 1: no text, one tool call; tool output 400 bytes (~100 tok).
+        m.observe(&cost(0, 0));
+        for e in &tool("read", &"x".repeat(400)) {
+            m.observe(e);
+        }
+        // Call 2: streams 40 chars (~10 tok), then reports no usage.
+        m.observe(&SessionEvent::Token { text: "y".repeat(40) });
+        m.observe(&cost(0, 0));
+        m.finish();
+        assert_eq!(m.model_calls, 2);
+        assert_eq!(m.estimated_calls, 2);
+        // Input: 100 (call 1) + 100 + args + 100 (call 2; its own streamed text excluded).
+        assert_eq!(m.input_tokens, 100 + 100 + args + 100);
+        // Output: tool-call args (call 1) + 10 (call 2).
+        assert_eq!(m.output_tokens, args + 10);
+        assert_eq!(m.tool_output_bytes, 400);
+    }
+
+    #[test]
+    fn run_totals_table_and_json() {
+        let mut a = TaskMetrics::new("a", "edit");
+        a.passed = true;
+        a.observe(&cost(10, 2));
+        for e in &tool("grep", "abc") {
+            a.observe(e);
+        }
+        let mut b = TaskMetrics::new("b", "ask");
+        b.observe(&SessionEvent::Error {
+            message: "rate limited".into(),
+            error: None,
+        });
+        assert_eq!(b.error.as_deref(), Some("ERROR: rate limited"));
+        b.observe(&cost(20, 3));
+        for e in &tool("outline", "abcd") {
+            b.observe(e);
+        }
+        let run = RunMetrics::new(vec![a, b]);
+        assert!(!run.total.passed);
+        assert_eq!(run.total.input_tokens, 30);
+        assert_eq!(run.total.output_tokens, 5);
+        assert_eq!(run.total.tool_calls, 2);
+        assert_eq!(run.total.tool_output_bytes, 7);
+        assert_eq!(run.total.tool_calls_by_name.len(), 2);
+        let table = run.table();
+        assert!(table.contains("TOTAL"));
+        assert!(table.contains("outline=1"));
+        let js = serde_json::to_value(&run).unwrap();
+        assert_eq!(js["total"]["input_tokens"], 30);
+        assert!(js["tasks"][0].get("context_est").is_none());
+    }
 }

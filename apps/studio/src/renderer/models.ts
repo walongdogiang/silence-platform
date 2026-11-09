@@ -26,6 +26,8 @@ export type ChatThread = {
   lines: ChatLine[];
   /** Thread gốc nếu đây là Fork Chat */
   forkedFromId?: string;
+  /** auto = cắt từ prompt (tạm); ai = Engine sinh (`chat.title`); user = đổi tên tay. ai/user không bị ghi đè. */
+  titleSource?: "auto" | "ai" | "user";
 };
 
 export type Diff = { path: string; before: string; after: string };
