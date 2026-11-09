@@ -1,4 +1,4 @@
-# Eval v0 — 22 task trên fixture sample-app (thay bằng repo nội bộ khi có).
+# Eval v0 — 23 task trên fixture sample-app (thay bằng repo nội bộ khi có).
 # kinds: edit | bugfix | explore | plan
 # Runner: silence-engine evals --dir evals/v0
 
@@ -46,6 +46,15 @@ tasks:
       grep:
         - path: src/user.py
           pattern: "def count"
+
+  # METR-04 / WIN-01: shell tool phải giữ nguyên tiếng Việt (UTF-8) trên Windows PowerShell.
+  - id: S23-shell-utf8-vietnamese
+    kind: edit
+    prompt: "Dùng công cụ shell để tạo file notes/xin-chao.txt chứa đúng một dòng: Xin chào thế giới. Đọc lại file bằng shell để xác nhận không bị lỗi font."
+    pass_if:
+      grep:
+        - path: notes/xin-chao.txt
+          pattern: "Xin chào thế giới"
 
   - id: B06-bugfix-mul
     kind: bugfix

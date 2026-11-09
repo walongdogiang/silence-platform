@@ -84,6 +84,7 @@ async fn serve(
     let state = Arc::new(RpcState::new(ctx));
 
     if let Some(addr) = tcp {
+        silence_engine::bind_policy::ensure_loopback_tcp_bind(&addr)?;
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let local = listener.local_addr()?;
         eprintln!("silence-engine ready tcp={local}");
