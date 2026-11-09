@@ -62,7 +62,10 @@ impl Workspace {
         } else {
             self.root.join(rel)
         };
-        let canon = dunce::canonicalize(&candidate).unwrap_or(candidate);
+        // Fold `.`/`..` first: for a path that does not exist yet (a new file) canonicalize
+        // fails, and `root/../x` would otherwise still "start with" root.
+        let candidate = normalize_lexical(&strip_extended(&candidate));
+        let canon = canonicalize_existing_prefix(&candidate);
         // dunce keeps `\\?\` on paths too long to simplify; compare the plain form with the root.
         let canon = strip_extended(&canon);
         if !canon.starts_with(&self.root) {
@@ -98,6 +101,48 @@ pub fn extended_path(p: PathBuf) -> PathBuf {
         }
     }
     p
+}
+
+/// Remove `.` and fold `..` without touching the filesystem. A `..` at the root is dropped.
+fn normalize_lexical(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(out.components().next_back(), Some(Component::RootDir | Component::Prefix(_)) | None) {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Canonicalize `p` (resolving symlinks). If it does not exist yet, canonicalize its nearest
+/// existing ancestor and re-append the missing tail, so a new file under a symlinked directory
+/// is judged by where it really lands.
+fn canonicalize_existing_prefix(p: &Path) -> PathBuf {
+    if let Ok(c) = dunce::canonicalize(p) {
+        return c;
+    }
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = p.to_path_buf();
+    while let Some(name) = cur.file_name().map(|n| n.to_os_string()) {
+        tail.push(name);
+        if !cur.pop() {
+            break;
+        }
+        if let Ok(mut base) = dunce::canonicalize(&cur) {
+            for seg in tail.iter().rev() {
+                base.push(seg);
+            }
+            return base;
+        }
+    }
+    p.to_path_buf()
 }
 
 /// Inverse of [`extended_path`] for display / relative-path computation.
@@ -358,18 +403,8 @@ fn read(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
 
 fn write(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let rel = args["path"].as_str().unwrap_or("");
-    let path = if Path::new(rel).is_absolute() {
-        ws.resolve(rel)?
-    } else {
-        let p = extended_path(ws.root.join(rel));
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        p
-    };
-    if !strip_extended(&path).starts_with(&ws.root) {
-        return Err(anyhow!("path escapes workspace"));
-    }
+    // Jail check first (folds `..`, follows symlinks); only then create directories.
+    let path = resolve_write_target(ws, rel)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -425,19 +460,8 @@ fn edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
 
 /// Resolve a write path under the workspace without creating parents (stage-safe).
 fn resolve_write_target(ws: &Workspace, rel: &str) -> Result<PathBuf> {
-    let path = if Path::new(rel).is_absolute() {
-        ws.resolve(rel)?
-    } else {
-        let p = ws.root.join(rel);
-        if !p.starts_with(&ws.root) {
-            return Err(anyhow!("path escapes workspace"));
-        }
-        p
-    };
-    if !path.starts_with(&ws.root) {
-        return Err(anyhow!("path escapes workspace"));
-    }
-    Ok(path)
+    // `resolve` handles both relative and absolute input and enforces the workspace jail.
+    ws.resolve(rel)
 }
 
 /// Propose a write without committing bytes to disk.
@@ -1091,6 +1115,37 @@ mod tests {
             "shell UTF-8 capture must preserve Vietnamese; got {:?}",
             out.output
         );
+    }
+
+    #[test]
+    fn dotdot_cannot_escape_workspace() {
+        let (_d, ws) = tmp_ws();
+        let outside = ws.root.parent().unwrap().join("escaped-by-dotdot.txt");
+        let _ = std::fs::remove_file(&outside);
+        for rel in [
+            "../escaped-by-dotdot.txt",
+            "sub/../../escaped-by-dotdot.txt",
+            "./../escaped-by-dotdot.txt",
+        ] {
+            assert!(
+                write(&ws, &json!({"path": rel, "contents": "x"})).is_err(),
+                "write must refuse {rel}"
+            );
+            assert!(
+                stage_write(&ws, &json!({"path": rel, "contents": "x"})).is_err(),
+                "stage_write must refuse {rel}"
+            );
+            assert!(ws.resolve(rel).is_err(), "resolve must refuse {rel}");
+        }
+        assert!(!outside.exists(), "nothing may be written outside the workspace");
+    }
+
+    #[test]
+    fn dotdot_inside_workspace_is_allowed() {
+        let (_d, ws) = tmp_ws();
+        let out = write(&ws, &json!({"path": "a/../b.txt", "contents": "ok"})).unwrap();
+        assert!(out.ok);
+        assert_eq!(std::fs::read_to_string(ws.root.join("b.txt")).unwrap(), "ok");
     }
 
     #[test]

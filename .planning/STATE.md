@@ -38,8 +38,6 @@ Wave 0 RED tests are all green (no `#[ignore]` left). Open before closing Phase 
 - Manual checks in `01-VALIDATION.md` (Diff Apply/Reject UX, Permission Remember UX, Engine survives UI crash).
 - Live `npm run evals` never run (no API key) — incl. new `S23-shell-utf8-vietnamese`.
 - Missing `01-02-SUMMARY.md`.
-- Known gap: `write()` relative-path branch in `crates/tools/src/lib.rs` does not reject `..` (path escape).
-
 ## Performance Metrics
 
 **Velocity:**
