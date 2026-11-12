@@ -1,24 +1,49 @@
 import type { ModelInfo } from "../types";
 
 export type ModelPrefs = {
+  /** Normal models the user switched off. */
   disabled: string[];
+  /** `opt_in` models (off by default, e.g. Fable) the user switched on. */
+  enabled: string[];
   extras: ModelInfo[];
 };
 
 const KEY = "silence.models.prefs.v1";
 
-export function loadModelPrefs(): ModelPrefs {
+const EMPTY: ModelPrefs = { disabled: [], enabled: [], extras: [] };
+
+export function parseModelPrefs(raw: string | null): ModelPrefs {
+  if (!raw) return { ...EMPTY };
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { disabled: [], extras: [] };
     const parsed = JSON.parse(raw) as Partial<ModelPrefs>;
+    const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
     return {
-      disabled: Array.isArray(parsed.disabled) ? parsed.disabled : [],
+      disabled: ids(parsed.disabled),
+      enabled: ids(parsed.enabled),
       extras: Array.isArray(parsed.extras) ? parsed.extras : [],
     };
   } catch {
-    return { disabled: [], extras: [] };
+    return { ...EMPTY };
   }
+}
+
+export function loadModelPrefs(): ModelPrefs {
+  try {
+    return parseModelPrefs(localStorage.getItem(KEY));
+  } catch {
+    return { ...EMPTY };
+  }
+}
+
+/** On in the picker: `opt_in` models only when switched on, others unless switched off. */
+export function isModelOn(m: { id: string; opt_in?: boolean }, prefs: ModelPrefs): boolean {
+  return m.opt_in ? prefs.enabled.includes(m.id) : !prefs.disabled.includes(m.id);
+}
+
+/** Flip a model's switch in Settings (opt-in models use `enabled`, others `disabled`). */
+export function toggleModel(m: { id: string; opt_in?: boolean }, prefs: ModelPrefs): ModelPrefs {
+  const flip = (list: string[]) => (list.includes(m.id) ? list.filter((x) => x !== m.id) : [...list, m.id]);
+  return m.opt_in ? { ...prefs, enabled: flip(prefs.enabled) } : { ...prefs, disabled: flip(prefs.disabled) };
 }
 
 export function saveModelPrefs(p: ModelPrefs) {
@@ -51,32 +76,33 @@ export function modelName(m: { id: string; label?: string; api_model?: string })
   return humanizeSlug(slug);
 }
 
-export function speedLabel(tier: string) {
-  const t = tier.trim().toLowerCase();
-  if (t === "high-fast" || t === "highfast" || t === "high_fast") return "High Fast";
-  if (t === "fast") return "Fast";
-  if (t === "mid" || t === "medium") return "Medium";
-  if (t === "strong" || t === "high") return "High";
-  if (t === "free") return "Free";
-  return tier.trim();
+/**
+ * Rows for the model picker: only models that can run now (a source without a key or without the
+ * CLI is hidden; the selected model always stays so the check mark never vanishes). `dupes` holds
+ * the ids whose display name appears more than once (same model from two sources), the only rows
+ * that need a source suffix to tell them apart.
+ */
+export function pickerRows<T extends { id: string; label?: string; api_model?: string; available?: boolean }>(
+  models: T[],
+  selectedId: string,
+): { rows: T[]; dupes: Set<string> } {
+  const rows = models.filter((m) => m.available !== false || m.id === selectedId);
+  const count = new Map<string, number>();
+  for (const m of rows) count.set(modelName(m), (count.get(modelName(m)) ?? 0) + 1);
+  return { rows, dupes: new Set(rows.filter((m) => (count.get(modelName(m)) ?? 0) > 1).map((m) => m.id)) };
 }
 
-export function modelParts(m: { id: string; label?: string; api_model?: string; tier: string }) {
-  const name = modelName(m);
-  const speed = speedLabel(m.tier);
-  if (!speed) return { name, speed: "" };
-  if (name.toLowerCase().endsWith(` ${speed.toLowerCase()}`)) {
-    return { name: name.slice(0, -(speed.length + 1)).trimEnd(), speed };
-  }
-  return { name, speed };
+/** Display name only. The tier (`fast`/`mid`/`strong`/`free`) is Auto's routing hint, not shown. */
+export function modelTitle(m: { id: string; label?: string; api_model?: string; tier?: string }) {
+  return modelName(m);
 }
 
-export function modelTitle(m: { id: string; label?: string; api_model?: string; tier: string }) {
-  const { name, speed } = modelParts(m);
-  return speed ? `${name} ${speed}` : name;
+/** `opt_in` models still switched off: listed in the picker as locked, with an Enable button. */
+export function lockedModels(catalog: ModelInfo[], prefs: ModelPrefs): ModelInfo[] {
+  return catalog.filter((m) => m.opt_in && !isModelOn(m, prefs));
 }
 
 export function visibleModels(catalog: ModelInfo[], prefs: ModelPrefs): ModelInfo[] {
   const extra = prefs.extras.filter((e) => !catalog.some((c) => c.id === e.id));
-  return [...catalog, ...extra].filter((m) => !prefs.disabled.includes(m.id));
+  return [...catalog, ...extra].filter((m) => isModelOn(m, prefs));
 }

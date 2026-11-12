@@ -74,11 +74,20 @@ Wave 0 RED tests are all green (no `#[ignore]` left). Open before closing Phase 
 
 ### Pending Todos
 
-None yet.
+Manual verifications of Phase 1 (from `01-VALIDATION.md`). Status stays **unverified** until someone runs the steps and records the date + result here; re-check after any change to the code area in the last column.
+
+| # | Check | How | Status | Re-check when touching |
+|---|-------|-----|--------|------------------------|
+| M1 | Diff Apply/Reject UX (LOOP-01) | Prompt an edit in Agent mode → staged diff appears, file on disk unchanged → Apply writes / Reject keeps before | unverified | `agent.rs` apply/reject, `DiffCard`/`DiffPane`, `diff.*` RPC |
+| M2 | Permission Remember UX (PERM-01) | Allow + "Nhớ cho workspace này" → new session in same workspace → same tool skips Ask; Deny never persists | unverified | `permissions.rs`, Ask banner in `App.tsx` |
+| M3 | Engine survives UI crash (WIN-02) | Kill Studio renderer/main while Engine runs → `silence-engine` process still alive | unverified | `apps/studio/src/main/index.ts` spawn, Job Object / `wrap_pid` |
+| M4 | Live evals (METR-04) | `npm run evals` with `SILENCE_API_BASE`/`SILENCE_API_KEY`, incl. `S23-shell-utf8-vietnamese` | never run | agent loop, tools, `evals/v0/manifest.yaml` |
+
+Also open: engine-level test that Apply audits and Reject does not (`01-VALIDATION.md` row 01-02-T2 "partial"); decide whether `diff.apply` may write without a pending edit (see `01-02-SUMMARY.md` Observations).
 
 ### Blockers/Concerns
 
-None yet.
+- Phase 1 is not signed off while M1–M4 are unverified; Phase 2 work may start in parallel but must not weaken the stage-then-apply path.
 
 ## Deferred Items
 

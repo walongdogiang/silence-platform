@@ -6,6 +6,10 @@ code:
   - apps/studio/src/renderer/components/MarkdownMessage.tsx
   - apps/studio/src/renderer/components/CodeView.tsx
   - apps/studio/src/renderer/components/DiffCard.tsx
+  - apps/studio/src/renderer/components/ImageLightbox.tsx
+  - apps/studio/src/renderer/components/WorkspaceImage.tsx
+  - apps/studio/src/renderer/components/VisualBlock.tsx
+  - apps/studio/src/renderer/workspaceImages.ts
   - apps/studio/src/renderer/syntax.ts
 ---
 # Hội thoại (ChatPane)
@@ -29,12 +33,21 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 [4] Footer: Copy · Fork Chat                         ← không hiện thời gian tin nhắn
 ```
 
+- **User bubble có ảnh** (dán / kéo-thả / chọn file ở composer): ảnh nằm trên chữ, bấm để mở lightbox. Chi tiết: mục "Ảnh" và "Lightbox" trong `composer.md`.
+
 ## Câu trả lời AI (Markdown-first)
 
 - **Nguồn sự thật:** mọi `ChatLine` loại `token` trong lượt → `Turn.ai.text` (chuỗi gốc từ model).
-- **Quy ước format:** system prompt runtime (`crates/runtime/src/agent.rs` → `SYSTEM`) bảo model viết câu trả lời user bằng Markdown.
+- **Quy ước format:** system prompt runtime (`crates/runtime/src/agent/modes.rs` → `SYSTEM`) bảo model viết câu trả lời user bằng Markdown.
 - **Hiển thị:** `components/MarkdownMessage.tsx` (`react-markdown` + `remark-gfm`: đậm/nghiêng, danh sách, bảng, task list, code fence). Streaming: fence chưa đóng vẫn ra khối code.
 - **An toàn:** không `rehype-raw` (HTML thô hiện như chữ, không thành phần tử); `javascript:`/`data:`/`file:` không thành link; **ảnh từ xa bị chặn** (URL ảnh là kênh rò rỉ dữ liệu khi model bị prompt-injection); link `http(s)` mở trình duyệt ngoài qua `window.silence.openExternal` (main kiểm lại scheme, từ chối URL kèm user:pass). Main chặn `will-navigate`/`window.open`, link không bao giờ thay giao diện app (`src/main/safeUrl.ts`).
+- **Ảnh trong workspace:** `![alt](out/cat.png)` với đường dẫn tương đối (không `..`, không ổ đĩa) → đọc qua Engine `fs.read_image` (jail, ≤ 5 MB, png/jpg/gif/webp/svg) và hiện tại chỗ (tối đa 480×320); lỗi → `[không mở được ảnh …]`. Link `[x](path)` tương đối thành chip mở file như `` `path` ``.
+- **Hình minh hoạ (` ```svg `)** (`VisualBlock`): user bảo "vẽ… hiển thị ở đây" → agent trả một khối ` ```svg ` (hợp đồng trong `SYSTEM`, mục Visuals: tự chứa, có `viewBox` và `<title>`, không script/foreignObject/tài nguyên ngoài; sơ đồ nền trong suốt, tranh nền kín bo góc, không chữ trong tranh). App vẽ thành hình trong card có tiêu đề lấy từ `<title>` (không có thì "Hình minh hoạ", cũng là `alt`): nút **Mã** (xem/copy SVG), nút phóng to → lightbox (Copy = PNG 2x; Lưu **PNG** 2x theo `viewBox` hoặc **SVG** gốc); bấm hình cũng phóng to. Hình cao tối đa 400px, bề rộng tính từ tỉ lệ `viewBox`. Tranh nền kín (hình vẽ đầu tiên là `<rect>` phủ cả `viewBox`) → card co theo hình, hình sát mép; sơ đồ → card full, hình có lề 16px. Hiện bằng `<img src="data:image/svg+xml…">` nên SVG không chạy script, không tải gì ngoài. Đang stream (chưa có `</svg>`) → ô chờ "Đang vẽ…" kèm số KB đã nhận, đúng tỉ lệ `viewBox` ngay khi đọc được (chat không nhảy khi hình hiện), không đổ mã ra chat; trả lời xong mà SVG cụt → hiện mã; SVG hỏng → hiện mã kèm "SVG không vẽ được". Không tạo file.
+- **Thao tác trên ảnh (`ImageFrame`)** — mọi ảnh trong chat (hình SVG, ảnh workspace tại chỗ và ở dải ảnh, ảnh user dán): hover / focus hiện góc phải trên **Tải** (SVG: menu có icon tải **Download as PNG** — nét 2x — / **Download as SVG**) và **Copy as image** (chỉ icon; copy xong icon Copy chuyển mượt sang icon ✓ khoảng 1,8 giây rồi trở lại, thanh nút giữ hiện trong lúc đó, tooltip "Copied"; bấm dồn khi lần trước chưa xong thì dùng chung lần đó, PNG đã vẽ được nhớ cho vài ảnh gần nhất; lỗi thì hiện "Không copy được". PNG; SVG vẽ lại 2x; ghi clipboard từ main qua IPC `silence-copy-image`, chỉ nhận PNG ≤ 32 MB; data URL giải mã tại chỗ bằng `dataUrlToBlob`, không `fetch` vì CSP `connect-src` chặn `data:` — Clipboard API của trang chỉ là dự phòng khi chạy ngoài app), góc trái dưới pill **Chỉnh sửa**. Bấm ảnh vẫn phóng to; lightbox cũng có nút **Chỉnh sửa**. Ảnh của câu trả lời đang stream chưa có Chỉnh sửa.
+- **Tên file khi tải (`fileNameFor`)** — ảnh workspace giữ tên file thật; hình SVG dùng tên model đặt ở `data-filename` trên thẻ `<svg>` (prompt `SYSTEM` → Visuals: tiếng Anh, kebab-case, mô tả nội dung); thiếu thì lấy `<title>`; vẫn không có thì `image-<n>`. Renderer luôn chuẩn hoá (`slugFileName`): chữ thường, bỏ dấu tiếng Việt, từ nối bằng `-`, không dấu cách / ký tự đặc biệt, ≤ 60 ký tự; đuôi theo định dạng thật (hoặc định dạng xuất, vd. SVG → `.png`). Ảnh đã đánh dấu trong trình chỉnh sửa thêm hậu tố `-annotated`.
+- **Trình chỉnh sửa ảnh (`ImageEditor`)** — toàn màn hình, nền tối. Trên: ← đóng (có đánh dấu thì hỏi "Bỏ các đánh dấu chưa dùng?"), Hoàn tác / Làm lại, Copy, Tải PNG đã đánh dấu, nút chính **Gửi cho agent**. Dưới: 7 màu (đỏ mặc định; đổi màu khi đang chọn một dấu thì đổi luôn dấu đó) và công cụ **Phác hoạ**, **Văn bản**, **Khung**, **Mũi tên**, **Bình luận** (ghim số + ô ghi chú ở cột phải); **Gỡ nền** / **Xóa vật thể** hiện nhưng disabled, ghi "chưa gắn" (chưa có model sửa ảnh). Phím: Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, Delete xoá dấu đang chọn, Esc. Dấu lưu theo toạ độ ảnh gốc (SVG: đơn vị `viewBox`). **Gửi cho agent** = ghép ảnh + dấu thành PNG (SVG vẽ 2x, cạnh ≤ 2048), đính vào composer qua đường ảnh dán (`imagesFromFiles`, tối đa 4 ảnh) và điền sẵn `Sửa hình "<tiêu đề>" theo chỗ đánh dấu trong ảnh đính kèm:` kèm danh sách ghim `1. (x=…, y=… theo viewBox): <ghi chú>`; **không tự gửi**. Model không có vision → Composer đã cảnh báo.
+- **Dải ảnh dưới câu trả lời** (`ImageRefStrip`): ảnh workspace mà câu trả lời nhắc tới (chip, link, chữ trơn; bỏ ảnh đã nhúng; tối đa 4), mỗi ảnh có tên file dưới. Chỉ hiện khi lượt đã xong; ảnh chưa có trên đĩa (đang chờ Apply) thì bỏ qua. Bấm → lightbox (Copy / Lưu).
+- **Mở file ảnh** (chip, menu Files, panel Review): ảnh mở bằng lightbox, không đọc như chữ.
 - **Chip file:** inline code dạng `path`, `path:line` (đường dẫn tương đối, không `..`, không ổ đĩa) thành chip bấm mở file trong workspace; chưa cuộn tới dòng.
 - **Copy Message:** `clipboard.writeText(ai.text)` — nguyên nguồn; không gồm Thought, Explored, tool details, checkpoint, route, timestamp.
 - **Copy UX (Cursor-like):** hover tooltip “Copy Message”; sau khi copy, icon → check ~2s; toast góc dưới trái “Message copied to clipboard”.
@@ -96,6 +109,10 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 
 Gửi → Planning + bắt đầu đo thought. `thinking` → Thinking + body. `tool_start`/`token` → seal `ms`. `done`/`error` → drop Planning/Thinking live, past bước, Thought record, checkpoint, worked.
 
+Các bước Read liên tiếp cùng file được gộp thành một dòng có khoảng dòng (`Read App.tsx (1–40, 615–629)`), xem `mergeReadSteps` trong [status.md](status.md).
+
+Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 5.9K tokens` (hoặc `Waiting for approval` / `Stopping…`), xem [status.md](status.md). Xong lượt thì quay về `Worked for …`.
+
 ## Lỗi trong lượt
 
 - Engine chuẩn hóa lỗi provider → `error` event có `error: { code, status?, retryable, detail }` (`PROVIDER_CREDITS`, `PROVIDER_AUTH`, `PROVIDER_RATE`, `PROVIDER_UNAVAILABLE`, `NETWORK`, `TIMEOUT`, `UNKNOWN`). Thiếu `error` → thông báo chung.
@@ -109,7 +126,17 @@ Gửi → Planning + bắt đầu đo thought. `thinking` → Thinking + body. `
 - Card phẳng (`DiffCard.tsx`), viền `--border-ui`, bo `--radius-md`; không dùng `.banner`.
 - Header: icon file, đường dẫn mono (thư mục muted, tên đậm), `+N −M`, icon mở panel Changes. Bấm tên file cũng mở panel.
 - Body: `DiffTable` dùng chung (xem mục dưới), 3 dòng ngữ cảnh mỗi bên. Hiện tối đa 14 hàng, có "Hiện thêm N dòng".
-- Footer căn phải: **Reject** (ghost) rồi **Apply** (primary). Không ghi file nếu chưa Apply.
+- File `.svg`: header có toggle **Xem trước / Mã**, mặc định Xem trước — hình vẽ từ nội dung đề xuất (`after`, data URL trong `<img>`, nền ô caro), bấm để phóng to. Chưa Apply vẫn xem được.
+- Footer căn phải: **Reject** (ghost) rồi **Apply** (primary). Không ghi file nếu chưa Apply. Áp dụng cho mode Thận trọng (`ask`), nơi Engine stage file.
+- Mode Cân bằng: Engine đã ghi file (event `diff{applied:true}`, tầng 1). Footer hiện "✓ Đã áp dụng" bên trái và **Hoàn tác** (ghost) bên phải; Hoàn tác ghi lại `before` qua `diff.apply` (như Restore checkpoint). Xem `docs/security/permissions.md`.
+
+## Card xin quyền
+
+- Tiêu đề = lý do chính từ Risk Engine (`risk.reasons[0].title`) + "cho phép <tool>?". Lệnh shell hiện **nguyên văn** (không JSON); tool khác hiện JSON tham số.
+- Danh sách lý do: tiêu đề đậm + giải thích (`.perm-reasons`), mã nằm ở `title` để tra catalog.
+- Badge tầng cạnh tiêu đề (`Cần duyệt`). Nút: **Cho phép một lần** (chính), **Cho phép "<mẫu>" trong phiên này**, **Luôn cho phép "<mẫu>" trong workspace**, **Từ chối**. Hai nút giữa chỉ hiện khi Engine gửi `risk.pattern`; không có mẫu (pipeline, git huỷ thay đổi, secrets…) thì ẩn. Không còn checkbox "Nhớ". Chi tiết phạm vi: [security/permissions.md](../security/permissions.md).
+- Bước bị chặn (tầng 3) không có card: bước `Running …` đổi thành `Blocked <lý do>`.
+- Bấm Stop: card gỡ ngay, Engine tự từ chối quyền đang chờ.
 - Panel Changes dùng `DiffEditor` before/after; Monaco nạp cục bộ, không qua CDN.
 
 ## Code block và diff trong câu trả lời

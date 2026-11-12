@@ -12,19 +12,28 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   countExplored,
   isPlanningVerb,
+  mergeReadSteps,
+  narrateFromLine,
   narrateToPast,
   parseNarrateLegacy,
   type NarrateStep,
 } from "../chatMeta";
 import type { ChatLine, Diff, Perm } from "../models";
 import { MODE_LABEL, type SessionMode } from "../modes";
+import { pulseLabel, pulseTip, runPhase, type RunMeter } from "../runStatus";
+import { scopeLabels, tierBadge, type PermScope } from "../permissionUi";
 import { DiffCard } from "./DiffCard";
 import { ErrorCard } from "./ErrorCard";
 import { MarkdownMessage } from "./MarkdownMessage";
+import { ImageLightbox, type LightboxState } from "./ImageLightbox";
+import { ImageEditor } from "./ImageEditor";
+import { ImageFrame } from "./ImageFrame";
+import type { EditTarget } from "../imageActions";
+import { ImageRefStrip } from "./WorkspaceImage";
 import { SoftScroll } from "./SoftScroll";
 
 const MODES = [
@@ -41,6 +50,9 @@ const PROMPTS = [
 
 type Turn = {
   user: string;
+  /** Ảnh dán kèm (data URL, chỉ trong phiên) hoặc số ảnh khi mở lại từ lịch sử. */
+  userImages?: string[];
+  userImageCount?: number;
   worked?: { ms: number; at: number };
   thought?: { ms?: number; brief: string; body?: string };
   narrations: NarrateStep[];
@@ -54,20 +66,8 @@ type Turn = {
   endLine: number;
 };
 
-/** Nhãn ô "Nhớ": mirror của `permissions::entry_for` (Engine mới là nơi quyết định phạm vi thật). */
-function permRememberLabel(input: unknown): string {
-  const raw = (input as { path?: unknown } | null | undefined)?.path;
-  if (typeof raw !== "string") return "Nhớ cho mọi lần gọi tool này trong workspace";
-  const p = raw.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
-  const segs = p.split("/");
-  if (!p || p.startsWith("/") || p.includes(":") || segs.some((s) => s === ".." || s === "")) {
-    return "Nhớ cho mọi lần gọi tool này trong workspace";
-  }
-  return segs.length === 1 ? "Nhớ cho file ở thư mục gốc" : `Nhớ cho ${segs.slice(0, -1).join("/")}/**`;
-}
-
 function lineToStep(l: Extract<ChatLine, { kind: "narrate" }>): NarrateStep {
-  if (l.verb) return { verb: l.verb, detail: l.detail };
+  if (l.verb) return narrateFromLine(l);
   return parseNarrateLegacy(l.text ?? "");
 }
 
@@ -87,7 +87,15 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.kind === "user") {
-      cur = { user: l.text, traces: [], narrations: [], errors: [], endLine: i };
+      cur = {
+        user: l.text,
+        userImages: l.images ?? [],
+        userImageCount: l.imageCount ?? 0,
+        traces: [],
+        narrations: [],
+        errors: [],
+        endLine: i,
+      };
       turns.push(cur);
     } else if (l.kind === "worked") {
       const t = ensure(i);
@@ -118,7 +126,7 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
     }
   }
 
-  const out = turns.filter((t) => t.user || t.ai || t.traces.length || t.worked || t.narrations.length || t.thought || t.errors.length);
+  const out = turns.filter((t) => t.user || t.userImages?.length || t.userImageCount || t.ai || t.traces.length || t.worked || t.narrations.length || t.thought || t.errors.length);
   for (const t of out) {
     if (t.ai && !t.ai.at && t.worked?.at) t.ai.at = t.worked.at;
   }
@@ -185,9 +193,12 @@ function thoughtLabel(turn: Turn): string {
 
 function displaySteps(turn: Turn): { step: NarrateStep; active: boolean }[] {
   /* Live: Planning/Thinking; Done: bỏ placeholder; Thought hiển thị block riêng */
-  const raw = turn.live
-    ? turn.narrations.filter((s) => !/^Thought$/i.test(s.verb))
-    : turn.narrations.filter((s) => !isPlanningVerb(s.verb) && !/^Thinking$/i.test(s.verb) && !/^Thought$/i.test(s.verb));
+  /* Gộp Read liên tiếp cùng file → `Read App.tsx (1–40, 615–629)` (docs/frontend/status.md). */
+  const raw = mergeReadSteps(
+    turn.live
+      ? turn.narrations.filter((s) => !/^Thought$/i.test(s.verb))
+      : turn.narrations.filter((s) => !isPlanningVerb(s.verb) && !/^Thinking$/i.test(s.verb) && !/^Thought$/i.test(s.verb)),
+  );
   if (!turn.live) {
     return raw.map((s) => ({ step: narrateToPast(s), active: false }));
   }
@@ -219,8 +230,20 @@ function planSteps(markdown: string): string[] {
     .slice(0, 6);
 }
 
-function summaryLabel(turn: Turn): string {
-  if (turn.live) return "Working…";
+/** Đồng hồ 1s chỉ chạy khi lượt đang live; xong lượt thì dừng tick. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function summaryLabel(turn: Turn, run: RunMeter | null, now: number, awaitingPermission: boolean): string {
+  if (turn.live) return pulseLabel(run, now, awaitingPermission);
   return formatWorked(turn.worked?.ms);
 }
 
@@ -316,8 +339,14 @@ function AiFooter(props: {
 
 function AgentMeta(props: {
   turn: Turn;
+  run?: RunMeter | null;
+  awaitingPermission?: boolean;
   onRestoreCheckpoint?: (id: string) => void;
 }) {
+  const run = props.turn.live ? (props.run ?? null) : null;
+  const awaiting = Boolean(props.turn.live && props.awaitingPermission);
+  const now = useNow(Boolean(props.turn.live));
+  const phase = runPhase(run, awaiting);
   const explored = exploreLabel(props.turn.traces, props.turn.narrations);
   const steps = displaySteps(props.turn);
   const active = steps.find((s) => s.active);
@@ -345,7 +374,13 @@ function AgentMeta(props: {
   return (
     <details className={`msg-agent-meta${props.turn.live ? " live" : ""}`} open={props.turn.live || undefined}>
       <summary>
-        <span>{summaryLabel(props.turn)}</span>
+        <span
+          className={props.turn.live ? `msg-pulse ${phase}` : undefined}
+          title={props.turn.live ? pulseTip(run) || undefined : undefined}
+          aria-live={props.turn.live ? "off" : undefined}
+        >
+          {summaryLabel(props.turn, run, now, awaiting)}
+        </span>
         <ChevronDown size={14} className="msg-agent-meta-chev" />
       </summary>
       {hasBody ? (
@@ -443,7 +478,11 @@ export function ChatPane(props: {
   sessionId: string;
   hasSession: boolean;
   wsName: string;
+  /** Đường dẫn workspace: xem trước ảnh workspace agent nhắc tới (`fs.read_image`). */
+  workspace?: string;
   busy?: boolean;
+  /** Run pulse của lượt live (elapsed, token, Stop) — `runStatus.ts`. */
+  run?: RunMeter | null;
   onApprovePlan: () => void;
   onRevisePlan?: () => void;
   /** Mở file trong workspace khi bấm chip `path:line` trong câu trả lời. */
@@ -454,7 +493,7 @@ export function ChatPane(props: {
   onSwitchAndRun?: (mode: SessionMode, prompt: string) => void;
   permBusy?: boolean;
   permError?: boolean;
-  onAllow: (remember: boolean) => void;
+  onAllow: (scope: PermScope) => void;
   onDeny: () => void;
   onApplyDiff: () => void;
   onRejectDiff: () => void;
@@ -465,20 +504,22 @@ export function ChatPane(props: {
   onChip?: (chip: string) => void;
   onUsePrompt?: (text: string) => void;
   onRetry?: () => void;
+  /** "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn prompt. Trả lỗi nếu không đính được. */
+  onAttachEdited?: (png: Blob, prompt: string) => Promise<string | null>;
 }) {
   const steps = props.plan ? planSteps(props.plan) : [];
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
   const logRef = useRef<HTMLDivElement>(null);
   const [copyToast, setCopyToast] = useState(false);
+  const [lightbox, setLightbox] = useState<LightboxState>(null);
+  const openImages = useCallback((images: string[], index: number) => setLightbox({ images, index }), []);
+  const [editor, setEditor] = useState<EditTarget | null>(null);
+  const editImage = props.onAttachEdited ? setEditor : undefined;
   // endLine của các gợi ý đổi mode đã bị "Giữ …" (chỉ ẩn trong phiên UI này).
   const [dismissedSuggest, setDismissedSuggest] = useState<Set<number>>(new Set());
-  const [remember, setRemember] = useState(false);
-  const permRequestId = props.perm?.request_id;
-  // Remembering widens trust, so it is opt-in: unchecked for every new permission request.
-  useEffect(() => {
-    setRemember(false);
-  }, [permRequestId]);
-  const rememberLabel = permRememberLabel(props.perm?.input);
+  // Nhớ quyền mở rộng độ tin cậy nên luôn là nút riêng (không tick sẵn); Engine quyết định có cho nhớ không.
+  const scopes = scopeLabels(props.perm);
+  const permCommand = (props.perm?.input as { command?: unknown } | null | undefined)?.command;
   const copyToastTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -512,6 +553,24 @@ export function ChatPane(props: {
 
   return (
     <div className="chat-pane">
+      {lightbox ? (
+        <ImageLightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+          onEdit={
+            editImage
+              ? (src) => {
+                  setLightbox(null);
+                  setEditor({ src });
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {editor && props.onAttachEdited ? (
+        <ImageEditor target={editor} onClose={() => setEditor(null)} onSend={props.onAttachEdited} />
+      ) : null}
       {copyToast ? (
         <div className="app-toast" role="status" aria-live="polite">
           <Info size={14} strokeWidth={2} className="app-toast-ico" aria-hidden />
@@ -576,17 +635,50 @@ export function ChatPane(props: {
           );
           return (
             <div key={i} className="msg-turn">
-              {t.user ? (
+              {t.user || t.userImages?.length || t.userImageCount ? (
                 <div className="msg-user">
-                  <div className="msg-bubble">{t.user}</div>
+                  <div className="msg-bubble">
+                    {t.userImages?.length ? (
+                      <div className="msg-images">
+                        {t.userImages.map((src, j) => (
+                          <ImageFrame
+                            key={j}
+                            src={src}
+                            alt={`Ảnh ${j + 1}`}
+                            title="Phóng to"
+                            onOpen={() => setLightbox({ images: t.userImages ?? [], index: j })}
+                            onEdit={props.onAttachEdited ? () => setEditor({ src }) : undefined}
+                          />
+                        ))}
+                      </div>
+                    ) : t.userImageCount ? (
+                      <span className="msg-images-note">{t.userImageCount} ảnh (không lưu trong lịch sử)</span>
+                    ) : null}
+                    {t.user}
+                  </div>
                 </div>
               ) : null}
               {showMeta ? (
-                <AgentMeta turn={t} onRestoreCheckpoint={props.onRestoreCheckpoint} />
+                <AgentMeta
+                  turn={t}
+                  run={props.run}
+                  awaitingPermission={Boolean(props.perm)}
+                  onRestoreCheckpoint={props.onRestoreCheckpoint}
+                />
               ) : null}
               {t.ai ? (
                 <div className="msg-ai-wrap">
-                  <MarkdownMessage text={t.ai.text} onOpenFile={props.onOpenFile} />
+                  <MarkdownMessage
+                    text={t.ai.text}
+                    onOpenFile={props.onOpenFile}
+                    workspace={props.workspace}
+                    onOpenImage={openImages}
+                    streaming={Boolean(t.live)}
+                    onEditImage={t.live ? undefined : editImage}
+                  />
+                  {t.live ? null : (
+                    <ImageRefStrip workspace={props.workspace} text={t.ai.text} onOpen={openImages} onEdit={editImage} />
+                  )}
                   <AiFooter
                     text={t.ai.text}
                     canFork={Boolean(props.onForkChat) && !t.live}
@@ -669,33 +761,63 @@ export function ChatPane(props: {
         )}
 
         {props.perm && (
-          <div className="banner warn">
-            <h4>Cho phép {props.perm.name}?</h4>
-            <pre>{JSON.stringify(props.perm.input, null, 2)}</pre>
-            <label className="perm-remember">
-              <input
-                type="checkbox"
-                checked={remember}
-                disabled={props.permBusy}
-                onChange={(e) => setRemember(e.target.checked)}
-              />
-              {rememberLabel}
-            </label>
+          <div className="banner warn perm-card" role="alertdialog" aria-label="Cần bạn duyệt">
+            <h4>
+              <span className={`perm-tier ${tierBadge(props.perm.risk?.tier).cls}`}>
+                {tierBadge(props.perm.risk?.tier).label}
+              </span>
+              {props.perm.risk?.reasons[0]?.title
+                ? `${props.perm.risk.reasons[0].title} · cho phép ${props.perm.name}?`
+                : `Cho phép ${props.perm.name}?`}
+            </h4>
+            {/* Lệnh thật luôn hiện nguyên văn: duyệt dựa trên lệnh, không dựa trên mô tả. */}
+            <pre>{typeof permCommand === "string" ? permCommand : JSON.stringify(props.perm.input, null, 2)}</pre>
+            {props.perm.risk?.reasons.length ? (
+              <ul className="perm-reasons">
+                {props.perm.risk.reasons.map((r) => (
+                  <li key={r.code} title={r.code}>
+                    <strong>{r.title}.</strong> {r.detail}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {props.permError && (
               <p className="perm-error" role="alert">
                 <strong>Không gửi được quyết định quyền.</strong> Cho phép hoặc Từ chối lại; nếu vẫn
                 lỗi, mở lại workspace.
               </p>
             )}
-            <div className="row">
+            <div className="row perm-actions">
               <button
                 type="button"
                 className="primary"
                 disabled={props.permBusy}
-                onClick={() => props.onAllow(remember)}
+                onClick={() => props.onAllow("once")}
               >
-                Cho phép
+                Cho phép một lần
               </button>
+              {scopes ? (
+                <>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={props.permBusy}
+                    title="Chỉ trong phiên này, không lưu vào workspace"
+                    onClick={() => props.onAllow("session")}
+                  >
+                    {scopes.session}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={props.permBusy}
+                    title="Lưu vào .silence/permissions.json; thu hồi trong Settings"
+                    onClick={() => props.onAllow("workspace")}
+                  >
+                    {scopes.workspace}
+                  </button>
+                </>
+              ) : null}
               <button type="button" className="ghost" disabled={props.permBusy} onClick={props.onDeny}>
                 Từ chối
               </button>
@@ -709,6 +831,7 @@ export function ChatPane(props: {
             onApply={props.onApplyDiff}
             onReject={props.onRejectDiff}
             onShow={props.onShowDiff}
+            onOpenImage={openImages}
           />
         )}
       </div>

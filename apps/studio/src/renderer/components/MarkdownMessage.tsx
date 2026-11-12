@@ -3,17 +3,13 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { looksLikeDiff, parseUnifiedDiff } from "../unifiedDiff";
 import { CodeBlock, DiffBlock } from "./CodeView";
+import { parsePathRef } from "../pathRef";
+import { workspaceImageSrc } from "../workspaceImages";
+import { WorkspaceImage } from "./WorkspaceImage";
+import { VisualBlock } from "./VisualBlock";
+import type { EditTarget } from "../imageActions";
 
-/**
- * Nhận `src/calc.py`, `calc.py:4`, `src/a/b.rs:10-20`. Từ chối đường dẫn tuyệt đối, có ổ đĩa
- * hoặc `..` (giống `rel_path` ở Engine) để chip chỉ mở file trong workspace.
- */
-export function parsePathRef(text: string): { path: string; line?: number } | null {
-  const m = /^([\w.\-]+(?:\/[\w.\-]+)*\.[A-Za-z0-9]{1,8})(?::(\d+)(?:-\d+)?)?$/.exec(text.trim());
-  if (!m) return null;
-  if (m[1].split("/").some((s) => s === "..")) return null;
-  return { path: m[1], line: m[2] ? Number(m[2]) : undefined };
-}
+export { parsePathRef };
 
 const isHttp = (href: string) => /^https?:\/\//i.test(href);
 
@@ -27,15 +23,35 @@ function textOf(node: ReactNode): string {
  * Câu trả lời của agent dạng GitHub-flavored Markdown. An toàn theo thiết kế:
  * - không rehype-raw: HTML thô không được render (hiện như chữ);
  * - `urlTransform` mặc định của react-markdown bỏ `javascript:` và scheme lạ;
- * - ảnh từ xa bị chặn (URL ảnh là kênh rò rỉ dữ liệu khi model bị prompt-injection);
- * - link http(s) đi qua `openExternal` (main kiểm lại), link khác chỉ hiện chữ.
+ * - ảnh từ xa bị chặn (URL ảnh là kênh rò rỉ dữ liệu khi model bị prompt-injection); ảnh trỏ vào
+ *   workspace (`![x](out/a.png)`) đọc qua Engine `fs.read_image` (jail) và hiện tại chỗ;
+ * - link http(s) đi qua `openExternal` (main kiểm lại); link tới file trong workspace mở như
+ *   chip đường dẫn; link khác chỉ hiện chữ.
  * Copy Message vẫn lấy chuỗi gốc `ai.text`, không lấy từ DOM.
  */
-export function MarkdownMessage(props: { text: string; onOpenFile?: (path: string) => void }) {
-  const { onOpenFile } = props;
+export function MarkdownMessage(props: {
+  text: string;
+  onOpenFile?: (path: string) => void;
+  /** Đường dẫn workspace: cần để hiện ảnh `![](path)` trong workspace. */
+  workspace?: string;
+  onOpenImage?: (images: string[], index: number) => void;
+  /** Câu trả lời còn đang stream: khối ```svg chưa xong hiện ô chờ thay vì mã. */
+  streaming?: boolean;
+  /** Nút "Chỉnh sửa" khi hover ảnh (hình SVG, ảnh workspace): mở trình đánh dấu. */
+  onEditImage?: (target: EditTarget) => void;
+}) {
+  const { onOpenFile, workspace, onOpenImage, streaming, onEditImage } = props;
   const components = useMemo<Components>(
     () => ({
       a({ href, children }) {
+        const ref = href && !isHttp(href) && onOpenFile ? parsePathRef(href.replace(/^\.\//, "")) : null;
+        if (ref && onOpenFile) {
+          return (
+            <button type="button" className="md-path md-link-file" title={`Mở ${ref.path}`} onClick={() => onOpenFile(ref.path)}>
+              {children}
+            </button>
+          );
+        }
         if (!href || !isHttp(href)) return <span>{children}</span>;
         return (
           <a
@@ -50,7 +66,9 @@ export function MarkdownMessage(props: { text: string; onOpenFile?: (path: strin
           </a>
         );
       },
-      img({ alt }) {
+      img({ alt, src }) {
+        const path = workspace ? workspaceImageSrc(src) : null;
+        if (path) return <WorkspaceImage workspace={workspace} path={path} alt={alt} onOpen={onOpenImage} onEdit={onEditImage} />;
         return <span className="md-img-blocked">{alt ? `[ảnh: ${alt}]` : "[ảnh bị chặn]"}</span>;
       },
       code({ className, children }) {
@@ -58,6 +76,9 @@ export function MarkdownMessage(props: { text: string; onOpenFile?: (path: strin
         const inline = !className && !text.includes("\n");
         if (!inline) {
           const lang = /language-([\w+#.-]+)/.exec(className ?? "")?.[1];
+          if (lang?.toLowerCase() === "svg") return (
+              <VisualBlock text={text} streaming={streaming} onOpenImage={onOpenImage} onEdit={onEditImage} />
+            );
           const parsed = looksLikeDiff(lang, text) ? parseUnifiedDiff(text) : null;
           if (parsed) {
             const ref = parsed.path ? parsePathRef(parsed.path) : null;
@@ -100,7 +121,7 @@ export function MarkdownMessage(props: { text: string; onOpenFile?: (path: strin
         );
       },
     }),
-    [onOpenFile],
+    [onOpenFile, workspace, onOpenImage, streaming, onEditImage],
   );
 
   return (

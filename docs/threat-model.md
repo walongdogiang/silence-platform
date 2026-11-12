@@ -3,6 +3,7 @@ description: Mô hình đe doạ cho local agent trên Windows — tài sản, t
 type: spec
 code:
   - crates/runtime/src/permissions.rs
+  - crates/runtime/src/risk/mod.rs
   - crates/runtime/src/bind_policy.rs
   - crates/runtime/src/redact.rs
   - crates/sandbox/src/lib.rs
@@ -24,12 +25,18 @@ Electron renderer is untrusted. Preload exposes a narrow RPC. Sidecar is trusted
 
 ## Threats and mitigations
 
-- **Prompt injection → RCE:** default permission `ask`; MCP không có shell mặc định; allowlist theo workspace.
+- **Prompt injection → RCE:** Risk Engine phân tầng mọi tool call ([security/permissions.md](security/permissions.md)): tải-về-rồi-chạy, lệnh mã hoá, xoá ngoài workspace, đổi hệ thống, gửi secrets và sửa policy file bị **chặn**; mạng, cài package, git huỷ thay đổi, secrets và lệnh không parse được thì **hỏi kèm giải thích**; lượt đã nhận output MCP/mạng (taint) thì shell tầng thấp cũng phải hỏi. Model không hạ được tầng; policy workspace chỉ được siết. MCP không có shell mặc định; allowlist theo workspace, nhớ theo mẫu lệnh (không nhớ cả tool `shell`). Bảng mã: [security/risk-catalog.md](security/risk-catalog.md).
 - **Sidecar bind nhầm LAN:** named pipe / 127.0.0.1 only.
 - **Secret leak lên model:** redaction regex (key, token, password, bearer) trước khi gửi.
+- **Log session chứa nội dung file/lệnh:** `sessions/<id>/events.jsonl` nằm trong data_dir của user, redact từng chuỗi trước khi ghi; id session phải là UUID (chặn `../`); không bind mạng, không tự upload.
 - **MCP độc:** không auto-trust; user bật từng server; timeout + stdout cap.
 - **Process treo / fork bomb:** timeout tool, Job Object kill-on-close, cwd jail.
-- **Path escape:** canonicalize + phải nằm trong workspace roots (trừ khi user allow).
-- **YOLO mode:** không mặc định; phải opt-in rõ.
+- **Path escape:** canonicalize + phải nằm trong workspace roots (trừ khi user allow). Shell: đường dẫn trong tham số lệnh ngoài workspace → hỏi (`FS_OUTSIDE_WS`); xoá đệ quy ngoài workspace → chặn (`FS_DELETE_SYSTEM`).
+- **Agent tự nới quyền:** ghi `.silence/permissions.json` / `.silence/policy.yaml` bằng tool hoặc shell bị chặn (`POLICY_TAMPER`); chỉ Engine ghi khi user bấm "nhớ".
+- **Ảnh (user dán, `view_image`, `fs.read_image`):** chỉ PNG/JPEG/GIF/WebP (SVG chỉ để xem trước ở UI), tối đa 5 MB, cùng jail workspace với `read`. Ảnh đi tới model như nội dung hội thoại: chữ trong ảnh có thể là prompt injection, nên mọi tool ghi vẫn qua `ask` + diff. Base64 ảnh không qua `redact` (secret trong ảnh chụp màn hình vẫn tới provider — user tự chịu khi dán). Renderer chặn ảnh từ xa trong Markdown (kênh rò rỉ), chỉ hiện ảnh workspace qua Engine; SVG chỉ render trong `<img>` (không chạy script).
+- **API key model:** nhập ở Settings → Model sources; main process lưu bằng Electron `safeStorage` (DPAPI) trong `userData/credentials.json`, đẩy vào Engine qua RPC loopback `providers.set_credential`. Renderer không gọi được RPC đó (main chặn) và không có IPC nào trả key về: chỉ `has_key` + 4 ký tự cuối. Engine giữ key trong RAM, `Debug` của params che key, lỗi provider đi qua `sanitize`. Key trong biến môi trường vẫn dùng được; key nhập ở Settings thắng biến môi trường.
+- **Nguồn Anthropic API:** code/ngữ cảnh gửi thẳng tới `api.anthropic.com` (không qua OpenRouter). Thinking block (kèm chữ ký) được lưu trong lịch sử session (`anthropic_content`) để gửi lại nguyên vẹn; bị lọc bỏ khi gửi sang nguồn OpenAI-compatible.
+- **Nguồn Claude CLI (thử nghiệm, nội bộ):** CLI chạy với `--tools ""` (tắt tool built-in), `--strict-mcp-config` (chỉ MCP `silence`), `--permission-mode dontAsk`, không bao giờ `bypassPermissions`. MCP `silence` là chính Engine: `silence-engine mcp-bridge` nối stdio của CLI tới listener loopback mở riêng cho lượt đó, dòng đầu phải là token ngẫu nhiên một lượt; mọi `tools/call` qua `dispatch_tool` nên Risk Engine, hỏi quyền, diff và audit giữ nguyên. Không phát hành cho khách đăng nhập bằng tài khoản claude.ai. Settings đọc `claude auth status --json` (không gọi model) để hiện email, gói, cách đăng nhập, hạn đăng nhập; thông tin chỉ hiện trên máy, không ghi log, không gửi đi; đăng nhập bằng gói claude.ai thì thẻ hiện cảnh báo chỉ dùng cá nhân / nội bộ.
+- **YOLO mode:** không có trong sản phẩm. RPC `session.create` từ chối `yolo`; chỉ `eval_runner` nội bộ dùng. Mặc định là **Cân bằng** (tự chạy tầng 0–1 có hiển thị và audit, không bao giờ im lặng). Tầng 3 bị chặn ở mọi mode, kể cả YOLO của eval.
 
 Control plane / SSO không nằm trong MVP local — không mở attack surface mạng năm 1.

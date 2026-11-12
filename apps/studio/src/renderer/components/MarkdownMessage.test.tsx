@@ -73,6 +73,83 @@ describe("MarkdownMessage render", () => {
     expect(out).toContain("[ảnh: logo]");
   });
 
+  it("ảnh trỏ vào workspace hiện qua Engine; ảnh từ xa vẫn chặn khi có workspace", () => {
+    const ws = (text: string) =>
+      renderToStaticMarkup(<MarkdownMessage text={text} workspace="D:/ws" onOpenImage={() => {}} />);
+    // SSR không chạy effect: thấy placeholder đang tải, chưa có <img>, không lộ URL lạ.
+    expect(ws("![mèo](out/cat.png)")).toContain("đang tải ảnh out/cat.png");
+    expect(ws("![x](../secret.png)")).toContain("[ảnh: x]");
+    const remote = ws("![logo](https://evil.example/p.png)");
+    expect(remote).not.toContain("<img");
+    expect(remote).toContain("[ảnh: logo]");
+  });
+
+  it("khối ```svg đủ thành hình (img data URL), đang stream thì còn là mã", () => {
+    const done = html(
+      '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="5" height="5"/></svg>\n```',
+    );
+    expect(done).toContain('class="visual-card"');
+    expect(done).toContain('src="data:image/svg+xml;charset=utf-8,%3Csvg');
+    // SVG của model chỉ nằm trong data URL của <img>, không chèn thẳng vào DOM.
+    expect(done).not.toContain('<rect width="5"');
+    // Đã xong mà SVG cụt: hiện mã.
+    const cut = html('```svg\n<svg viewBox="0 0 10 10"><rect');
+    expect(cut).not.toContain("visual-card");
+    expect(cut).toContain("code-card");
+  });
+
+  it("khối ```svg đang stream hiện ô chờ Đang vẽ, không đổ mã", () => {
+    const live = renderToStaticMarkup(
+      <MarkdownMessage text={'```svg\n<svg viewBox="0 0 10 10"><rect'} streaming />,
+    );
+    expect(live).toContain("visual-pending");
+    expect(live).toContain("Đang vẽ…");
+    expect(live).not.toContain("&lt;rect");
+  });
+
+  it("ô chờ đúng tỉ lệ viewBox; tranh nền kín tràn mép, sơ đồ giữ lề; nút Chỉnh khi có onEditVisual", () => {
+    const live = renderToStaticMarkup(
+      <MarkdownMessage text={'```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><rect'} streaming />,
+    );
+    expect(live).toContain("aspect-ratio:800 / 600");
+    expect(live).toContain("width:min(100%, 533px)");
+
+    const scene =
+      '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><title>Mèo</title><defs><linearGradient id="g"/></defs><rect width="800" height="600" rx="12" fill="url(#g)"/><circle r="5"/></svg>\n```';
+    const diagram =
+      '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><rect x="20" y="20" width="120" height="40" rx="8" fill="#456"/></svg>\n```';
+    expect(html(scene)).toContain('class="visual-card bleed"');
+    expect(html(diagram)).not.toContain("bleed");
+
+    // Hover: Tải + Copy luôn có; Chỉnh sửa chỉ khi có onEditImage. Header không còn nút "Chỉnh".
+    const edit = renderToStaticMarkup(<MarkdownMessage text={scene} onEditImage={() => {}} />);
+    expect(edit).toContain('aria-label="Tải ảnh"');
+    expect(edit).toContain('aria-label="Copy as image"');
+    // Nút Copy chỉ icon: hai icon (Copy, ✓) xếp chồng để chuyển mượt khi copy xong.
+    expect(edit).toContain("img-frame-swap");
+    expect(edit).not.toContain("Copied</span>");
+    expect(edit).toContain('aria-label="Chỉnh sửa hình ảnh"');
+    expect(edit.split('class="code-card-head"')[1].split("visual-body")[0]).not.toContain("Chỉnh");
+    const plain = html(scene);
+    expect(plain).toContain('aria-label="Tải ảnh"');
+    expect(plain).not.toContain("Chỉnh sửa");
+  });
+
+  it("<title> của SVG làm alt và tiêu đề card", () => {
+    const done = html(
+      '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>Mèo &amp; công viên</title><rect/></svg>\n```',
+    );
+    expect(done).toContain('alt="Mèo &amp; công viên"');
+    const plain = html('```svg\n<svg viewBox="0 0 10 10"><rect/></svg>\n```');
+    expect(plain).toContain('alt="Hình minh hoạ"');
+  });
+
+  it("link tương đối tới file workspace thành chip mở file", () => {
+    expect(html("[cat_in_park.png](cat_in_park.png)", () => {})).toContain("md-link-file");
+    expect(html("[x](../etc/passwd.txt)", () => {})).not.toContain("md-link-file");
+    expect(html("[cat_in_park.png](cat_in_park.png)")).not.toContain("md-link-file");
+  });
+
   it("inline `path:line` thành chip chỉ khi có onOpenFile", () => {
     expect(html("xem `calculator.py:4`", () => {})).toContain('class="md-path"');
     expect(html("xem `calculator.py:4`")).toContain('<code class="md-inline">calculator.py:4</code>');

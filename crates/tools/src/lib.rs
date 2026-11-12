@@ -7,6 +7,9 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
+pub mod image;
+pub use image::{read_image, ImageFile};
+
 /// Hard cap on any tool output handed back to the model (bytes). Longer output is cut with a note.
 pub const MAX_OUTPUT_BYTES: usize = 30_000;
 /// `read` without `limit` returns at most this many lines.

@@ -7,7 +7,11 @@ Studio Electron + React/TypeScript (`apps/studio`). Lõi harness Rust (`silence-
 ## Yêu cầu
 
 - Windows 10+, Node 20+, Rust stable (MSVC), Python 3.11 (fixture evals)
-- Endpoint OpenAI-compatible: `SILENCE_API_BASE`, `SILENCE_API_KEY`
+- Ít nhất một nguồn model (nhập key ở Settings → Model sources, lưu mã hoá trên máy; chọn nguồn đang dùng ở dòng Source trong menu model):
+  - **OpenRouter** / endpoint OpenAI-compatible: `SILENCE_API_BASE`, `SILENCE_API_KEY`
+  - **Anthropic API** trực tiếp: `ANTHROPIC_API_KEY` (tuỳ chọn `ANTHROPIC_BASE_URL`)
+  - **Claude CLI** (thử nghiệm, chỉ dùng cá nhân / nội bộ): lệnh `claude` đã đăng nhập; đổi đường dẫn bằng `SILENCE_CLAUDE_CLI`. Model `@cli` chỉ chạy khi chọn tường minh; tool vẫn chạy trong Engine qua MCP bridge.
+- Effort (Low → Max) chọn trong menu model của Composer; Chưa chọn mức nào thì Engine gửi mức Recommended của model (Medium cho mọi model Claude).
 
 ## Chạy
 
@@ -19,6 +23,25 @@ npm run studio
 ```
 
 `npm run studio` tự build Engine trước (`prestudio` → `npm run build:engine`), nên Studio luôn chạy bản Engine khớp code. Đóng Studio trước khi chạy lại, vì Engine đang chạy giữ khóa file `silence-engine.exe` và build sẽ báo "Access is denied".
+
+### Live watch
+
+```powershell
+npm run studio:watch
+```
+
+- Sửa renderer (React/CSS): HMR như `npm run studio`. Sửa `apps/studio/src/main` hoặc `preload`: không tự nạp, Ctrl+C rồi chạy lại.
+- Sửa `crates/**`, `Cargo.toml`/`Cargo.lock`: `scripts/studio-watch.mjs` build lại Engine, xong thì Studio khởi động lại Engine (không đóng cửa sổ). Session đang chạy bị cắt; lượt gửi sau tự tạo session mới, lịch sử chat giữ nguyên. Build lỗi thì Engine cũ vẫn chạy.
+- Sửa `config/*.yaml`: chỉ khởi động lại Engine.
+- Watch mode chạy bản copy `target/debug/silence-engine.live.exe`, nên cargo ghi đè được exe gốc trong lúc app đang mở.
+
+Lệnh tắt `run studio watch` (gõ ở thư mục nào cũng được): thêm dòng sau vào `$PROFILE` (`notepad $PROFILE`):
+
+```powershell
+. "<thư mục repo>\scripts\silence.ps1"
+```
+
+`run a b c` = `npm run a:b:c` ở gốc repo, ví dụ `run studio`, `run runtime`.
 
 `scripts/cargo-msvc.bat` bọc MSVC + Windows SDK (máy này thiếu `ucrt.lib` x64). Khi SDK đầy đủ, dùng `cargo` bình thường.
 

@@ -105,6 +105,8 @@ export function ChatHistoryPanel(props: {
   workspace: string;
   threads: ChatThread[];
   activeId: string;
+  /** Trạng thái lượt của thread đang mở: chấm nhấp nháy (running) hoặc copper (waiting = chờ duyệt quyền). */
+  runState?: "running" | "waiting";
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -113,6 +115,16 @@ export function ChatHistoryPanel(props: {
   onToggle: () => void;
 }) {
   const [q, setQ] = useState("");
+  const dotClass = (id: string) => {
+    if (id !== props.activeId) return "history-dot";
+    return props.runState ? `history-dot on ${props.runState}` : "history-dot on";
+  };
+  const dotTitle = (id: string) =>
+    id === props.activeId && props.runState
+      ? props.runState === "waiting"
+        ? "Đang chờ bạn duyệt"
+        : "Đang chạy"
+      : undefined;
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState("");
 
@@ -269,7 +281,7 @@ export function ChatHistoryPanel(props: {
                     onClick={() => props.onSelect(t.id)}
                     onDoubleClick={() => startRename(t)}
                   >
-                    <span className={`history-dot ${t.id === props.activeId ? "on" : ""}`} />
+                    <span className={dotClass(t.id)} title={dotTitle(t.id)} />
                     <strong>{t.title}</strong>
                     <em>{relativeTime(t.updatedAt, now)}</em>
                   </button>

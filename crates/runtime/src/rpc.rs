@@ -81,6 +81,8 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
     match req.method.as_str() {
         "ping" => Ok(json!({"ok": true, "protocol": silence_protocol::PROTOCOL_VERSION})),
         "session.create" => session_create(state.clone(), writer.clone(), req.params).await,
+        "session.list" => Ok(json!({"sessions": state.ctx.store.list()?})),
+        "session.resume" => session_resume(state.clone(), writer.clone(), req.params).await,
         "session.prompt" => {
             let p: PromptParams = serde_json::from_value(req.params)?;
             let text = match p.context.as_deref().map(str::trim) {
@@ -91,7 +93,8 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
                 ),
                 _ => p.text,
             };
-            agent::prompt(state.ctx.clone(), p.session_id, text).await?;
+            crate::images::validate(&p.images)?;
+            agent::prompt_with_images(state.ctx.clone(), p.session_id, text, p.images).await?;
             Ok(json!({"ok": true}))
         }
         "permissions.list" => {
@@ -118,6 +121,16 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             agent::set_model(&state.ctx, sid, model).await?;
             Ok(json!({"ok": true}))
         }
+        "session.set_effort" => {
+            let p: silence_protocol::SetEffortParams = serde_json::from_value(req.params)?;
+            agent::set_effort(&state.ctx, &p.session_id, &p.effort).await?;
+            Ok(json!({"ok": true}))
+        }
+        "session.set_permission" => {
+            let p: silence_protocol::SetPermissionParams = serde_json::from_value(req.params)?;
+            agent::set_permission(&state.ctx, &p.session_id, p.permission).await?;
+            Ok(json!({"ok": true}))
+        }
         "session.abort" => {
             let sid = req
                 .params
@@ -129,12 +142,12 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         }
         "session.permission" => {
             let p: PermissionDecision = serde_json::from_value(req.params)?;
-            agent::decide_permission(
+            agent::decide_permission_scoped(
                 &state.ctx,
                 &p.session_id,
                 &p.request_id,
                 p.allow,
-                p.remember,
+                p.effective_scope(),
             )
             .await?;
             Ok(json!({"ok": true}))
@@ -162,7 +175,26 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
                     .await?;
             Ok(json!({"title": title}))
         }
-        "models.list" => Ok(json!({"models": state.ctx.catalog.infos(), "default": "auto"})),
+        "models.list" => Ok(json!({
+            "models": crate::providers::model_infos(&state.ctx.catalog).await,
+            "default": "auto",
+            "preferred": state.ctx.catalog.preferred(),
+        })),
+        "providers.status" => Ok(crate::providers::status(&state.ctx.catalog).await),
+        "providers.cli_info" => Ok(serde_json::to_value(
+            crate::providers::cli_info(&state.ctx.catalog, &state.ctx.audit).await?,
+        )?),
+        // Studio main process only (the renderer path is blocked in main). Never echoes the key.
+        "providers.set_credential" => {
+            let p: silence_protocol::SetCredentialParams = serde_json::from_value(req.params)?;
+            state.ctx.catalog.set_credential(&p.provider, p.key.trim())?;
+            Ok(json!({"ok": true}))
+        }
+        "providers.set_preferred" => {
+            let p: silence_protocol::SetPreferredParams = serde_json::from_value(req.params)?;
+            state.ctx.catalog.set_preferred(&p.provider)?;
+            Ok(json!({"ok": true}))
+        }
         "fs.tree" => {
             let p: FsTreeParams = serde_json::from_value(req.params)?;
             let ws = Workspace::new(&p.workspace)?;
@@ -174,6 +206,17 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             let ws = Workspace::new(&p.workspace)?;
             let text = silence_tools::read_raw(&ws, &p.path).await?;
             Ok(json!({"text": text}))
+        }
+        "fs.read_image" => {
+            let p: FsReadParams = serde_json::from_value(req.params)?;
+            let ws = Workspace::new(&p.workspace)?;
+            let img = silence_tools::read_image(&ws, &p.path)?;
+            Ok(serde_json::to_value(silence_protocol::FsReadImageResult {
+                path: img.path,
+                mime: img.mime.to_string(),
+                bytes: img.bytes,
+                data_url: img.data_url,
+            })?)
         }
         "diff.apply" => {
             let p: DiffApplyParams = serde_json::from_value(req.params)?;
@@ -232,10 +275,44 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
 
 async fn session_create(state: Arc<RpcState>, writer: SharedWriter, params: Value) -> Result<Value> {
     let p: SessionCreateParams = serde_json::from_value(params)?;
+    client_permission_allowed(p.permission)?;
     let id = agent::create_session(&state.ctx, &p.workspace, p.model, p.mode, p.permission).await?;
+    if let Some(effort) = p.effort.as_deref() {
+        agent::set_effort(&state.ctx, &id, effort).await?;
+    }
     let rx = agent::subscribe(&state.ctx, &id).await;
     pump_events(writer, id.clone(), rx);
     Ok(json!({"session_id": id}))
+}
+
+/// RPC clients may never open a YOLO session: it skips every permission check.
+/// Only the in-process eval runner creates one (docs/security/permissions.md).
+fn client_permission_allowed(mode: silence_protocol::PermissionMode) -> Result<()> {
+    if mode == silence_protocol::PermissionMode::Yolo {
+        anyhow::bail!("permission mode `yolo` is not allowed over RPC");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod permission_mode_tests {
+    use super::client_permission_allowed;
+    use silence_protocol::PermissionMode;
+
+    #[test]
+    fn rpc_rejects_yolo_but_allows_others() {
+        assert!(client_permission_allowed(PermissionMode::Yolo).is_err());
+        assert!(client_permission_allowed(PermissionMode::Ask).is_ok());
+        assert!(client_permission_allowed(PermissionMode::Allowlist).is_ok());
+    }
+}
+
+async fn session_resume(state: Arc<RpcState>, writer: SharedWriter, params: Value) -> Result<Value> {
+    let p: silence_protocol::SessionResumeParams = serde_json::from_value(params)?;
+    let result = agent::resume_session(&state.ctx, &p.session_id).await?;
+    let rx = agent::subscribe(&state.ctx, &p.session_id).await;
+    pump_events(writer, p.session_id, rx);
+    Ok(serde_json::to_value(result)?)
 }
 
 fn pump_events(
@@ -314,7 +391,7 @@ mod tests {
         }))
         .unwrap();
         let ctx = Arc::new(AppCtx::new(
-            Catalog { raw },
+            Catalog::from_raw(raw),
             AuditLog::open(data.path()).unwrap(),
         ));
         let state = Arc::new(RpcState::new(ctx));

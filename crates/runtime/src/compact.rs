@@ -8,7 +8,7 @@ pub fn estimate_tokens(text: &str) -> usize {
 pub fn messages_tokens(messages: &[Value]) -> usize {
     messages
         .iter()
-        .map(|m| estimate_tokens(&m.to_string()))
+        .map(crate::images::message_tokens)
         .sum()
 }
 
@@ -29,10 +29,12 @@ fn role(m: &Value) -> &str {
 /// 2. nếu vẫn vượt, bỏ dần các lượt cũ nhất theo đơn vị nguyên vẹn
 ///    (assistant có `tool_calls` cùng các message `tool` trả lời nó), không bao giờ bỏ `system`,
 ///    message `user` đầu tiên (đề bài) hay phần đuôi.
-pub fn compact_if_needed(messages: &mut Vec<Value>, context_window: u32) {
+///
+/// Trả `true` nếu đã chạm vào lịch sử (để ghi snapshot vào event log).
+pub fn compact_if_needed(messages: &mut Vec<Value>, context_window: u32) -> bool {
     let budget = (context_window as usize * 70) / 100;
     if messages_tokens(messages) < budget {
-        return;
+        return false;
     }
 
     ensure_note(messages);
@@ -42,6 +44,7 @@ pub fn compact_if_needed(messages: &mut Vec<Value>, context_window: u32) {
     if messages_tokens(messages) >= budget {
         drop_oldest_turns(messages, budget);
     }
+    true
 }
 
 fn ensure_note(messages: &mut Vec<Value>) {
@@ -175,7 +178,7 @@ fn drop_oldest_turns(messages: &mut Vec<Value>, budget: usize) {
         }
         for k in start..end {
             drop[k] = true;
-            total -= estimate_tokens(&messages[k].to_string());
+            total -= crate::images::message_tokens(&messages[k]);
         }
     }
     let mut k = 0;

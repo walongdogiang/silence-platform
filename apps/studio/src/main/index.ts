@@ -1,10 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, safeStorage, shell } from "electron";
+import { permissionNotice, shouldNotify } from "./notify";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
+import { CredentialStore, MAIN_ONLY_RPC, cleanKey, isKeyedProvider } from "./credentials";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
+import { isPngBytes } from "./clipboardImage";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../");
@@ -15,6 +18,35 @@ let sock: net.Socket | null = null;
 let rpcBuf = "";
 let nextId = 1;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+/** Created after `app.whenReady` (userData + safeStorage need the app ready). */
+let credentials: CredentialStore | null = null;
+
+function openCredentials(): CredentialStore {
+  const file = path.join(app.getPath("userData"), "credentials.json");
+  return new CredentialStore(
+    {
+      read: () => (existsSync(file) ? readFileSync(file, "utf8") : null),
+      write: (text) => writeFileSync(file, text, { encoding: "utf8", mode: 0o600 }),
+    },
+    {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (s) => safeStorage.encryptString(s).toString("base64"),
+      decrypt: (s) => safeStorage.decryptString(Buffer.from(s, "base64")),
+    },
+  );
+}
+
+/** Push stored keys into the Engine (after every spawn/restart). Failures only log. */
+async function pushCredentials() {
+  if (!credentials) return;
+  for (const { provider, key } of credentials.all()) {
+    try {
+      await rpc("providers.set_credential", { provider, key });
+    } catch (err) {
+      console.warn(`[credentials] ${provider}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
 
 function runtimeBin(): string {
   if (process.env.SILENCE_ENGINE) return process.env.SILENCE_ENGINE;
@@ -59,6 +91,10 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  // Cửa sổ đã hủy thì bỏ tham chiếu, để không ai gửi IPC vào webContents đã chết.
+  win.on("closed", () => {
+    win = null;
+  });
   // Link trong câu trả lời của model không được thay giao diện app hay mở cửa sổ mới:
   // chặn mọi điều hướng, chỉ http(s) mới ra trình duyệt ngoài.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -84,9 +120,36 @@ function createWindow() {
   }
 }
 
+/** Lý do lần gần nhất Engine không chạy được; gắn vào lỗi rpc để UI thấy nguyên nhân thật. */
+let engineError = "";
+
 function sendLine(obj: unknown) {
-  if (!sock) throw new Error("Engine chưa kết nối — đóng app, chạy lại npm run studio");
+  if (!sock) {
+    const why = engineError ? `: ${engineError}` : "";
+    const hint = engineWatch ? "sửa lỗi rồi lưu file để studio:watch build lại" : "đóng app, chạy lại npm run studio";
+    throw new Error(`Engine chưa kết nối${why} — ${hint}`);
+  }
   sock.write(`${JSON.stringify(obj)}\n`);
+}
+
+/** webContents còn sống (cửa sổ chưa đóng/hủy), hoặc null. */
+function liveContents() {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return null;
+  return win.webContents;
+}
+
+/** Gửi sự kiện lên renderer; bỏ qua nếu cửa sổ đã đóng (vd. lúc tắt app). */
+function sendToRenderer(payload: unknown) {
+  liveContents()?.send("silence-event", payload);
+}
+
+/** Báo lỗi Engine lên chat, kể cả khi trang đã tải xong (did-finish-load không bắn lại). */
+function reportEngineError(message: string) {
+  const send = () => sendToRenderer({ event: { type: "error", message: `Sidecar: ${message}` } });
+  const wc = liveContents();
+  if (!wc) return;
+  if (wc.isLoading()) wc.once("did-finish-load", send);
+  else send();
 }
 
 function rpc(method: string, params?: unknown): Promise<unknown> {
@@ -125,7 +188,7 @@ function onData(chunk: Buffer) {
         params?: unknown;
       };
       if (msg.method === "session.event") {
-        win?.webContents.send("silence-event", msg.params);
+        sendToRenderer(msg.params);
         continue;
       }
       if (msg.id != null && pending.has(msg.id)) {
@@ -140,13 +203,42 @@ function onData(chunk: Buffer) {
   }
 }
 
+/* `npm run studio:watch` (scripts/studio-watch.mjs) đặt biến này. */
+const engineWatch = process.env.SILENCE_ENGINE_WATCH === "1";
+
+/** Watch mode chạy bản copy để cargo vẫn ghi đè được exe gốc (Windows khoá exe đang chạy). */
+function liveBin(bin: string): string {
+  if (!engineWatch) return bin;
+  const ext = path.extname(bin);
+  const stem = path.join(path.dirname(bin), `${path.basename(bin, ext)}.live`);
+  try {
+    copyFileSync(bin, `${stem}${ext}`);
+    return `${stem}${ext}`;
+  } catch {
+    // Bản live cũ còn bị khoá (Engine cũ chưa thoát hẳn, antivirus đang quét): dùng tên khác.
+    const alt = `${stem}-${Date.now()}${ext}`;
+    copyFileSync(bin, alt);
+    return alt;
+  }
+}
+
 async function startRuntime(): Promise<void> {
+  try {
+    await spawnRuntime();
+    engineError = "";
+  } catch (err) {
+    engineError = err instanceof Error ? err.message : String(err);
+    throw err;
+  }
+}
+
+async function spawnRuntime(): Promise<void> {
   const bin = runtimeBin();
   if (!existsSync(bin)) {
     throw new Error(`Không thấy ${bin}. Chạy: .\\scripts\\cargo-msvc.bat build -p silence-engine`);
   }
-  child = spawn(
-    bin,
+  const proc = spawn(
+    liveBin(bin),
     ["serve", "--tcp", "127.0.0.1:0", "--config", path.join(repoRoot, "config/models.yaml")],
     {
       cwd: repoRoot,
@@ -155,25 +247,102 @@ async function startRuntime(): Promise<void> {
       env: process.env,
     },
   );
+  child = proc;
   let ready = "";
+  let connected = false;
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`runtime start timeout: ${ready}`)), 20_000);
-    child!.stderr!.on("data", (d: Buffer) => {
+    const fail = (err: Error) => {
+      clearTimeout(timer);
+      reject(err);
+    };
+    const timer = setTimeout(() => fail(new Error(`Engine không báo cổng sau 20s: ${ready.trim()}`)), 20_000);
+    proc.on("error", (err) => fail(new Error(`không chạy được ${proc.spawnfile}: ${err.message}`)));
+    proc.stderr!.on("data", (d: Buffer) => {
       const s = d.toString("utf8");
-      ready += s;
       process.stderr.write(s);
+      if (connected) return;
+      ready += s;
       const m = ready.match(/tcp=([^\s]+)/);
       if (m) {
         clearTimeout(timer);
-        connect(m[1]).then(resolve).catch(reject);
+        connect(m[1])
+          .then(() => {
+            connected = true;
+            resolve();
+          })
+          .catch(reject);
       }
     });
-    child!.on("exit", (code) => {
-      if (!sock) {
-        clearTimeout(timer);
-        reject(new Error(`runtime exited ${code}: ${ready}`));
+    proc.on("exit", (code) => {
+      if (!connected) {
+        fail(new Error(`Engine thoát (code ${code}) trước khi kết nối: ${ready.trim().slice(-800)}`));
+        return;
       }
+      // Engine chết sau khi đã chạy (không phải do stopRuntime): báo lên UI thay vì im lặng.
+      if (child !== proc) return;
+      child = null;
+      sock?.destroy();
+      sock = null;
+      for (const p of pending.values()) p.reject(new Error(`Engine đã thoát (code ${code})`));
+      pending.clear();
+      engineError = `Engine đã thoát (code ${code})`;
+      console.error(`[engine] exited with code ${code}`);
+      reportEngineError(engineError);
     });
+  });
+  await pushCredentials();
+}
+
+function stopRuntime(): Promise<void> {
+  for (const p of pending.values()) p.reject(new Error("Engine đang khởi động lại"));
+  pending.clear();
+  sock?.destroy();
+  sock = null;
+  rpcBuf = "";
+  const old = child;
+  child = null;
+  if (!old || old.exitCode != null) return Promise.resolve();
+  return new Promise((resolve) => {
+    old.once("exit", () => resolve());
+    old.kill();
+  });
+}
+
+let restarting = false;
+let restartAgain = false;
+
+/** Khởi động lại Engine sau khi studio-watch build xong. Renderer tự tạo session mới khi gặp `unknown session`. */
+async function restartRuntime(): Promise<void> {
+  if (restarting) {
+    restartAgain = true;
+    return;
+  }
+  restarting = true;
+  try {
+    do {
+      restartAgain = false;
+      // Log ASCII: stdout của Electron qua pipe bị lỗi font tiếng Việt trên console Windows.
+      console.log("[studio:watch] engine rebuilt, restarting...");
+      await stopRuntime();
+      try {
+        await startRuntime();
+        console.log("[studio:watch] engine restarted.");
+      } catch (err) {
+        console.error("[studio:watch] engine restart failed:", err);
+        reportEngineError(err instanceof Error ? err.message : String(err));
+      }
+    } while (restartAgain);
+  } finally {
+    restarting = false;
+  }
+}
+
+function watchEngineBuild() {
+  if (!engineWatch) return;
+  const stamp = process.env.SILENCE_ENGINE_STAMP;
+  if (!stamp) return;
+  watchFile(stamp, { interval: 500 }, (cur, prev) => {
+    if (cur.mtimeMs > 0 && cur.mtimeMs !== prev.mtimeMs) void restartRuntime();
   });
 }
 
@@ -197,11 +366,46 @@ app.whenReady().then(async () => {
     else win.maximize();
   });
   ipcMain.handle("win-close", () => win?.close());
-  ipcMain.handle("silence-rpc", (_e, method: string, params?: unknown) => rpc(method, params));
+  credentials = openCredentials();
+  ipcMain.handle("silence-rpc", (_e, method: string, params?: unknown) => {
+    // Secret-carrying methods go through `silence-credentials-*` only.
+    if (MAIN_ONLY_RPC.has(method)) return Promise.reject(new Error(`${method} is main-process only`));
+    return rpc(method, params);
+  });
+  // Keys: renderer → main → Engine. Never returned to the renderer (only has_key + last4).
+  ipcMain.handle("silence-credentials-status", () => credentials?.status() ?? []);
+  ipcMain.handle("silence-credentials-set", async (_e, provider: unknown, key: unknown) => {
+    if (!credentials || !isKeyedProvider(provider)) throw new Error("Invalid provider");
+    const clean = cleanKey(key);
+    credentials.set(provider, clean);
+    await rpc("providers.set_credential", { provider, key: clean }).catch(() => undefined);
+    return credentials.status();
+  });
   // Renderer không đáng tin để tự kiểm URL: main kiểm lại trước khi mở.
   ipcMain.handle("silence-open-external", async (_e, url: unknown) => {
     if (typeof url !== "string" || !isSafeExternalUrl(url)) return false;
     await shell.openExternal(url);
+    return true;
+  });
+  // Copy ảnh: ghi clipboard từ main (không phụ thuộc quyền Clipboard API của trang). Chỉ nhận PNG.
+  ipcMain.handle("silence-copy-image", (_e, data: unknown) => {
+    if (!isPngBytes(data)) return false;
+    const img = nativeImage.createFromBuffer(Buffer.from(data));
+    if (img.isEmpty()) return false;
+    clipboard.writeImage(img);
+    return true;
+  });
+  // Thông báo "cần bạn duyệt" khi cửa sổ không ở phía trước. Chỉ nhận lý do (chuỗi ngắn), không nhận lệnh.
+  ipcMain.handle("silence-notify-permission", (_e, reason: unknown) => {
+    if (!Notification.isSupported() || !shouldNotify(win)) return false;
+    const n = new Notification(permissionNotice(reason));
+    n.on("click", () => {
+      if (!win) return;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    });
+    n.show();
     return true;
   });
   ipcMain.handle("silence-pick-folder", async () => {
@@ -214,17 +418,19 @@ app.whenReady().then(async () => {
     await startRuntime();
   } catch (err) {
     console.error(err);
-    const message = err instanceof Error ? err.message : String(err);
-    win?.webContents.once("did-finish-load", () => {
-      win?.webContents.send("silence-event", {
-        event: { type: "error", message: `Sidecar: ${message}` },
-      });
-    });
+    reportEngineError(err instanceof Error ? err.message : String(err));
   }
+  watchEngineBuild();
 });
 
 app.on("window-all-closed", () => {
-  child?.kill();
+  const stamp = process.env.SILENCE_ENGINE_STAMP;
+  if (stamp) unwatchFile(stamp);
+  // Tắt chủ động: bỏ `child` trước khi kill để handler `exit` không coi là Engine chết bất thường.
+  const old = child;
+  child = null;
   sock?.destroy();
+  sock = null;
+  old?.kill();
   app.quit();
 });

@@ -6,15 +6,48 @@ use serde_json::{json, Value};
 use silence_router::{Catalog, ModelEntry};
 use std::time::Duration;
 
+pub mod anthropic;
+
+/// `Provider.kind` values the gateway speaks.
+pub const KIND_OPENAI: &str = "openai_compat";
+pub const KIND_ANTHROPIC: &str = "anthropic";
+pub const KIND_CLAUDE_CLI: &str = "claude_cli";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatResult {
     pub content: String,
     /// Chuỗi suy nghĩ / reasoning stream (nếu provider gửi).
     pub reasoning: String,
     pub tool_calls: Vec<ToolCall>,
+    /// Whole prompt size, cached tokens included (measures the context).
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Part of `input_tokens` served from the prompt cache (Anthropic).
+    #[serde(default)]
+    pub cache_read_tokens: u32,
+    /// Part of `input_tokens` written to the prompt cache (Anthropic).
+    #[serde(default)]
+    pub cache_write_tokens: u32,
     pub finish_reason: String,
+    /// Provider-native content blocks of this assistant turn, to replay verbatim
+    /// (Anthropic thinking + signature). Stored on the message under
+    /// `anthropic::RAW_BLOCKS_KEY`.
+    #[serde(default)]
+    pub raw_blocks: Option<Value>,
+}
+
+impl ChatResult {
+    /// The assistant history message for this turn (OpenAI shape + raw blocks when present).
+    pub fn assistant_message(&self, tool_calls: Option<Vec<Value>>) -> Value {
+        let mut m = json!({"role": "assistant", "content": self.content});
+        if let Some(tc) = tool_calls {
+            m["tool_calls"] = Value::Array(tc);
+        }
+        if let Some(raw) = &self.raw_blocks {
+            m[anthropic::RAW_BLOCKS_KEY] = raw.clone();
+        }
+        m
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,18 +57,20 @@ pub struct ToolCall {
     pub arguments: String,
 }
 
+/// `effort`: the session preference (`auto`, `low` … `max`); mapped per model and provider.
 pub async fn chat(
     catalog: &Catalog,
     model_id: &str,
     messages: &[Value],
     tools: &Value,
+    effort: &str,
     on_token: impl FnMut(&str),
     on_thinking: impl FnMut(&str),
 ) -> Result<ChatResult> {
-    chat_inner(catalog, model_id, messages, tools, None, on_token, on_thinking).await
+    chat_inner(catalog, model_id, messages, tools, None, effort, on_token, on_thinking).await
 }
 
-/// Một lượt ngắn không tools, giới hạn `max_tokens` (vd sinh tiêu đề chat).
+/// Một lượt ngắn không tools, giới hạn `max_tokens` (vd sinh tiêu đề chat). Effort `low`.
 pub async fn chat_short(
     catalog: &Catalog,
     model_id: &str,
@@ -48,37 +83,94 @@ pub async fn chat_short(
         messages,
         &Value::Null,
         Some(max_tokens),
+        "low",
         |_| {},
         |_| {},
     )
     .await
 }
 
+/// OpenAI-compatible `reasoning.effort`. OpenRouter accepts every level we offer
+/// (`low` … `xhigh`, `max`); for Claude it turns the level into a thinking budget.
+fn openai_reasoning_effort(effort: &str) -> &str {
+    effort
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn chat_inner(
     catalog: &Catalog,
     model_id: &str,
     messages: &[Value],
     tools: &Value,
     max_tokens: Option<u32>,
+    effort: &str,
     mut on_token: impl FnMut(&str),
     mut on_thinking: impl FnMut(&str),
 ) -> Result<ChatResult> {
     let model = catalog.resolve(model_id)?;
     let provider = catalog.provider_for(&model)?;
     let key = catalog.api_key(provider);
+    // A catalog model without vision would reject image parts: send a text note instead.
+    // Ad-hoc `vendor/model` ids are not in the catalog and get the images as-is.
+    let stripped;
+    let messages = if catalog.model(model_id).is_ok_and(|m| !m.vision) {
+        stripped = crate::images::strip_images(messages);
+        stripped.as_slice()
+    } else {
+        messages
+    };
+    let effort = model.effective_effort(effort);
+    let max_tokens = max_tokens.unwrap_or_else(|| model.max_output_tokens.max(1024));
+    match provider.kind.as_str() {
+        KIND_ANTHROPIC => {
+            if key.is_empty() {
+                return Err(ProviderError::new(
+                    crate::provider_error::ErrorCode::ProviderAuth,
+                    "Anthropic API key is not set",
+                )
+                .into());
+            }
+            return anthropic::chat(
+                provider, &key, &model, messages, tools, max_tokens, effort, on_token, on_thinking,
+            )
+            .await;
+        }
+        KIND_CLAUDE_CLI => {
+            return Err(anyhow::anyhow!(
+                "model {model_id} runs through the Claude CLI backend, not the HTTP gateway"
+            ));
+        }
+        _ => {}
+    }
     let url = format!(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')
     );
+    // Raw Anthropic blocks are only meaningful to that API; OpenAI-compatible endpoints may
+    // reject unknown message fields.
+    let messages: Vec<Value> = messages
+        .iter()
+        .map(|m| match m {
+            Value::Object(o) if o.contains_key(anthropic::RAW_BLOCKS_KEY) => {
+                let mut o = o.clone();
+                o.remove(anthropic::RAW_BLOCKS_KEY);
+                Value::Object(o)
+            }
+            other => other.clone(),
+        })
+        .collect();
     let mut body = json!({
         "model": expand_api_model(&model.api_model),
         "messages": messages,
         "stream": true,
         "stream_options": {"include_usage": true},
-        "max_tokens": max_tokens.unwrap_or_else(|| model.max_output_tokens.max(1024)),
+        "max_tokens": max_tokens,
     });
     if model.tools && tools.is_array() && !tools.as_array().unwrap().is_empty() {
         body["tools"] = tools.clone();
+    }
+    if let Some(e) = effort {
+        body["reasoning"] = json!({"effort": openai_reasoning_effort(&e)});
     }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(180))
@@ -267,6 +359,16 @@ pub fn cost_usd(model: &ModelEntry, input: u32, output: u32) -> f64 {
         + (output as f64 / 1_000_000.0) * model.output_cost_per_1m
 }
 
+/// Cost of one call with prompt-cache pricing: cache reads bill at 0.1× input,
+/// 5-minute cache writes at 1.25×, the rest at the full input rate.
+pub fn chat_cost_usd(model: &ModelEntry, r: &ChatResult) -> f64 {
+    let cached = r.cache_read_tokens + r.cache_write_tokens;
+    let plain = r.input_tokens.saturating_sub(cached) as f64;
+    let input = plain + r.cache_read_tokens as f64 * 0.1 + r.cache_write_tokens as f64 * 1.25;
+    (input / 1_000_000.0) * model.input_cost_per_1m
+        + (r.output_tokens as f64 / 1_000_000.0) * model.output_cost_per_1m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +398,54 @@ mod tests {
         assert_eq!(thinking, "Step one. ");
         assert_eq!(result.reasoning, "Step one. ");
         assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn cache_pricing() {
+        let model = ModelEntry {
+            id: "m".into(),
+            label: String::new(),
+            provider: "p".into(),
+            api_model: "m".into(),
+            tier: "mid".into(),
+            context_window: 1000,
+            max_output_tokens: 1000,
+            tools: true,
+            vision: false,
+            input_cost_per_1m: 10.0,
+            output_cost_per_1m: 0.0,
+            efforts: vec![],
+            default_effort: String::new(),
+            opt_in: false,
+        };
+        let r = ChatResult {
+            input_tokens: 1_000_000,
+            cache_read_tokens: 800_000,
+            cache_write_tokens: 100_000,
+            ..Default::default()
+        };
+        // 100k plain + 800k × 0.1 + 100k × 1.25 = 305k tokens at $10/M
+        assert!((chat_cost_usd(&model, &r) - 3.05).abs() < 1e-9);
+        let plain = ChatResult { input_tokens: 1_000_000, ..Default::default() };
+        assert!((chat_cost_usd(&model, &plain) - cost_usd(&model, 1_000_000, 0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn assistant_message_keeps_raw_blocks() {
+        let r = ChatResult {
+            content: "hi".into(),
+            raw_blocks: Some(json!([{"type": "text", "text": "hi"}])),
+            ..Default::default()
+        };
+        let m = r.assistant_message(None);
+        assert_eq!(m[anthropic::RAW_BLOCKS_KEY][0]["text"], "hi");
+        assert!(m.get("tool_calls").is_none());
+    }
+
+    #[test]
+    fn openai_effort_passes_every_level() {
+        for e in silence_protocol::EFFORT_LEVELS {
+            assert_eq!(openai_reasoning_effort(e), e);
+        }
     }
 }

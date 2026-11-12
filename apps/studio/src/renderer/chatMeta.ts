@@ -2,10 +2,86 @@
 
 export type CheckpointFile = { path: string; before: string; after: string };
 
+/** Khoảng dòng 1-based, `end = null` = tới hết file (chỉ có `offset`). */
+export type LineRange = [start: number, end: number | null];
+
 export type NarrateStep = {
   verb: string;
   detail?: string;
+  /** Bước đọc file: đường dẫn đầy đủ để gộp các lần Read liên tiếp cùng file. */
+  file?: string;
+  /** Khoảng dòng đã đọc; bỏ trống khi có `file` = đọc cả file. */
+  ranges?: LineRange[];
 };
+
+const READ_RE = /read|outline|cat|open|fs\.read|list|tree/;
+const READ_VERB = /^(Reading|Read)$/;
+
+/** Dòng `narrate` đã lưu → bước, giữ `file`/`ranges` để gộp Read. */
+export function narrateFromLine(l: { verb: string; detail?: string; file?: string; ranges?: LineRange[] }): NarrateStep {
+  const s: NarrateStep = { verb: l.verb, detail: l.detail };
+  if (l.file) s.file = l.file;
+  if (l.ranges) s.ranges = l.ranges;
+  return s;
+}
+
+/** `read{path, offset?, limit?}` → khoảng dòng; không offset/limit = cả file (undefined). */
+export function readRange(input: unknown): LineRange[] | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const o = input as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined);
+  const offset = num(o.offset);
+  const limit = num(o.limit);
+  if (offset == null && limit == null) return undefined;
+  const start = offset ?? 1;
+  return [[start, limit != null ? start + limit - 1 : null]];
+}
+
+/** Hợp các khoảng: sắp xếp, nối khoảng chồng hoặc liền kề. `undefined` (cả file) thắng tất cả. */
+export function mergeRanges(a: LineRange[] | undefined, b: LineRange[] | undefined): LineRange[] | undefined {
+  if (!a || !b) return undefined;
+  const all = [...a, ...b].sort((x, y) => x[0] - y[0]);
+  const out: LineRange[] = [];
+  for (const [s, e] of all) {
+    const last = out[out.length - 1];
+    if (last && (last[1] == null || s <= last[1] + 1)) {
+      last[1] = last[1] == null || e == null ? null : Math.max(last[1], e);
+    } else {
+      out.push([s, e]);
+    }
+  }
+  return out;
+}
+
+/** `1–40, 615–629, 990+`; quá 4 khoảng thì rút gọn `… +N`. */
+export function formatRanges(ranges: LineRange[]): string {
+  const parts = ranges.map(([s, e]) => (e == null ? `${s}+` : s === e ? `${s}` : `${s}–${e}`));
+  return parts.length > 4 ? `${parts.slice(0, 4).join(", ")}, … +${parts.length - 4}` : parts.join(", ");
+}
+
+function readDetail(file: string, ranges: LineRange[] | undefined): string {
+  const name = basenamePath(file);
+  return ranges?.length ? `${name} (${formatRanges(ranges)})` : name;
+}
+
+/**
+ * Gộp các bước Read liên tiếp cùng file thành một dòng (kiểu Claude Code):
+ * `Read App.tsx (1–40, 615–629)`. Chỉ gộp khi liền nhau; bước khác file/khác loại cắt nhóm.
+ * Bước live (Reading) gộp với Read trước đó và giữ động từ của bước sau cùng.
+ */
+export function mergeReadSteps(steps: NarrateStep[]): NarrateStep[] {
+  const out: NarrateStep[] = [];
+  for (const s of steps) {
+    const prev = out[out.length - 1];
+    if (prev?.file && s.file && prev.file === s.file && READ_VERB.test(prev.verb) && READ_VERB.test(s.verb)) {
+      const ranges = mergeRanges(prev.ranges, s.ranges);
+      out[out.length - 1] = { verb: s.verb, file: s.file, ranges, detail: readDetail(s.file, ranges) };
+    } else {
+      out.push(s);
+    }
+  }
+  return out;
+}
 
 export function basenamePath(path: string): string {
   const norm = path.replace(/\\/g, "/");
@@ -79,8 +155,10 @@ export function narrateToolLive(name: string, input: unknown): NarrateStep {
     if (query) return { verb: "Searching", detail: `\`${clip(query, 48)}\`` };
     return { verb: "Searching", detail: short ?? "codebase" };
   }
-  if (/read|outline|cat|open|fs\.read|list|tree/.test(n)) {
-    return { verb: "Reading", detail: short ?? "file" };
+  if (READ_RE.test(n)) {
+    if (!path) return { verb: "Reading", detail: "file" };
+    const ranges = readRange(input);
+    return { verb: "Reading", detail: readDetail(path, ranges), file: path, ...(ranges ? { ranges } : {}) };
   }
   if (/write|edit|apply|patch|str_replace|create/.test(n)) {
     return { verb: "Editing", detail: short ?? "file" };
@@ -119,11 +197,12 @@ export function narrateToPast(step: NarrateStep): NarrateStep {
     Testing: "Tested",
     Exploring: "Explored",
     "Writing plan": "Wrote plan",
+    Blocked: "Blocked",
     "Using tool": "Used tool",
     Using: "Used tool",
     Used: "Used tool",
   };
-  return { verb: map[step.verb] ?? step.verb, detail: step.detail };
+  return { ...step, verb: map[step.verb] ?? step.verb };
 }
 
 export function planningStep(): NarrateStep {

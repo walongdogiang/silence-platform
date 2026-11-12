@@ -16,6 +16,7 @@ Khi sửa giao diện: đọc file tương ứng dưới đây, rồi `.cursor/r
 | [chat.md](chat.md) | Hội thoại Cursor-like: Worked for, Thought brief, narration, checkpoint, Explored |
 | [composer.md](composer.md) | Ô nhập kiểu Cursor, mode, Auto, context usage |
 | [tokens.md](tokens.md) | Token màu, appearance, localStorage |
+| [status.md](status.md) | Chỉ báo phiên: run pulse, session rail, task list, background; lộ trình S0–S5 |
 
 **Ranh giới:** UI không gọi model. Mọi fs/shell/MCP qua `silence-engine` (JSON-RPC). Không bịa backend (mic, upload, automations = “chưa gắn”).
 

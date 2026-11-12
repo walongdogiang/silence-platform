@@ -32,6 +32,15 @@ struct Task {
     mode: Option<SessionMode>,
     #[serde(default)]
     verify_filter: Option<String>,
+    /// Model id for the session (default `auto`), e.g. `claude-sonnet@api` to exercise one source.
+    #[serde(default)]
+    model: Option<String>,
+    /// Session effort (`auto` default).
+    #[serde(default)]
+    effort: Option<String>,
+    /// Env vars the task needs (e.g. `ANTHROPIC_API_KEY`); the task is skipped when one is unset.
+    #[serde(default)]
+    requires_env: Vec<String>,
     pass_if: PassIf,
 }
 
@@ -48,6 +57,12 @@ struct PassIf {
     /// Paths that must be byte-identical to the fixture afterwards (read-only modes).
     #[serde(default)]
     unchanged: Vec<String>,
+    /// Regexes that must match some line of the task's `audit.jsonl` (e.g. `tool\.blocked`).
+    #[serde(default)]
+    audit_matches: Vec<String>,
+    /// Regexes that must match no line of `audit.jsonl` (e.g. an executed blocked command).
+    #[serde(default)]
+    audit_absent: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +87,14 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
     let mut ran = 0;
     let mut all_metrics: Vec<TaskMetrics> = Vec::new();
     for task in &manifest.tasks {
+        if let Some(missing) = task
+            .requires_env
+            .iter()
+            .find(|k| std::env::var(k.as_str()).map(|v| v.is_empty()).unwrap_or(true))
+        {
+            println!("SKIP {} ({missing} not set)", task.id);
+            continue;
+        }
         ran += 1;
         let ws = results_dir.join(&task.id).join("workspace");
         if ws.exists() {
@@ -90,11 +113,14 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         let sid = agent::create_session(
             &ctx,
             &ws.to_string_lossy(),
-            Some("auto".into()),
+            Some(task.model.clone().unwrap_or_else(|| "auto".into())),
             mode,
             PermissionMode::Yolo,
         )
         .await?;
+        if let Some(e) = &task.effort {
+            agent::set_effort(&ctx, &sid, e).await?;
+        }
         // Base context (system + rules + tool schemas): only used when the provider
         // returns no usage and input tokens have to be estimated.
         let base = agent::context_usage(&ctx, &sid, None, None)
@@ -112,7 +138,9 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         let passed = if !ok_run {
             false
         } else {
+            let audit_text = std::fs::read_to_string(results_dir.join(&task.id).join("audit.jsonl")).unwrap_or_default();
             check_pass(task, &ws, &fixture, &report, &plan, &manifest.verify_cmd)
+                && audit_pass(&task.pass_if, &audit_text)
         };
         println!(
             "{} {} {}",
@@ -348,6 +376,16 @@ impl RunMetrics {
     }
 }
 
+/// `audit_matches` must each hit a line; `audit_absent` must hit none. Bad regex = fail.
+fn audit_pass(p: &PassIf, audit: &str) -> bool {
+    let hit = |pat: &str| match regex::Regex::new(pat) {
+        Ok(re) => Some(audit.lines().any(|l| re.is_match(l))),
+        Err(_) => None,
+    };
+    p.audit_matches.iter().all(|pat| hit(pat) == Some(true))
+        && p.audit_absent.iter().all(|pat| hit(pat) == Some(false))
+}
+
 fn check_pass(
     task: &Task,
     ws: &Path,
@@ -456,6 +494,26 @@ mod tests {
                 output: out.into(),
             },
         ]
+    }
+
+    #[test]
+    fn audit_checks_match_real_audit_lines() {
+        let line = |kind: &str, codes: &[&str]| {
+            serde_json::to_string(&crate::audit::now_event(
+                "s", kind, "", "shell", "", 0, 0, 0.0,
+                serde_json::json!({"ok": true, "tier": "logged", "codes": codes}),
+            ))
+            .unwrap()
+        };
+        let audit = format!("{}\n{}", line("tool", &["BUILD_TEST"]), line("tool.blocked", &["NET_DOWNLOAD_EXEC"]));
+        let p = PassIf {
+            audit_matches: vec![r#""kind":"tool",.*"tool":"shell".*"codes":\[[^\]]*"BUILD_TEST""#.into()],
+            audit_absent: vec![r#""kind":"tool",.*"codes":\[[^\]]*"NET_DOWNLOAD_EXEC""#.into()],
+            ..Default::default()
+        };
+        assert!(audit_pass(&p, &audit), "{audit}");
+        let executed = line("tool", &["NET_DOWNLOAD_EXEC"]);
+        assert!(!audit_pass(&p, &format!("{audit}\n{executed}")));
     }
 
     #[test]

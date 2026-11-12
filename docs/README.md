@@ -43,7 +43,7 @@ Monorepo **`5ilence`**. Bốn tên dưới đây là bề mặt sản phẩm / t
 | **5ilence** | Nền tảng / tên repo | Thư mục repo (đổi từ `5ilence-planning`) |
 | **5ilence Studio** | Desktop GUI (editor, chat, terminal, Git) | `apps/studio` (package `@silence/studio`) |
 | **5ilence Engine** | Runtime, harness, session, tool execution | `crates/runtime` (binary / crate `silence-engine`) + `tools`, `mcp`, `router`, `sandbox` |
-| **5ilence Agent** | Vòng agent / plan / tool calls | Module trong Engine (`crates/runtime/src/agent.rs`) — chưa tách process |
+| **5ilence Agent** | Vòng agent / plan / tool calls | Module trong Engine (`crates/runtime/src/agent/`) — chưa tách process |
 | **5ilence CLI** | Agent trong terminal | **Chưa có** (backlog PRD năm 1); sẽ dùng chung Engine |
 
 Họ crate phụ vẫn `silence-*` (protocol, tools, …). Không đổi sang tên bắt đầu bằng số `5…` — identifier Rust không hợp lệ.
@@ -54,7 +54,11 @@ Họ crate phụ vẫn `silence-*` (protocol, tools, …). Không đổi sang t�
 | --- | --- | --- |
 | [PRD.md](PRD.md) | Yêu cầu năm 1, persona, 6 job lõi, backlog | Plan GSD, đổi phạm vi sản phẩm |
 | [adr/0001-architecture.md](adr/0001-architecture.md) | Quyết định Electron + Rust sidecar, JSON-RPC, Monaco | Đổi kiến trúc / IPC / editor |
+| [adr/0002-harness-architecture.md](adr/0002-harness-architecture.md) | Kiến trúc đích harness — event log, kernel, tool registry, store task, lộ trình | Đổi agent loop, session, tool, hook, lưu trữ |
 | [threat-model.md](threat-model.md) | Tài sản, trust boundary, giảm thiểu đe dọa local agent | Đổi permission, sandbox, MCP, mạng |
+| [security/permissions.md](security/permissions.md) | 4 tầng rủi ro, chế độ Thận trọng/Cân bằng/Tự chủ, Risk Engine, taint, card hỏi, nạp hướng dẫn cho AI | Đổi permission, `ask_perm`, Risk Engine, chế độ quyền |
+| [security/backlog.md](security/backlog.md) | Việc bảo mật cố ý chưa làm: duyệt trước theo plan, nhóm deploy, allowlist domain, sandbox mạng, policy workspace — kèm điều kiện để làm | Trước khi làm tiếp bảo mật/quyền; tránh làm sớm |
+| [security/risk-catalog.md](security/risk-catalog.md) | Bảng mã rủi ro: lệnh nào chặn / hỏi / tự chạy | Thêm hoặc đổi luật trong `risk/default_policy.yaml` |
 
 ## Giao diện
 
@@ -65,6 +69,7 @@ Mục lục chi tiết UI: [frontend/README.md](frontend/README.md).
 | [frontend/layout.md](frontend/layout.md) | Shell TitleBar, Chat Workspace, panel | Sửa khung cửa sổ / layout |
 | [frontend/chat.md](frontend/chat.md) | Hội thoại Cursor-like, Copy, checkpoint | Sửa ChatPane / hợp đồng tin nhắn |
 | [frontend/composer.md](frontend/composer.md) | Ô nhập, mode, Auto, tools | Sửa Composer |
+| [frontend/status.md](frontend/status.md) | Chỉ báo phiên (elapsed, token, chờ duyệt, gộp Read, duyệt plan 4 nút, description lệnh, rail, todo, background) | Sửa run pulse / bước narrate / duyệt plan / session rail / task list |
 | [frontend/tokens.md](frontend/tokens.md) | Token màu, appearance | Sửa theme / appearance |
 | [frontend/chat-markdown-roadmap.md](frontend/chat-markdown-roadmap.md) | Việc Markdown chat cố ý chưa làm | Tránh làm sớm / mở lại backlog Markdown |
 

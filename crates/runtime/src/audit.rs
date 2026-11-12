@@ -34,6 +34,11 @@ impl AuditLog {
         })
     }
 
+    /// Folder holding `audit.jsonl`; sessions live under `<dir>/sessions`.
+    pub fn dir(&self) -> &Path {
+        self.path.parent().unwrap_or_else(|| Path::new("."))
+    }
+
     pub async fn append(&self, event: AuditEvent) -> Result<()> {
         let _g = self.lock.lock().await;
         let mut line = serde_json::to_string(&event)?;
