@@ -17,7 +17,22 @@ const COPY: Record<string, Omit<ErrorCopy, "canRetry">> = {
   PROVIDER_AUTH: {
     title: "API key không hợp lệ",
     body: "Provider từ chối API key hiện tại.",
-    hint: "Kiểm tra SILENCE_API_KEY hoặc cấu hình provider của model, rồi gửi lại.",
+    hint: "Nhập lại key ở Settings → Nguồn model (hoặc biến SILENCE_API_KEY / ANTHROPIC_API_KEY), rồi gửi lại.",
+  },
+  PROVIDER_REFUSAL: {
+    title: "Model từ chối yêu cầu",
+    body: "Bộ lọc an toàn của model đã từ chối trả lời yêu cầu này.",
+    hint: "Diễn đạt lại yêu cầu, hoặc thử model khác.",
+  },
+  CLI_NOT_FOUND: {
+    title: "Không tìm thấy Claude CLI",
+    body: "Model này chạy qua lệnh `claude`, nhưng máy chưa cài hoặc lệnh không có trong PATH.",
+    hint: "Cài Claude Code rồi mở lại 5ilence, hoặc chọn model từ nguồn khác.",
+  },
+  CLI_AUTH: {
+    title: "Claude CLI chưa đăng nhập",
+    body: "Claude CLI đã cài nhưng chưa có phiên đăng nhập hợp lệ.",
+    hint: "Chạy `claude` trong terminal để đăng nhập, rồi gửi lại.",
   },
   PROVIDER_RATE: {
     title: "Đang bị giới hạn tạm thời",

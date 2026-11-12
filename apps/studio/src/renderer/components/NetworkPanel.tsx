@@ -1,13 +1,28 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModelInfo } from "../types";
-import { modelTitle, speedLabel, type ModelPrefs } from "../theme/modelsPrefs";
+import { isModelOn, modelTitle, toggleModel, type ModelPrefs } from "../theme/modelsPrefs";
+import { ProviderSources } from "./ProviderSources";
 
 export function NetworkPanel(props: {
   catalog: ModelInfo[];
   prefs: ModelPrefs;
   onPrefs: (next: ModelPrefs) => void;
   activeModel: string;
+  onSourcesChanged?: () => void;
+  /** Scroll to + flash this model's row (from the picker's Enable button). `n` re-triggers. */
+  focus?: { id: string; n: number } | null;
 }) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const [flash, setFlash] = useState("");
+  useEffect(() => {
+    if (!props.focus) return;
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-model="${CSS.escape(props.focus.id)}"]`);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    row?.querySelector<HTMLElement>(".switch")?.focus({ preventScroll: true });
+    setFlash(props.focus.id);
+    const t = window.setTimeout(() => setFlash(""), 1800);
+    return () => window.clearTimeout(t);
+  }, [props.focus]);
   const [slug, setSlug] = useState("");
   const [label, setLabel] = useState("");
   const [tier, setTier] = useState("mid");
@@ -18,16 +33,6 @@ export function NetworkPanel(props: {
     ...props.prefs.extras.filter((e) => !props.catalog.some((c) => c.id === e.id)),
   ];
 
-  function enabled(id: string) {
-    return !props.prefs.disabled.includes(id);
-  }
-
-  function toggle(id: string) {
-    const disabled = enabled(id)
-      ? [...props.prefs.disabled, id]
-      : props.prefs.disabled.filter((x) => x !== id);
-    props.onPrefs({ ...props.prefs, disabled });
-  }
 
   function add() {
     const id = slug.trim();
@@ -56,6 +61,7 @@ export function NetworkPanel(props: {
 
   function removeExtra(id: string) {
     props.onPrefs({
+      ...props.prefs,
       extras: props.prefs.extras.filter((e) => e.id !== id),
       disabled: props.prefs.disabled.filter((x) => x !== id),
     });
@@ -63,19 +69,21 @@ export function NetworkPanel(props: {
 
   return (
     <div className="network-page">
+      <ProviderSources onChanged={props.onSourcesChanged} />
       <header>
         <h2>Models</h2>
-        <p>Chọn model hiện trong picker. Slug OpenRouter (vendor/model) — gọi qua SILENCE_API_KEY.</p>
+        <p>Chọn model hiện trong picker. Slug OpenRouter (vendor/model) — gọi qua nguồn OpenRouter.</p>
       </header>
-      <ul className="model-switch-list">
+      <ul className="model-switch-list" ref={listRef}>
         {rows.map((m) => (
-          <li key={m.id}>
+          <li key={m.id} data-model={m.id} className={flash === m.id ? "flash" : undefined}>
             <div>
               <b>{modelTitle(m)}</b>
               <small>
+                {m.provider_label ? `${m.provider_label} · ` : ""}
                 {m.id}
-                {m.tier ? ` · ${speedLabel(m.tier)}` : ""}
               </small>
+              {m.opt_in ? <small className="model-optin">Uses many more tokens — off by default</small> : null}
             </div>
             {extrasIds.has(m.id) ? (
               <button type="button" className="ghost" onClick={() => removeExtra(m.id)}>
@@ -84,11 +92,11 @@ export function NetworkPanel(props: {
             ) : null}
             <button
               type="button"
-              className={`switch${enabled(m.id) ? " on" : ""}`}
+              className={`switch${isModelOn(m, props.prefs) ? " on" : ""}`}
               role="switch"
-              aria-checked={enabled(m.id)}
+              aria-checked={isModelOn(m, props.prefs)}
               aria-label={`Bật ${modelTitle(m)}`}
-              onClick={() => toggle(m.id)}
+              onClick={() => props.onPrefs(toggleModel(m, props.prefs))}
             />
           </li>
         ))}
@@ -117,9 +125,9 @@ export function NetworkPanel(props: {
           Tier
           <select value={tier} onChange={(e) => setTier(e.target.value)}>
             <option value="fast">Fast</option>
-            <option value="high-fast">High Fast</option>
-            <option value="mid">Medium</option>
-            <option value="strong">High</option>
+            <option value="high-fast">Fast+</option>
+            <option value="mid">Balanced</option>
+            <option value="strong">Powerful</option>
             <option value="free">Free</option>
           </select>
         </label>

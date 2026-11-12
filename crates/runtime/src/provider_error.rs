@@ -15,6 +15,12 @@ pub enum ErrorCode {
     ProviderUnavailable,
     Network,
     Timeout,
+    /// The model declined (Anthropic `stop_reason: "refusal"`).
+    ProviderRefusal,
+    /// `claude` CLI not installed / not on PATH.
+    CliNotFound,
+    /// `claude` CLI is installed but not signed in.
+    CliAuth,
     Unknown,
 }
 
@@ -27,6 +33,9 @@ impl ErrorCode {
             ErrorCode::ProviderUnavailable => "PROVIDER_UNAVAILABLE",
             ErrorCode::Network => "NETWORK",
             ErrorCode::Timeout => "TIMEOUT",
+            ErrorCode::ProviderRefusal => "PROVIDER_REFUSAL",
+            ErrorCode::CliNotFound => "CLI_NOT_FOUND",
+            ErrorCode::CliAuth => "CLI_AUTH",
             ErrorCode::Unknown => "UNKNOWN",
         }
     }
@@ -71,6 +80,23 @@ impl ProviderError {
         }
     }
 
+    /// The model declined to answer; `category` from `stop_details` (may be empty).
+    pub fn refusal(category: &str) -> Self {
+        Self {
+            code: ErrorCode::ProviderRefusal,
+            status: None,
+            detail: if category.is_empty() {
+                "model declined the request".into()
+            } else {
+                format!("model declined the request ({category})")
+            },
+        }
+    }
+
+    pub fn new(code: ErrorCode, detail: &str) -> Self {
+        Self { code, status: None, detail: sanitize(detail, "") }
+    }
+
     pub fn from_reqwest(err: &reqwest::Error, key: &str) -> Self {
         let code = if err.is_timeout() {
             ErrorCode::Timeout
@@ -100,6 +126,8 @@ pub fn classify_http(status: u16, body: &str) -> ErrorCode {
                 ErrorCode::Unknown
             }
         }
+        // Anthropic reports an empty balance as 400 "Your credit balance is too low…".
+        400 if body.to_lowercase().contains("credit balance") => ErrorCode::ProviderCredits,
         401 | 403 => ErrorCode::ProviderAuth,
         408 => ErrorCode::Timeout,
         429 => ErrorCode::ProviderRate,
@@ -215,6 +243,15 @@ mod tests {
         assert!(!s.contains("abc.def-ghi"));
         let long = "x".repeat(2000);
         assert!(sanitize(&long, "").chars().count() <= DETAIL_MAX + 1);
+    }
+
+    #[test]
+    fn anthropic_error_body() {
+        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#;
+        let e = ProviderError::from_http(400, body, "");
+        assert_eq!(e.code, ErrorCode::ProviderCredits);
+        assert!(e.detail.starts_with("Your credit balance"));
+        assert_eq!(classify_http(529, ""), ErrorCode::ProviderUnavailable);
     }
 
     #[test]

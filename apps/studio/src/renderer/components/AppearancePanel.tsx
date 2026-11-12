@@ -1,5 +1,6 @@
 import { Monitor, Moon, Sun, X } from "lucide-react";
 import { PermissionsSection } from "./PermissionsSection";
+import type { UiPermMode } from "../permissionUi";
 import mountains from "../assets/wallpapers/mountains.png";
 import {
   ACCENTS,
@@ -41,6 +42,8 @@ export function AppearancePanel(props: {
   onChange: (next: Appearance) => void;
   onClose: () => void;
   workspace?: string;
+  permMode: UiPermMode;
+  onPermMode: (m: UiPermMode) => void;
 }) {
   if (!props.open) return null;
   const a = props.value;
@@ -145,7 +148,7 @@ export function AppearancePanel(props: {
         </label>
       </div>
 
-      <PermissionsSection workspace={props.workspace ?? ""} />
+      <PermissionsSection workspace={props.workspace ?? ""} mode={props.permMode} onMode={props.onPermMode} />
 
       <button type="button" className="ghost" onClick={() => props.onChange({ ...DEFAULT_APPEARANCE })}>
         Reset to default

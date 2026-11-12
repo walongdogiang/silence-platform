@@ -1,5 +1,13 @@
-# Catalog OpenRouter — cần SILENCE_API_BASE=https://openrouter.ai/api/v1 và SILENCE_API_KEY.
-# Env: SILENCE_API_KEY, SILENCE_API_BASE. SILENCE_MODEL_* override api_model nếu set.
+# Ba nguồn model:
+#   company-gateway — OpenRouter (OpenAI-compatible). Env: SILENCE_API_KEY, SILENCE_API_BASE.
+#                     SILENCE_MODEL_* override api_model nếu set.
+#   anthropic       — Anthropic Messages API trực tiếp. Env: ANTHROPIC_API_KEY (hoặc nhập ở
+#                     Settings → Model sources), ANTHROPIC_BASE_URL.
+#   claude-cli      — Claude CLI đã đăng nhập trên máy (thử nghiệm, chỉ dùng nội bộ). Model @cli
+#                     chỉ chạy khi chọn tường minh; Auto không bao giờ route sang CLI.
+# Giữ company-gateway đứng đầu: model ad-hoc `vendor/model` dùng provider đầu tiên.
+# `opt_in: true` = model tắt mặc định (ẩn khỏi picker, Auto không dùng) cho tới khi user bật
+# ở Settings → Models. Dùng cho model rất tốn token.
 
 version: 1
 default_model: auto
@@ -7,9 +15,21 @@ optimize: balance # cost | balance | intelligence
 
 providers:
   - id: company-gateway
+    label: OpenRouter
     kind: openai_compat
     base_url: ${SILENCE_API_BASE:-https://openrouter.ai/api/v1}
     api_key_env: SILENCE_API_KEY
+
+  - id: anthropic
+    label: Anthropic API
+    kind: anthropic
+    base_url: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+    api_key_env: ANTHROPIC_API_KEY
+
+  - id: claude-cli
+    label: Claude CLI
+    kind: claude_cli
+    command: ${SILENCE_CLAUDE_CLI:-claude}
 
 models:
   - id: claude-haiku
@@ -23,6 +43,8 @@ models:
     vision: true
     input_cost_per_1m: 0.10
     output_cost_per_1m: 0.50
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
 
   - id: claude-sonnet
     label: Claude Sonnet 5.5
@@ -35,6 +57,8 @@ models:
     vision: true
     input_cost_per_1m: 2.00
     output_cost_per_1m: 10.00
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
 
   - id: claude-opus
     label: Claude Opus 5.5
@@ -45,8 +69,10 @@ models:
     max_output_tokens: 16384
     tools: true
     vision: true
-    input_cost_per_1m: 5.00
-    output_cost_per_1m: 25.00
+    input_cost_per_1m: 4.00
+    output_cost_per_1m: 20.00
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
 
   - id: north-mini-code
     label: North Mini Code
@@ -83,6 +109,96 @@ models:
     vision: false
     input_cost_per_1m: 0
     output_cost_per_1m: 0
+
+  # --- Anthropic API trực tiếp (giá Anthropic; cache read 0.1×, cache write 1.25×) ---
+  - id: claude-haiku@api
+    label: Claude Haiku 5.5
+    provider: anthropic
+    api_model: claude-haiku-5-5
+    tier: fast
+    context_window: 1000000
+    max_output_tokens: 8192
+    tools: true
+    vision: true
+    input_cost_per_1m: 0.10
+    output_cost_per_1m: 0.50
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+
+  - id: claude-sonnet@api
+    label: Claude Sonnet 5.5
+    provider: anthropic
+    api_model: claude-sonnet-5-5
+    tier: mid
+    context_window: 1000000
+    max_output_tokens: 32000
+    tools: true
+    vision: true
+    input_cost_per_1m: 2.00
+    output_cost_per_1m: 10.00
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+
+  - id: claude-opus@api
+    label: Claude Opus 5.5
+    provider: anthropic
+    api_model: claude-opus-5-5
+    tier: strong
+    context_window: 1000000
+    max_output_tokens: 32000
+    tools: true
+    vision: true
+    input_cost_per_1m: 4.00
+    output_cost_per_1m: 20.00
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+
+  # --- Claude CLI (thử nghiệm, nội bộ). Chi phí do CLI báo (total_cost_usd). ---
+  - id: claude-haiku@cli
+    label: Claude Haiku 5.5
+    provider: claude-cli
+    api_model: claude-haiku-5-5
+    tier: fast
+    context_window: 1000000
+    tools: true
+    vision: false
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+
+  - id: claude-sonnet@cli
+    label: Claude Sonnet 5.5
+    provider: claude-cli
+    api_model: claude-sonnet-5-5
+    tier: mid
+    context_window: 1000000
+    tools: true
+    vision: false
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+
+  - id: claude-opus@cli
+    label: Claude Opus 5.5
+    provider: claude-cli
+    api_model: claude-opus-5-5
+    tier: strong
+    context_window: 1000000
+    tools: true
+    vision: false
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+
+  # Tốn token hơn nhiều: tắt mặc định, bật ở Settings → Models (opt_in).
+  - id: claude-fable@cli
+    label: Claude Fable 5.2
+    provider: claude-cli
+    api_model: claude-fable-5-2
+    tier: strong
+    context_window: 1000000
+    tools: true
+    vision: false
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: medium
+    opt_in: true
 
 routes:
   chat: fast

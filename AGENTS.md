@@ -12,7 +12,7 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 - Engine / harness: `crates/{runtime,tools,mcp,router,sandbox,protocol}` — binary `silence-engine`; Agent loop nằm trong `runtime`.
 - Protocol: `packages/protocol` (TS) và `crates/protocol` (Rust) — đổi cả hai.
 - Shell: PowerShell. Rust khi thiếu SDK: `.\scripts\cargo-msvc.bat <cargo-args>`.
-- Chạy UI: `npm install` rồi `npm run studio` (`npm run desktop` vẫn alias). Engine CLI: `npm run runtime`.
+- Chạy UI: `npm install` rồi `npm run studio` (`npm run desktop` vẫn alias). Live watch (UI HMR + Engine tự build/restart khi sửa `crates/`): `npm run studio:watch` (README → Live watch). Engine CLI: `npm run runtime`.
 - Test crate: `cargo test -p <crate>` (hoặc qua `cargo-msvc.bat`).
 - Evals: `npm run evals` cần `SILENCE_API_BASE` / `SILENCE_API_KEY`.
 
@@ -33,10 +33,10 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 ## Bắt buộc
 
 - Renderer không gọi model; không fs/shell/MCP trực tiếp; không napi-rs làm IPC chính; không fork VS Code năm 1.
-- Sản phẩm: diff + audit; permission mặc định `ask`; không silent YOLO; không bind LAN.
+- Sản phẩm: diff + audit; permission mặc định **Cân bằng** (an toàn/đảo ngược được thì tự chạy có hiển thị; rủi ro thì hỏi kèm giải thích; nguy hiểm thì chặn — `docs/security/permissions.md`); không silent YOLO; không bind LAN.
 - Đổi harness/agent loop: thêm hoặc sửa eval task; chạy eval nếu có key, không thì ghi rõ chưa chạy. Không full 20 eval cho mọi PR.
 - Đổi UI: `docs/frontend/` + `.cursor/rules/frontend-*.mdc`.
-- Câu trả lời agent trong app (Markdown user-facing): sửa `SYSTEM` trong `crates/runtime/src/agent.rs`; hợp đồng UI/Copy: `docs/frontend/chat.md`; việc chưa làm: `docs/frontend/chat-markdown-roadmap.md`.
+- Câu trả lời agent trong app (Markdown user-facing): sửa `SYSTEM` trong `crates/runtime/src/agent/modes.rs`; hợp đồng UI/Copy: `docs/frontend/chat.md`; việc chưa làm: `docs/frontend/chat-markdown-roadmap.md`.
 - Plan GSD: `/gsd-plan-phase --prd docs/PRD.md`. Không `/gsd-new-project` đè PRD.
 - Nói với user tiếng Việt.
 

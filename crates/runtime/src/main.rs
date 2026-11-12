@@ -34,6 +34,15 @@ enum Cmd {
         #[arg(long)]
         repo_root: Option<PathBuf>,
     },
+    /// Internal: MCP stdio bridge the Claude CLI spawns; relays to the Engine's per-turn
+    /// loopback listener. Not for direct use.
+    #[command(hide = true)]
+    McpBridge {
+        #[arg(long)]
+        port: u16,
+        #[arg(long)]
+        token: String,
+    },
 }
 
 #[tokio::main]
@@ -64,6 +73,7 @@ async fn main() -> Result<()> {
             let code = silence_engine::eval_runner::run(&dir, &cfg, &repo).await?;
             std::process::exit(code);
         }
+        Cmd::McpBridge { port, token } => silence_engine::agent::run_bridge(port, &token).await,
     }
 }
 

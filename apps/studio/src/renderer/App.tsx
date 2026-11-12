@@ -17,15 +17,33 @@ import {
 import { ChatPane } from "./components/ChatPane";
 import { ChatTabBar } from "./components/ChatTabBar";
 import { Composer } from "./components/Composer";
+import { ImageLightbox, type LightboxState } from "./components/ImageLightbox";
+import { isImagePath, readWorkspaceImage } from "./workspaceImages";
 import { routeText, type SessionMode } from "./modes";
+import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImages";
+import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
 import { DiffPane } from "./components/DiffPane";
+import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
+import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
 import { NetworkPanel } from "./components/NetworkPanel";
+import {
+  loadPick,
+  loadPreferredProvider,
+  modelForSource,
+  modelSources,
+  normalizeEffort,
+  resolveSource,
+  savePick,
+  savePreferredProvider,
+  type Effort,
+} from "./effort";
 import { TitleBar } from "./components/TitleBar";
 import {
   briefFromNarrations,
   filesToRestore,
   briefFromThinkingBody,
   isPlanningVerb,
+  narrateFromLine,
   narrateToPast,
   narrateToolLive,
   newCheckpointId,
@@ -41,8 +59,8 @@ import {
   saveAppearance,
   type Appearance,
 } from "./theme/appearance";
-import { loadModelPrefs, saveModelPrefs, visibleModels } from "./theme/modelsPrefs";
-import type { ContextUsage, ModelInfo, SessionEvent } from "./types";
+import { loadModelPrefs, lockedModels, saveModelPrefs, visibleModels } from "./theme/modelsPrefs";
+import type { CliInfo, ContextUsage, ModelInfo, SessionEvent } from "./types";
 
 function loadShellView(): ShellView {
   const v = localStorage.getItem("silence.shell.view");
@@ -126,10 +144,9 @@ function appendTurnMeta(
     if (userIdx >= 0 && i <= userIdx) return [l];
     if (l.kind === "thought" || l.kind === "worked" || l.kind === "checkpoint") return [];
     if (l.kind !== "narrate") return [l];
-    const step = l.verb ? { verb: l.verb, detail: l.detail } : parseNarrateLegacy(l.text ?? "");
+    const step = l.verb ? narrateFromLine(l) : parseNarrateLegacy(l.text ?? "");
     if (isPlanningVerb(step.verb) || /^Thinking$/i.test(step.verb) || /^Thought$/i.test(step.verb)) return [];
-    const past = narrateToPast(step);
-    return [{ kind: "narrate", verb: past.verb, detail: past.detail }];
+    return [{ kind: "narrate", ...narrateToPast(step) }];
   });
   const meta: ChatLine[] = thoughtLine ? [worked, thoughtLine, checkpoint] : [worked, checkpoint];
   if (userIdx < 0) return [...normalized, ...meta];
@@ -198,6 +215,8 @@ export function App() {
   const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
   const [showNetwork, setShowNetwork] = useState(false);
+  /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
+  const [focusModel, setFocusModel] = useState<{ id: string; n: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
   const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
   const [outputLog, setOutputLog] = useState<string[]>([]);
@@ -206,7 +225,10 @@ export function App() {
 
   const [workspace, setWorkspace] = useState(() => localStorage.getItem("silence.shell.workspace") ?? "");
   const [sessionId, setSessionId] = useState("");
-  const [model, setModel] = useState("auto");
+  const [model, setModel] = useState(() => loadPick().model);
+  const [effort, setEffort] = useState<Effort>(() => loadPick().effort);
+  /** Model source the picker shows (provider id); also the provider Auto prefers. */
+  const [source, setSource] = useState(() => loadPreferredProvider());
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
   const [mode, setMode] = useState<SessionMode>("agent");
@@ -214,6 +236,10 @@ export function App() {
   const [file, setFile] = useState<string | null>(null);
   const [fileText, setFileText] = useState("");
   const [prompt, setPrompt] = useState("");
+  /** Ảnh dán vào composer (data URL), gửi kèm `session.prompt`. */
+  const [images, setImages] = useState<string[]>([]);
+  /** Ảnh workspace mở từ chip / menu Files / panel Review. */
+  const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [diff, setDiff] = useState<Diff | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
@@ -222,6 +248,10 @@ export function App() {
   const [permError, setPermError] = useState(false);
   const [cost, setCost] = useState({ usd: 0, input_tokens: 0, output_tokens: 0, events: 0 });
   const [busy, setBusy] = useState(false);
+  /** Chế độ quyền (Settings): Cân bằng mặc định hoặc Thận trọng. Gửi lên Engine mỗi lượt. */
+  const [permMode, setPermMode] = useState<UiPermMode>(() => loadPermMode());
+  /** Run pulse của lượt đang chạy: giờ bắt đầu, token/USD cộng từ `cost`, cờ Stop (`docs/frontend/status.md`). */
+  const [run, setRun] = useState<RunMeter | null>(null);
   const termRef = useRef<HTMLDivElement | null>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -241,6 +271,8 @@ export function App() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs" | "preview">("changes");
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
+  // Id ảnh không còn trong IndexedDB: không hỏi lại mỗi lần `lines` đổi (stream token).
+  const missedImagesRef = useRef(new Set<string>());
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => loadOpenTabs());
   const [activeThreadId, setActiveThreadId] = useState("");
   /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
@@ -298,8 +330,30 @@ export function App() {
   }, [workspace]);
 
   useEffect(() => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(threads));
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(threadsForStorage(threads)));
+    } catch {
+      // Hết quota localStorage: giữ bản đã lưu trước đó thay vì làm sập app.
+    }
   }, [threads]);
+
+  // Dọn ảnh IndexedDB của thread đã xoá — một lần lúc mở app.
+  useEffect(() => {
+    void pruneImages(referencedImageIds(threads));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Thread mở lại từ lịch sử chỉ có `imageIds`: lấy ảnh từ IndexedDB rồi điền vào.
+  useEffect(() => {
+    if (!lines.some((l) => needsHydrate(l, missedImagesRef.current))) return;
+    let alive = true;
+    void hydrateImages(lines, missedImagesRef.current).then((next) => {
+      if (alive && next !== lines) setLines((cur) => (cur === lines ? next : cur));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [lines]);
 
   useEffect(() => {
     const known = new Set(threads.map((t) => t.id));
@@ -391,23 +445,20 @@ export function App() {
             last?.kind === "narrate" &&
             (isPlanningVerb(last.verb ?? last.text) || /^Thinking$/i.test(last.verb ?? ""))
           ) {
-            next[next.length - 1] = { kind: "narrate", verb: step.verb, detail: step.detail };
+            next[next.length - 1] = { kind: "narrate", ...step };
             return next;
           }
           if (last?.kind === "narrate") {
-            const prev = last.verb
-              ? { verb: last.verb, detail: last.detail }
-              : parseNarrateLegacy(last.text ?? "");
+            const prev = last.verb ? narrateFromLine(last) : parseNarrateLegacy(last.text ?? "");
             if (
               !isPlanningVerb(prev.verb) &&
               !/^Thought$/i.test(prev.verb) &&
               !/^Thinking$/i.test(prev.verb)
             ) {
-              const past = narrateToPast(prev);
-              next[next.length - 1] = { kind: "narrate", verb: past.verb, detail: past.detail };
+              next[next.length - 1] = { kind: "narrate", ...narrateToPast(prev) };
             }
           }
-          next.push({ kind: "narrate", verb: step.verb, detail: step.detail });
+          next.push({ kind: "narrate", ...step });
           return next;
         });
       } else if (ev.type === "tool_end") {
@@ -420,13 +471,27 @@ export function App() {
       } else if (ev.type === "plan") {
         setPlan(ev.markdown);
       } else if (ev.type === "diff") {
-        const fileDiff = { path: ev.path, before: ev.before, after: ev.after };
+        const fileDiff = { path: ev.path, before: ev.before, after: ev.after, applied: ev.applied === true };
         const prev = turnFilesRef.current.filter((f) => f.path !== ev.path);
         turnFilesRef.current = [...prev, fileDiff];
         setDiff(fileDiff);
       } else if (ev.type === "permission") {
         setPermError(false);
-        setPerm({ request_id: ev.request_id, name: ev.name, input: ev.input, reason: ev.reason });
+        setPerm({ request_id: ev.request_id, name: ev.name, input: ev.input, reason: ev.reason, risk: ev.risk });
+        // Cửa sổ không ở phía trước thì báo ra desktop. Chỉ gửi lý do (không gửi lệnh).
+        void window.silence.notifyPermission?.(ev.risk?.reasons[0]?.title ?? ev.reason).catch(() => undefined);
+      } else if (ev.type === "trace" && ev.event === "policy.blocked") {
+        // Risk Engine chặn lệnh (tầng 3): biến bước "Running …" đang chạy thành "Blocked <lý do>".
+        const step = blockedStep(ev.detail);
+        if (step) {
+          setLines((xs) => {
+            const next = [...xs];
+            const last = next[next.length - 1];
+            if (last?.kind === "narrate") next[next.length - 1] = { kind: "narrate", ...step };
+            else next.push({ kind: "narrate", ...step });
+            return next;
+          });
+        }
       } else if (ev.type === "terminal") {
         term.current?.write(ev.data.replace(/\n/g, "\r\n"));
       } else if (ev.type === "error") {
@@ -446,6 +511,7 @@ export function App() {
           : `[error] ${ev.message}`;
         setOutputLog((xs) => [...xs.slice(-199), logLine]);
         setBusy(false);
+        setRun(null);
         // Giữ prompt: trả lại câu vừa gửi nếu composer đang trống. Không auto-retry.
         const last = lastPromptRef.current;
         setPrompt((p) => (p.trim() ? p : last));
@@ -461,8 +527,10 @@ export function App() {
           return appendTurnMeta(sealed, turnStart, files);
         });
         setBusy(false);
+        setRun(null);
         void refreshCost();
       } else if (ev.type === "cost") {
+        setRun((m) => addCost(m, ev));
         setCost((c) => ({
           ...c,
           usd: c.usd + ev.usd,
@@ -473,17 +541,93 @@ export function App() {
     });
   }, []);
 
-  useEffect(() => {
+  function loadModels() {
     if (!window.silence) return;
     void window.silence
       .rpc("models.list")
       .then((r) => setModels((r as { models: ModelInfo[] }).models ?? []))
       .catch((err: Error) => setLines((xs) => [...xs, { kind: "sys", text: String(err.message ?? err) }]));
+  }
+
+  /** Catalog + models added in Settings, minus the ones switched off there. */
+  const allModels = useMemo(() => visibleModels(models, modelPrefs), [models, modelPrefs]);
+  const sources = useMemo(() => modelSources(models), [models]);
+  /** Auto routes inside the picked source; the Claude CLI has no Auto, so the Engine gets "". */
+  const preferredFor = (src: string) =>
+    sources.find((s) => s.id === src)?.kind === "claude_cli" ? "" : src;
+
+  // Push the saved source first so `models.list` and the first turn see it. A CLI source is
+  // refused by the Engine (no Auto there), which is fine: the CLI turn never asks for Auto.
+  useEffect(() => {
+    if (!window.silence) return;
+    void window.silence
+      .rpc("providers.set_preferred", { provider: source })
+      .catch(() => undefined)
+      .finally(loadModels);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Which account the Claude CLI source runs as (shown next to it in the Source submenu).
+  // `claude auth status` is local and free; read once per catalog load.
+  const [cliEmail, setCliEmail] = useState("");
+  const cliReady = sources.some((s) => s.kind === "claude_cli" && s.available);
+  useEffect(() => {
+    if (!cliReady || !window.silence) {
+      setCliEmail("");
+      return;
+    }
+    let live = true;
+    void window.silence
+      .rpc("providers.cli_info")
+      .then((r) => {
+        const a = (r as CliInfo).account;
+        if (live) setCliEmail(a?.logged_in ? a.email : a ? "not signed in" : "");
+      })
+      .catch(() => live && setCliEmail(""));
+    return () => {
+      live = false;
+    };
+  }, [cliReady, models]);
+
+  /** Switch the picker's source: list only its models, keep or reset the model, tell the Engine. */
+  function chooseSource(id: string) {
+    setSource(id);
+    savePreferredProvider(id);
+    setModel((cur) => modelForSource(cur, id, allModels));
+    void window.silence
+      ?.rpc("providers.set_preferred", { provider: preferredFor(id) })
+      .catch((err: Error) => setLines((xs) => [...xs, { kind: "sys", text: String(err.message ?? err) }]));
+  }
 
   useEffect(() => {
     saveModelPrefs(modelPrefs);
   }, [modelPrefs]);
+
+  // Model + effort survive a reload. A saved model the catalog no longer has falls back to Auto.
+  useEffect(() => {
+    savePick({ model, effort });
+  }, [model, effort]);
+  // Keep source + model consistent with the catalog: a gone source → the first usable one; a
+  // model that is gone or belongs to another source → Auto (or the CLI default model).
+  useEffect(() => {
+    if (models.length === 0) return;
+    const src = resolveSource(source, sources);
+    if (src !== source) {
+      chooseSource(src);
+      return;
+    }
+    const fixed = modelForSource(
+      allModels.some((m) => m.id === model) ? model : "auto",
+      src,
+      allModels,
+    );
+    if (fixed !== model) {
+      setModel(fixed);
+      return;
+    }
+    setEffort((e) => normalizeEffort(e, model, allModels));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models, model, source, allModels]);
 
   useEffect(() => {
     if (!termEl) return;
@@ -547,12 +691,18 @@ export function App() {
   }
 
   async function createLiveSession(dir: string) {
-    const created = (await window.silence.rpc("session.create", {
-      workspace: dir,
-      model,
-      mode,
-      permission: "ask",
-    })) as { session_id: string };
+    // Cân bằng (mặc định): tầng 0–1 tự chạy có hiển thị, tầng 2 hỏi, tầng 3 chặn — docs/security/permissions.md.
+    // Chọn mode trong Settings là B4. Engine cũ (protocol < 0.1.9) chưa biết `balanced` → lùi về `ask`.
+    const create = (permission: string) =>
+      window.silence.rpc("session.create", { workspace: dir, model, mode, permission }) as Promise<{ session_id: string }>;
+    let created: { session_id: string };
+    try {
+      created = await create(permMode);
+    } catch (e) {
+      if (!/unknown variant/i.test(e instanceof Error ? e.message : String(e))) throw e;
+      setOutputLog((xs) => [...xs.slice(-199), "[warn] Engine cũ chưa hỗ trợ chế độ Cân bằng; dùng chế độ hỏi. Chạy lại `npm run studio` để build Engine mới."]);
+      created = await create("ask");
+    }
     await window.silence.rpc("terminal.start", { session_id: created.session_id, cols: 100, rows: 16 });
     return created.session_id;
   }
@@ -587,7 +737,9 @@ export function App() {
     setDiff(null);
     setPerm(null);
     setPrompt("");
+    setImages([]);
     setBusy(false);
+    setRun(null);
     setShowNetwork(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
@@ -707,6 +859,7 @@ export function App() {
       setDiff(null);
       setPerm(null);
       setPrompt("");
+      setImages([]);
       if (workspace && !t.sessionId) {
         void createLiveSession(workspace).then((liveId) => {
           setSessionId(liveId);
@@ -730,6 +883,7 @@ export function App() {
       setDiff(null);
       setPerm(null);
       setPrompt("");
+      setImages([]);
       return;
     }
     setActiveThreadId("");
@@ -764,6 +918,17 @@ export function App() {
 
   async function openFile(rel: string) {
     if (!workspace) return;
+    if (isImagePath(rel)) {
+      // Ảnh không đọc được dạng chữ: mở lightbox (xem, copy, lưu).
+      try {
+        const img = await readWorkspaceImage(workspace, rel);
+        setLightbox({ images: [img.data_url], index: 0 });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setOutputLog((xs) => [...xs.slice(-199), `[error] không mở được ảnh ${rel}: ${message}`]);
+      }
+      return;
+    }
     try {
       // Đọc trước rồi mới đặt file: chip trong câu trả lời có thể trỏ tới file không tồn tại.
       const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
@@ -779,22 +944,35 @@ export function App() {
 
   async function send(retryText?: string, modeOverride?: SessionMode) {
     const text = (retryText ?? prompt).trim();
-    if (!sessionId || !text || busy) return;
+    // Thử lại (retry) chỉ gửi lại chữ; ảnh chỉ đi cùng lượt gửi từ composer.
+    const turnImages = retryText === undefined ? images : [];
+    if (!sessionId || (!text && turnImages.length === 0) || busy) return;
     // `mode` là state nên không kịp cập nhật khi vừa setMode: dùng giá trị ghi đè cho lượt này.
     const turnMode = modeOverride ?? mode;
     turnModeRef.current = turnMode;
     lastPromptRef.current = text;
-    if (retryText === undefined) setPrompt("");
+    if (retryText === undefined) {
+      setPrompt("");
+      setImages([]);
+    }
     turnStartedAtRef.current = Date.now();
     turnFilesRef.current = [];
     thoughtStartedAtRef.current = Date.now();
     const plan = planningStep();
     setLines((xs) => [
       ...xs,
-      { kind: "user", text },
+      turnImages.length ? { kind: "user", text, images: turnImages } : { kind: "user", text },
       { kind: "narrate", verb: plan.verb, detail: plan.detail },
     ]);
     setBusy(true);
+    setRun(startRun(turnStartedAtRef.current));
+    if (turnImages.length) {
+      // Lưu ảnh vào IndexedDB để mở lại thread vẫn thấy; dòng user được nhận ra qua mảng ảnh.
+      void putImages(turnImages).then((ids) => {
+        if (!ids) return;
+        setLines((xs) => xs.map((l) => (l.kind === "user" && l.images === turnImages ? { ...l, imageIds: ids } : l)));
+      });
+    }
     try {
       let sid = sessionId;
       try {
@@ -808,9 +986,29 @@ export function App() {
       }
       // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
       await window.silence.rpc("session.set_mode", { session_id: sid, mode: turnMode });
+      // Engine cũ (protocol < 0.1.11) chưa có set_effort: bỏ qua, lượt vẫn chạy với mặc định model.
+      await window.silence.rpc("session.set_effort", { session_id: sid, effort }).catch(() => undefined);
+      // Engine restart (watch mode) loses the Auto preference: re-send it with the turn.
+      await window.silence.rpc("providers.set_preferred", { provider: preferredFor(source) }).catch(() => undefined);
+      // Session cũ (resume) giữ chế độ quyền lúc tạo: đồng bộ lại theo Settings trước mỗi lượt.
+      await window.silence.rpc("session.set_permission", { session_id: sid, permission: permMode }).catch(() => undefined);
+      if (turnImages.length) {
+        // Engine build cũ (vd. chỉ UI được hot-reload) bỏ qua `images` im lặng: model không thấy ảnh.
+        const pong = (await window.silence.rpc("ping", {})) as { protocol?: unknown } | null;
+        if (!supportsImages(pong?.protocol)) {
+          throw new Error(
+            `Engine đang chạy (protocol ${String(pong?.protocol ?? "?")}) chưa nhận ảnh. Tắt Studio rồi chạy lại \`npm run studio\` để build lại Engine.`,
+          );
+        }
+      }
       // Debug: gửi kèm phần cuối tab Output (Engine lọc secret trước khi đưa cho model).
       const context = turnMode === "debug" ? outputLog.slice(-60).join("\n") : undefined;
-      await window.silence.rpc("session.prompt", { session_id: sid, text, context });
+      await window.silence.rpc("session.prompt", {
+        session_id: sid,
+        text,
+        context,
+        ...(turnImages.length ? { images: turnImages } : {}),
+      });
     } catch (e) {
       // RPC bị từ chối (vd. Engine chưa sẵn sàng): tắt busy, trả prompt, hiện thẻ lỗi chung.
       const message = e instanceof Error ? e.message : String(e);
@@ -819,13 +1017,18 @@ export function App() {
       setLines((xs) => [...xs, { kind: "error", message }]);
       setOutputLog((xs) => [...xs.slice(-199), `[error] ${message}`]);
       setBusy(false);
+      setRun(null);
       setPrompt((p) => (p.trim() ? p : text));
+      setImages((xs) => (xs.length ? xs : turnImages));
     }
   }
 
   /** Yêu cầu Engine dừng lượt: cờ abort được kiểm ở đầu mỗi vòng; `done` (stop=abort) sẽ tắt busy. */
   async function stop() {
     if (!sessionId || !busy) return;
+    setRun(markStopping);
+    // Engine từ chối quyền đang chờ khi abort; gỡ card ngay để không còn nút duyệt "mồ côi".
+    setPerm(null);
     try {
       await window.silence.rpc("session.abort", { session_id: sessionId });
     } catch (e) {
@@ -836,6 +1039,10 @@ export function App() {
 
   async function applyDiff() {
     if (!sessionId || !diff) return;
+    if (diff.applied) {
+      setDiff(null);
+      return;
+    }
     try {
       await window.silence.rpc("diff.apply", {
         session_id: sessionId,
@@ -859,6 +1066,18 @@ export function App() {
 
   async function rejectDiff() {
     if (!sessionId || !diff) return;
+    if (diff.applied) {
+      // Balanced: file đã được ghi. "Hoàn tác" = ghi lại nội dung trước khi sửa (cùng đường với Restore).
+      try {
+        await window.silence.rpc("diff.apply", { session_id: sessionId, path: diff.path, after: diff.before });
+        turnFilesRef.current = turnFilesRef.current.filter((f) => f.path !== diff.path);
+        setDiff(null);
+        if (file === diff.path) setFileText(diff.before);
+      } catch {
+        setOutputLog((xs) => [...xs.slice(-199), `Không hoàn tác được ${diff.path}. Thử lại hoặc Restore checkpoint.`]);
+      }
+      return;
+    }
     try {
       await window.silence.rpc("diff.reject", {
         session_id: sessionId,
@@ -910,6 +1129,7 @@ export function App() {
     turnFilesRef.current = [];
     turnStartedAtRef.current = 0;
     setBusy(false);
+    setRun(null);
   }
 
   function onChip(chip: string) {
@@ -931,17 +1151,19 @@ export function App() {
     else if (chip === "More") setAppearOpen(true);
   }
 
-  async function answerPerm(allow: boolean, remember: boolean) {
+  async function answerPerm(allow: boolean, scope: PermScope) {
     if (!perm || !sessionId || permBusy) return;
     setPermBusy(true);
     setPermError(false);
     try {
+      // Deny never persists; Engine enforces this too. `remember` is the legacy flag for old Engines.
+      const s: PermScope = allow ? scope : "once";
       await window.silence.rpc("session.permission", {
         session_id: sessionId,
         request_id: perm.request_id,
         allow,
-        // Deny never persists; Engine enforces this too.
-        remember: allow && remember,
+        scope: s,
+        remember: s === "workspace",
       });
       setPerm(null);
     } catch {
@@ -967,6 +1189,7 @@ export function App() {
       { kind: "narrate", verb: step.verb, detail: step.detail },
     ]);
     setBusy(true);
+    setRun(startRun(turnStartedAtRef.current));
     try {
       await window.silence.rpc("session.approve_plan", { session_id: sessionId });
     } catch (e) {
@@ -975,6 +1198,7 @@ export function App() {
       thoughtStartedAtRef.current = 0;
       setLines((xs) => [...xs, { kind: "error", message }]);
       setBusy(false);
+      setRun(null);
     }
   }
 
@@ -983,6 +1207,18 @@ export function App() {
     setMode("plan");
     setPrompt((p) => (p.trim() ? p : "Sửa plan: "));
     focusComposer();
+  }
+
+  async function attachEdited(png: Blob, text: string): Promise<string | null> {
+    // "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn yêu cầu; user tự gửi.
+    const file = new File([png], "anh-danh-dau.png", { type: "image/png" });
+    const r = await imagesFromFiles([file], images.length);
+    if (!r.images.length) return r.error ?? "Không đính được ảnh.";
+    setImages((xs) => [...xs, ...r.images]);
+    // Ô nhập đang có chữ thì giữ lại, đặt sau yêu cầu sửa.
+    setPrompt((p) => (p.trim() ? `${text.endsWith("\n") ? text : `${text}\n`}${p}` : text));
+    focusComposer();
+    return null;
   }
 
   const editorLang = useMemo(() => {
@@ -1021,11 +1257,15 @@ export function App() {
   );
   const threadIdx = openTabs.findIndex((t) => t.id === activeThreadId);
   const wp = appearance.wallpaper === "mountains" ? `url(${mountains})` : "";
-  const pickerModels = visibleModels(models, modelPrefs);
+  // Locked opt-in models (e.g. Fable) stay visible in the picker but can't be picked there.
+  const locked = lockedModels(models, modelPrefs);
+  const pickerModels = locked.length ? [...allModels, ...locked] : allModels;
   const composerEl = (
     <Composer
       prompt={prompt}
       onPrompt={setPrompt}
+      images={images}
+      onImages={setImages}
       onSend={() => void send()}
       onSendAs={(m) => {
         setMode(m);
@@ -1036,6 +1276,16 @@ export function App() {
       model={model}
       models={pickerModels}
       onModel={setModel}
+      effort={effort}
+      onEffort={setEffort}
+      source={source}
+      sources={sources}
+      onSource={chooseSource}
+      sourceAccounts={cliEmail ? { "claude_cli": cliEmail } : undefined}
+      onSetupSources={() => {
+        setShowNetwork(true);
+        setShellView("chat");
+      }}
       busy={busy}
       onStop={() => void stop()}
       disabled={!sessionId}
@@ -1043,6 +1293,12 @@ export function App() {
       context={contextUsage}
       onOpenFile={(p) => void openFile(p)}
       onAddModels={() => {
+        setShowNetwork(true);
+        setShellView("chat");
+      }}
+      lockedIds={locked.map((m) => m.id)}
+      onEnableModel={(id) => {
+        setFocusModel({ id, n: Date.now() });
         setShowNetwork(true);
         setShellView("chat");
       }}
@@ -1060,7 +1316,9 @@ export function App() {
           sessionId={sessionId}
           hasSession={Boolean(sessionId)}
           wsName={wsName}
+          workspace={workspace || undefined}
           busy={busy}
+          run={run}
           mode={mode}
           onOpenFile={(p) => void openFile(p)}
           onSwitchAndRun={(m, text) => {
@@ -1072,8 +1330,8 @@ export function App() {
           onRevisePlan={revisePlan}
           permBusy={permBusy}
           permError={permError}
-          onAllow={(remember) => void answerPerm(true, remember)}
-          onDeny={() => void answerPerm(false, false)}
+          onAllow={(scope) => void answerPerm(true, scope)}
+          onDeny={() => void answerPerm(false, "once")}
           onApplyDiff={() => void applyDiff()}
           onRejectDiff={() => void rejectDiff()}
           onShowDiff={() => {
@@ -1086,6 +1344,7 @@ export function App() {
           onChip={onChip}
           onUsePrompt={setPrompt}
           onRetry={() => void send(lastPromptRef.current)}
+          onAttachEdited={attachEdited}
         />
         {activeThreadId ? composerEl : null}
       </div>
@@ -1130,6 +1389,9 @@ export function App() {
       data-blur={appearance.blur ? "on" : "off"}
       style={wp ? ({ ["--wp" as string]: wp } as CSSProperties) : undefined}
     >
+      {lightbox ? (
+        <ImageLightbox images={lightbox.images} index={lightbox.index} onClose={() => setLightbox(null)} />
+      ) : null}
       <TitleBar
         wsName={wsName}
         chatHidden={chatHidden}
@@ -1175,7 +1437,14 @@ export function App() {
               ? null
               : showNetwork
                 ? (
-                  <NetworkPanel catalog={models} prefs={modelPrefs} onPrefs={setModelPrefs} activeModel={model} />
+                  <NetworkPanel
+                    catalog={models}
+                    prefs={modelPrefs}
+                    onPrefs={setModelPrefs}
+                    activeModel={model}
+                    onSourcesChanged={loadModels}
+                    focus={focusModel}
+                  />
                 )
                 : chatMain}
           </div>
@@ -1194,6 +1463,7 @@ export function App() {
             workspace={workspace}
             threads={threads}
             activeId={activeThreadId}
+            runState={busy ? (perm && !run?.stopping ? "waiting" : "running") : undefined}
             onNewChat={() => void newChat()}
             onSelect={selectThread}
             onDelete={deleteThread}
@@ -1209,6 +1479,15 @@ export function App() {
         onChange={setAppearance}
         onClose={() => setAppearOpen(false)}
         workspace={workspace}
+        permMode={permMode}
+        onPermMode={(m) => {
+          setPermMode(m);
+          savePermMode(m);
+          // Áp dụng ngay cho phiên đang mở (các phiên khác đồng bộ ở lượt gửi kế tiếp).
+          if (sessionId) {
+            void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: m }).catch(() => undefined);
+          }
+        }}
       />
     </div>
   );

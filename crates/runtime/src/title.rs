@@ -42,7 +42,7 @@ pub async fn generate_title(
     let usd = ctx
         .catalog
         .model(&model)
-        .map(|m| gateway::cost_usd(m, result.input_tokens, result.output_tokens))
+        .map(|m| gateway::chat_cost_usd(m, &result))
         .unwrap_or(0.0);
     let _ = ctx
         .audit

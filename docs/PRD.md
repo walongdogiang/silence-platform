@@ -37,7 +37,8 @@ Hướng bắc: **Cursor và Claude Code có chức năng gì thì 5ilence cũng
 | --- | --- |
 | Context & convention | `@` file/folder, `/` skills, `AGENTS.md` / rules theo path, hooks |
 | Modes | Ask / Debug / Review / MultiTask đã gắn runtime (xem `docs/frontend/composer.md`); còn lại: MultiTask chạy sub-agent song song |
-| Git & session | commit khi user hỏi, worktree, resume thread |
+| Git & session | commit khi user hỏi, worktree, resume thread (event log — ADR 0002) |
+| Task & bối cảnh | project / task / decisions trong `.silence/`, agent nạp vào context (ADR 0002) |
 | CLI | 5ilence CLI kiểu Claude Code, cùng harness với Studio |
 | Index codebase | grep/ripgrep trước; embedding/RAG nếu cần sau |
 | Editor phụ | Tab autocomplete, LSP đầy đủ — sau năm 1 trừ khi chốt sớm |
@@ -56,7 +57,7 @@ Tab autocomplete, RAG mặc định, CLI: **không cấm** — để backlog, kh
 
 - ConPTY + PowerShell mặc định; path dài; UTF-16/UTF-8 không vỡ tiếng Việt.
 - Sidecar Rust tách process; UI crash không giết agent.
-- Permission default = `ask` (remember theo workspace). Không silent YOLO.
+- Permission mặc định = **Cân bằng**: tự chạy hành động an toàn hoặc đảo ngược được (luôn hiển thị + audit); rủi ro thì `ask` kèm giải thích; nguy hiểm thì chặn. Nhớ quyền theo workspace và theo mẫu lệnh. Không silent YOLO. Spec: `docs/security/permissions.md`.
 - Secret redaction trước khi gửi model.
 - Named pipe local-only; không bind LAN.
 

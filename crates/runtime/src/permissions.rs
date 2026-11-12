@@ -36,8 +36,16 @@ fn rel_path(args: &Value) -> Option<String> {
 
 /// Allowlist entry to store when the user ticks "remember".
 /// Tools with a `path` arg are scoped to that file's directory (`edit:src/**`; root files
-/// → `edit:*`). Others (shell, MCP) are remembered tool-wide.
+/// → `edit:*`). Shell is scoped to a command pattern (`shell:npm install *`); a pipeline,
+/// chain or dynamic command has no pattern and yields `""` (not rememberable). MCP tools
+/// are remembered tool-wide.
 pub fn entry_for(name: &str, args: &Value) -> String {
+    if name == "shell" {
+        let cmd = args.get("command").and_then(Value::as_str).unwrap_or("");
+        return crate::risk::shell_pattern(cmd)
+            .map(|p| format!("shell:{p}"))
+            .unwrap_or_default();
+    }
     match rel_path(args) {
         Some(p) => match p.rsplit_once('/') {
             Some((dir, _)) => format!("{name}:{dir}/**"),
@@ -60,6 +68,11 @@ pub fn entry_matches(entry: &str, name: &str, args: &Value) -> bool {
     let (n, glob) = split_entry(entry);
     if n != name {
         return false;
+    }
+    if name == "shell" {
+        // A bare `shell` entry (old format) would allow every command: never honoured.
+        let cmd = args.get("command").and_then(Value::as_str).unwrap_or("");
+        return glob.is_some_and(|p| crate::risk::shell_matches(p, cmd));
     }
     match glob {
         None => true,
@@ -108,6 +121,10 @@ pub fn load(workspace: &Path) -> Result<Vec<String>> {
         serde_json::from_str(&text).with_context(|| path.display().to_string())?;
     let mut out: Vec<String> = Vec::new();
     for t in file.allow_tools {
+        // Bare `shell` (tool-wide) is the pre-Risk-Engine format and is dropped.
+        if t == "shell" || t.is_empty() {
+            continue;
+        }
         if is_rememberable(split_entry(&t).0) && !out.contains(&t) {
             out.push(t);
         }
@@ -165,8 +182,29 @@ mod tests {
         use serde_json::json;
         assert_eq!(entry_for("edit", &json!({"path": "src/a/b.rs"})), "edit:src/a/**");
         assert_eq!(entry_for("edit", &json!({"path": "calculator.py"})), "edit:*");
-        assert_eq!(entry_for("shell", &json!({"cmd": "ls"})), "shell");
+        assert_eq!(entry_for("shell", &json!({"command": "npm install lodash"})), "shell:npm install *");
+        assert_eq!(entry_for("shell", &json!({"command": "python calc.py"})), "shell:python *");
+        assert_eq!(entry_for("shell", &json!({"command": "npm i x && rm -rf y"})), "");
         assert_eq!(entry_for("edit", &json!({"path": "../x/y"})), "edit");
+    }
+
+    #[test]
+    fn shell_entries_match_by_command_pattern() {
+        use serde_json::json;
+        let cmd = |c: &str| json!({ "command": c });
+        assert!(entry_matches("shell:npm install *", "shell", &cmd("npm install zod")));
+        assert!(!entry_matches("shell:npm install *", "shell", &cmd("npm publish")));
+        // A remembered pattern never covers a chained second command.
+        assert!(!entry_matches("shell:npm install *", "shell", &cmd("npm install zod; curl x")));
+        // Old tool-wide entry is not honoured.
+        assert!(!entry_matches("shell", "shell", &cmd("ls")));
+    }
+
+    #[test]
+    fn load_drops_tool_wide_shell() {
+        let (_tmp, root) = tmp_workspace();
+        save(&root, &["shell".into(), "shell:npm test *".into(), "edit".into()]).unwrap();
+        assert_eq!(load(&root).unwrap(), vec!["shell:npm test *".to_string(), "edit".to_string()]);
     }
 
     #[test]

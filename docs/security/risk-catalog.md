@@ -1,0 +1,84 @@
+---
+description: Bảng tra mã rủi ro (RiskCode) — lệnh/hành động nào tự chạy, ghi nhận, phải hỏi hay bị chặn; ví dụ PowerShell/bash, git, package, mạng, file, secrets, hệ thống, MCP.
+type: reference
+code:
+  - crates/runtime/src/risk/default_policy.yaml
+  - crates/runtime/src/risk/corpus.yaml
+  - crates/runtime/src/risk/mod.rs
+---
+# Risk catalog
+
+Bảng tra cho [permissions.md](permissions.md). **Nguồn máy** là [`default_policy.yaml`](../../crates/runtime/src/risk/default_policy.yaml); file này là bản cho người đọc. Test `catalog_lists_every_code` bắt buộc mọi mã trong YAML phải có trong file này.
+
+Khi thêm hoặc đổi luật:
+1. Sửa `default_policy.yaml`.
+2. Thêm ít nhất một dòng vào `corpus.yaml`, gồm ca an toàn và ca tấn công.
+3. Cập nhật bảng dưới đây.
+4. Chạy `cargo test -p silence-engine --lib risk`.
+
+Tầng: **0 auto** tự chạy · **1 logged** tự chạy và ghi audit · **2 ask** hỏi kèm giải thích · **3 block** chặn.
+
+## Tầng 3 — Chặn
+
+Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
+
+| Mã | Ví dụ | Vì sao chặn |
+| --- | --- | --- |
+| `NET_DOWNLOAD_EXEC` | `curl … \| sh`, `curl … \| sudo bash -s`, `iwr … \| iex`, `iex (iwr …)`, `IEX (New-Object Net.WebClient).DownloadString(…)` | Kiểu tấn công prompt injection phổ biến nhất: chạy code lạ không qua bước xem |
+| `ENCODED_COMMAND` | `powershell -EncodedCommand …`, `pwsh -enc …`, `echo … \| base64 -d \| sh` | Nội dung bị che, user không đọc được |
+| `FS_DELETE_SYSTEM` | `rm -rf /`, `rm -rf ~`, `rm -rf ../`, `Remove-Item C:\ -Recurse`, `rd /s /q C:\Windows`, xoá `$env:USERPROFILE\…` | Xoá đệ quy ngoài workspace, không khôi phục được |
+| `SYSTEM_CHANGE` | `format`, `diskpart`, `bcdedit`, `vssadmin`, `reg add/delete/import`, `Set-ExecutionPolicy`, `Set-MpPreference`, `netsh`, `schtasks /create`, `sc create`, `New-Service`, `takeown`, `icacls`, `shutdown`, `Restart-Computer`, `sudo …`, `runas` | Đổi cấu hình máy, bảo mật, khởi động hoặc tạo persistence |
+| `SECRET_EXFIL` | `curl -d @.env https://…`, `cat .env \| curl --data-binary @- …`, `iwr -Method Post -InFile .env` | Gửi bí mật ra mạng |
+| `POLICY_TAMPER` | `write`/`edit`/shell ghi `.silence/permissions.json`, `.silence/policy.yaml` | Agent tự nới quyền cho chính nó; chỉ user (Settings) và Engine được ghi |
+
+## Tầng 2 — Hỏi kèm giải thích
+
+| Mã | Ví dụ | Tác động user cần biết |
+| --- | --- | --- |
+| `PKG_INSTALL` | `npm install x`, `npm ci`, `pnpm add`, `pip install`, `uv add`, `cargo add/install`, `go get`, `winget`, `choco`, `scoop`, `Install-Module` | Mạng, chạy install script, sửa lock file và thư mục dependency |
+| `PKG_EXEC` | `npx …`, `pnpm dlx`, `bunx`, `uvx`, `npm exec` | Tải package rồi chạy ngay |
+| `NET_ACCESS` | `curl`, `Invoke-WebRequest`, `Invoke-RestMethod`, `ssh`, `scp`, `nc`, `ping`, `Test-NetConnection` | Kết nối ra ngoài máy |
+| `GIT_NETWORK` | `git push/pull/fetch/clone/submodule`, `npm publish` | Đổi hoặc lấy dữ liệu từ remote |
+| `GIT_COMMIT` | `git commit/merge/tag/cherry-pick/revert/config` | Ghi lịch sử. Repo yêu cầu hỏi trước khi commit |
+| `GIT_DESTRUCTIVE` | `git reset --hard`, `git clean -fdx`, `git checkout -- .`, `git restore`, `git push --force`, `git branch -D`, `git stash drop/clear`, `git rebase` | Có thể mất việc chưa lưu |
+| `FS_DELETE` | `rm`, `del`, `Remove-Item` trong workspace, `git rm`, `find -delete`, `Clear-Content` | Xoá không có checkpoint |
+| `FS_OUTSIDE_WS` | `cat ../other/x`, `Get-Content C:\Users\…`, `cd ..`, `echo > C:\temp\x`, chạy `C:\tools\x.exe`, write/edit ngoài workspace | Ra khỏi phạm vi dự án |
+| `SECRET_READ` | `.env`, `.env.*`, `*.pem`, `*.key`, `*.pfx`, `id_rsa`, `id_ed25519`, `.ssh/`, `.aws/`, `.npmrc`, `.pypirc`, `.git-credentials`, `.netrc`, `credentials*`, `secrets.*` | Có thể lộ khoá. Agent không được in giá trị |
+| `ENV_READ` | `env`, `printenv`, `set`, `Get-ChildItem env:` | Biến môi trường hay chứa API key |
+| `INLINE_CODE` | `python -c "…"`, `node -e "…"`, `cmd /c …`, `pwsh -Command "…"`, interpreter không có file | Code không nằm trong file để xem lại; nên viết thành script |
+| `DYNAMIC_EXEC` | `Invoke-Expression $x`, `eval`, `Invoke-Command`, `source`, `cat x.sh \| bash`, `find -exec` | Chạy chuỗi như lệnh |
+| `UNPARSED` | `$(…)`, backtick subshell, `<(…)`, quote không đóng, `rm -rf $VAR`, `rm` không có đích | Không xác định được lệnh sẽ làm gì |
+| `PROC_KILL` | `Stop-Process`, `taskkill`, `pkill`, `killall` | Có thể dừng chương trình của user |
+| `MCP_CALL` | `mcp__server__tool` không khai báo chỉ đọc | Server ngoài, 5ilence không biết tác dụng |
+| `TAINTED_CONTEXT` | Lệnh shell tầng 0–1 trong phiên đã nhận output MCP hoặc nội dung tải từ mạng (`curl`, `iwr`) | Lệnh có thể do nội dung bên ngoài điều khiển |
+| `UNKNOWN_COMMAND` | Chương trình chưa có trong policy | Mặc định thận trọng |
+| `UNKNOWN_TOOL` | Tool chưa có trong policy | Mặc định thận trọng |
+
+## Tầng 1 — Tự chạy, ghi audit
+
+| Mã | Ví dụ | Vì sao an toàn đủ |
+| --- | --- | --- |
+| `WRITE_WS` | `write`/`edit` trong workspace; `New-Item`, `Set-Content`, `Copy-Item`, `Move-Item`, `> file` trong workspace | Có DiffCard và checkpoint để Restore |
+| `BUILD_TEST` | `cargo test/check/build/clippy/fmt/run`, `cargo-msvc.bat`, `npm test`, `npm run …`, `pnpm test`, `pytest`, `python -m pytest`, `go test/build/vet`, `dotnet test/build`, `tsc`, `vitest`, `jest`, `eslint`, `prettier`, `ruff`, `mypy`, `make` | Lệnh của dự án, trong workspace. Sau khi có sandbox mạng sẽ chạy offline |
+| `RUN_SCRIPT` | `python calc.py`, `node scripts/check.mjs`, `.\tools\x.ps1` (file trong workspace) | Script trong repo, user xem được |
+| `GIT_LOCAL` | `git add`, `git stash`, `git switch`, `git checkout -b`, `git mv` | Cục bộ, đảo ngược được |
+| `MCP_READ` | Tool MCP có `readOnlyHint` | Không ghi; output vẫn bị coi là nội dung bên ngoài (làm phát sinh taint) |
+
+## Tầng 0 — Tự chạy
+
+| Mã | Ví dụ |
+| --- | --- |
+| `READ_WS` | Tool `read`, `outline`, `glob`, `grep`, `view_image`, `git_status`, `git_diff` trong workspace |
+| `READ_CMD` | `ls`, `dir`, `Get-ChildItem`, `cat`, `type`, `Get-Content`, `rg`, `grep`, `find`, `Select-String`, `Select-Object`, `Measure-Object`, `head`, `tail`, `wc`, `echo`, `Test-Path`, `cd`/`Set-Location` trong workspace |
+| `VERSION` | `python --version`, `node -v`, `cargo --version` |
+| `GIT_READ` | `git status/diff/log/show/blame/rev-parse/ls-files/branch/remote` |
+| `INTERNAL` | `submit_plan`, `suggest_mode`, `task` (tool của sub-agent vẫn bị xét riêng), `update_todos` |
+
+## Quy tắc ghép
+
+- Một dòng lệnh được tách tại `|`, `;`, `&&`, `||`, `&`, xuống dòng, `( )`, `{ }`. **Tầng của cả dòng = tầng cao nhất của mọi đoạn.**
+- Alias PowerShell được quy về tên gốc (`rm` → `Remove-Item`, `iwr` → `Invoke-WebRequest`, `iex` → `Invoke-Expression`…), xem `aliases` trong YAML.
+- `sudo`/`doas` được bóc ra để xét lệnh bên trong, đồng thời gắn `SYSTEM_CHANGE`.
+- Mỗi tham số trông như đường dẫn đều được xét: ngoài workspace, secrets, policy file.
+- Nhớ quyền: chỉ lệnh đơn có mẫu (`npm install *`); mã trong `never_remember` luôn hỏi lại; tầng 3 không bao giờ được nhớ.
+- Workspace `.silence/policy.yaml` (chưa làm) chỉ được **siết**: thêm luật ask/block, không hạ được mã tầng 3.

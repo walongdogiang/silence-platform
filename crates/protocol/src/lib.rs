@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.5";
+pub const PROTOCOL_VERSION: &str = "0.1.11";
+
+/// Schema version of one line in a session `events.jsonl`.
+pub const EVENT_LOG_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
@@ -80,6 +83,88 @@ pub struct SessionCreateParams {
     pub mode: SessionMode,
     #[serde(default)]
     pub permission: PermissionMode,
+    /// `auto` (default) = let the model pick; otherwise one of [`EFFORT_LEVELS`].
+    #[serde(default)]
+    pub effort: Option<String>,
+}
+
+/// Effort levels the UI can pick, weakest first. `auto` (not listed) = send nothing.
+pub const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// Params of `providers.set_credential` (Studio main process only). `key: ""` clears it.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SetCredentialParams {
+    pub provider: String,
+    pub key: String,
+}
+
+impl std::fmt::Debug for SetCredentialParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetCredentialParams")
+            .field("provider", &self.provider)
+            .field("key", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Result of `providers.cli_info`: what the local Claude CLI is and how 5ilence runs it.
+/// Shown in Settings → Model sources. Local only; nothing here leaves the machine.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CliInfo {
+    /// Provider id (`claude-cli`).
+    pub provider: String,
+    /// False when no `claude` executable answered `--version`.
+    pub installed: bool,
+    /// Executable 5ilence runs (`claude`, `claude.cmd`, or `SILENCE_CLAUDE_CLI`).
+    pub program: String,
+    pub version: String,
+    /// `None` when installed but `claude auth status` failed or timed out.
+    pub account: Option<CliAccount>,
+    pub usage: CliUsage,
+    /// Hardening 5ilence always applies: `(what it means, the flag)`.
+    pub safeguards: Vec<(String, String)>,
+    /// Catalog models of this source: `(label, CLI model id)`.
+    pub models: Vec<(String, String)>,
+}
+
+/// From `claude auth status --json`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct CliAccount {
+    pub logged_in: bool,
+    pub email: String,
+    pub org_name: String,
+    /// `pro`, `max`, `team`, … (`subscriptionType` / `planTier`); empty for API keys.
+    pub plan: String,
+    /// `claude.ai`, `api_key`, …
+    pub auth_method: String,
+    /// `firstParty`, `bedrock`, `vertex`, …
+    pub api_provider: String,
+    /// RFC 3339; empty when the login does not expire.
+    pub login_expires_at: String,
+    pub config_dir: String,
+}
+
+/// Cost the CLI reported (`total_cost_usd`) for turns 5ilence ran, from the audit log.
+/// Subscription quota is not readable from the CLI, so it is not here.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct CliUsage {
+    pub turns_today: u32,
+    pub usd_today: f64,
+    pub turns_total: u32,
+    pub usd_total: f64,
+}
+
+/// Params of `providers.set_preferred`. `""` = catalog order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPreferredParams {
+    pub provider: String,
+}
+
+/// Params of `session.set_effort`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetEffortParams {
+    pub session_id: String,
+    pub effort: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -105,13 +190,39 @@ impl SessionMode {
     }
 }
 
+/// How the Engine gates tool calls by risk tier (docs/security/permissions.md).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionMode {
-    #[default]
+    /// Thận trọng: only read-only (tier 0) runs without asking.
     Ask,
+    /// Legacy: never prompts; runs only what the allowlist covers (plus tier 0).
     Allowlist,
+    /// In-process evals only; refused over RPC. Tier 3 is still blocked.
     Yolo,
+    /// Cân bằng (default): tiers 0–1 run (visible + audited), tier 2 asks, tier 3 blocked.
+    #[default]
+    Balanced,
+    /// Tự chủ: like Balanced; tier 2 runs only inside a network sandbox (not available yet → asks).
+    Autonomous,
+}
+
+/// Why a permission is asked: risk tier and reason codes from the Risk Engine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PermissionRisk {
+    /// `auto` | `logged` | `ask` | `block`
+    pub tier: String,
+    pub reasons: Vec<RiskReason>,
+    /// What "remember" would store, e.g. `npm install *`. `None` = cannot be remembered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiskReason {
+    pub code: String,
+    pub title: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +237,9 @@ pub struct PromptParams {
     /// Extra context the user's UI attached (e.g. tail of the Output panel in Debug mode).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Images pasted into the composer, as `data:image/<png|jpeg|gif|webp>;base64,...` URLs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,8 +247,40 @@ pub struct PermissionDecision {
     pub session_id: String,
     pub request_id: String,
     pub allow: bool,
+    /// Legacy flag: `true` = `scope: workspace`. Ignored when `scope` is present.
     #[serde(default)]
     pub remember: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<PermissionScope>,
+}
+
+/// How long an approval lasts. A deny never persists.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PermissionScope {
+    /// This call only.
+    #[default]
+    Once,
+    /// Until the session ends; held in memory, never written to disk.
+    Session,
+    /// Saved to `.silence/permissions.json` for the workspace.
+    Workspace,
+}
+
+impl PermissionDecision {
+    pub fn effective_scope(&self) -> PermissionScope {
+        match self.scope {
+            Some(s) => s,
+            None if self.remember => PermissionScope::Workspace,
+            None => PermissionScope::Once,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPermissionParams {
+    pub session_id: String,
+    pub permission: PermissionMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,7 +288,7 @@ pub struct ApprovePlanParams {
     pub session_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
     Token {
@@ -168,6 +314,8 @@ pub enum SessionEvent {
         name: String,
         input: Value,
         reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        risk: Option<PermissionRisk>,
     },
     Plan {
         markdown: String,
@@ -182,6 +330,9 @@ pub enum SessionEvent {
         path: String,
         before: String,
         after: String,
+        /// Already written to disk (Balanced/Autonomous): the UI offers Undo, not Apply/Reject.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        applied: bool,
     },
     Trace {
         event: String,
@@ -209,6 +360,79 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<ErrorInfo>,
     },
+}
+
+/// One line of `sessions/<session_id>/events.jsonl` (append-only, one writer: the Engine).
+/// `seq` starts at 1 and grows by 1 per session; `ts` is RFC3339 UTC with milliseconds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogRecord {
+    pub v: u32,
+    pub seq: u64,
+    pub ts: String,
+    pub session_id: String,
+    #[serde(flatten)]
+    pub body: LogBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LogBody {
+    SessionStart {
+        workspace: String,
+        mode: SessionMode,
+        model: String,
+        permission: PermissionMode,
+    },
+    ModeChanged {
+        mode: SessionMode,
+    },
+    ModelChanged {
+        model: String,
+    },
+    /// Appended to the model-visible history (system, user, assistant, tool). Secrets redacted.
+    Message {
+        message: Value,
+    },
+    /// The last history message was dropped (a failed first call rolls the user message back).
+    MessagePopped {},
+    /// History rewritten wholesale (compaction). Replaces everything before it.
+    MessagesReplaced {
+        messages: Vec<Value>,
+    },
+    /// UI-visible event. `token`, `thinking`, `terminal` and `diff` are not persisted.
+    Event {
+        event: SessionEvent,
+    },
+}
+
+/// Row of `session.list`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub workspace: String,
+    pub mode: SessionMode,
+    pub model: String,
+    /// First user message, trimmed to 80 characters. Empty until the user speaks.
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    /// Number of user messages.
+    pub turns: u32,
+}
+
+/// Params of `session.resume`. Result: [`SessionResumeResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionResumeParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionResumeResult {
+    pub summary: SessionSummary,
+    pub permission: PermissionMode,
+    /// Log without `messages_replaced` snapshots, in order. Pending permission requests and
+    /// staged diffs are not restored.
+    pub records: Vec<LogRecord>,
 }
 
 /// Lỗi lượt đã chuẩn hóa. `code`: PROVIDER_CREDITS | PROVIDER_AUTH | PROVIDER_RATE |
@@ -261,6 +485,17 @@ pub struct ContextParts {
 pub struct FsReadParams {
     pub workspace: String,
     pub path: String,
+}
+
+/// Result of `fs.read_image` (params: `FsReadParams`): an image file inside the workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FsReadImageResult {
+    /// Workspace-relative path with `/`.
+    pub path: String,
+    pub mime: String,
+    pub bytes: u64,
+    /// `data:<mime>;base64,...`
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +586,32 @@ pub struct ModelInfo {
     pub context_window: u32,
     pub tools: bool,
     pub vision: bool,
+    /// Effort levels this model accepts (subset of [`EFFORT_LEVELS`]); empty = no effort control.
+    #[serde(default)]
+    pub efforts: Vec<String>,
+    /// Level the UI marks "Recommended"; empty when `efforts` is empty.
+    #[serde(default)]
+    pub default_effort: String,
+    /// Provider id (`company-gateway`, `anthropic`, `claude-cli`, …) the picker groups by.
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub provider_label: String,
+    /// `openai_compat` | `anthropic` | `claude_cli`.
+    #[serde(default)]
+    pub provider_kind: String,
+    /// False when the source cannot run now (no key, CLI missing); see `unavailable_reason`.
+    #[serde(default = "default_true")]
+    pub available: bool,
+    #[serde(default)]
+    pub unavailable_reason: String,
+    /// Hidden from the picker until switched on in Settings (costly models, e.g. Fable).
+    #[serde(default)]
+    pub opt_in: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[cfg(test)]
