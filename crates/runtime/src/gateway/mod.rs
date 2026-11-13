@@ -6,11 +6,11 @@ use serde_json::{json, Value};
 use silence_router::{Catalog, ModelEntry};
 use std::time::Duration;
 
-pub mod anthropic;
+pub mod claude_api;
 
 /// `Provider.kind` values the gateway speaks.
 pub const KIND_OPENAI: &str = "openai_compat";
-pub const KIND_ANTHROPIC: &str = "anthropic";
+pub const KIND_CLAUDE_API: &str = "claude_api";
 pub const KIND_CLAUDE_CLI: &str = "claude_cli";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -22,16 +22,16 @@ pub struct ChatResult {
     /// Whole prompt size, cached tokens included (measures the context).
     pub input_tokens: u32,
     pub output_tokens: u32,
-    /// Part of `input_tokens` served from the prompt cache (Anthropic).
+    /// Part of `input_tokens` served from the prompt cache (Claude API).
     #[serde(default)]
     pub cache_read_tokens: u32,
-    /// Part of `input_tokens` written to the prompt cache (Anthropic).
+    /// Part of `input_tokens` written to the prompt cache (Claude API).
     #[serde(default)]
     pub cache_write_tokens: u32,
     pub finish_reason: String,
     /// Provider-native content blocks of this assistant turn, to replay verbatim
-    /// (Anthropic thinking + signature). Stored on the message under
-    /// `anthropic::RAW_BLOCKS_KEY`.
+    /// (Claude API thinking + signature). Stored on the message under
+    /// `claude_api::RAW_BLOCKS_KEY`.
     #[serde(default)]
     pub raw_blocks: Option<Value>,
 }
@@ -44,7 +44,7 @@ impl ChatResult {
             m["tool_calls"] = Value::Array(tc);
         }
         if let Some(raw) = &self.raw_blocks {
-            m[anthropic::RAW_BLOCKS_KEY] = raw.clone();
+            m[claude_api::RAW_BLOCKS_KEY] = raw.clone();
         }
         m
     }
@@ -122,15 +122,15 @@ async fn chat_inner(
     let effort = model.effective_effort(effort);
     let max_tokens = max_tokens.unwrap_or_else(|| model.max_output_tokens.max(1024));
     match provider.kind.as_str() {
-        KIND_ANTHROPIC => {
+        KIND_CLAUDE_API => {
             if key.is_empty() {
                 return Err(ProviderError::new(
                     crate::provider_error::ErrorCode::ProviderAuth,
-                    "Anthropic API key is not set",
+                    "Claude API key is not set (ANTHROPIC_API_KEY)",
                 )
                 .into());
             }
-            return anthropic::chat(
+            return claude_api::chat(
                 provider, &key, &model, messages, tools, max_tokens, effort, on_token, on_thinking,
             )
             .await;
@@ -146,14 +146,14 @@ async fn chat_inner(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')
     );
-    // Raw Anthropic blocks are only meaningful to that API; OpenAI-compatible endpoints may
+    // Raw Claude API blocks are only meaningful to that API; OpenAI-compatible endpoints may
     // reject unknown message fields.
     let messages: Vec<Value> = messages
         .iter()
         .map(|m| match m {
-            Value::Object(o) if o.contains_key(anthropic::RAW_BLOCKS_KEY) => {
+            Value::Object(o) if o.contains_key(claude_api::RAW_BLOCKS_KEY) => {
                 let mut o = o.clone();
-                o.remove(anthropic::RAW_BLOCKS_KEY);
+                o.remove(claude_api::RAW_BLOCKS_KEY);
                 Value::Object(o)
             }
             other => other.clone(),
@@ -438,7 +438,7 @@ mod tests {
             ..Default::default()
         };
         let m = r.assistant_message(None);
-        assert_eq!(m[anthropic::RAW_BLOCKS_KEY][0]["text"], "hi");
+        assert_eq!(m[claude_api::RAW_BLOCKS_KEY][0]["text"], "hi");
         assert!(m.get("tool_calls").is_none());
     }
 

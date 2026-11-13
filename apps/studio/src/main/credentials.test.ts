@@ -22,25 +22,25 @@ describe("credential store", () => {
   it("stores keys encrypted and reports only has_key + last4", () => {
     const io = memIo();
     const s = new CredentialStore(io, cipher());
-    s.set("anthropic", "sk-ant-secret-1234");
+    s.set("claude-api", "sk-ant-secret-1234");
     expect(io.text).not.toContain("sk-ant-secret-1234");
-    const st = s.status().find((x) => x.provider === "anthropic")!;
-    expect(st).toEqual({ provider: "anthropic", has_key: true, last4: "1234" });
+    const st = s.status().find((x) => x.provider === "claude-api")!;
+    expect(st).toEqual({ provider: "claude-api", has_key: true, last4: "1234" });
     expect(JSON.stringify(s.status())).not.toContain("secret");
-    expect(new CredentialStore(io, cipher()).get("anthropic")).toBe("sk-ant-secret-1234");
+    expect(new CredentialStore(io, cipher()).get("claude-api")).toBe("sk-ant-secret-1234");
   });
 
   it("clears with an empty key and ignores unknown providers on load", () => {
-    const io = memIo(JSON.stringify({ evil: "x", anthropic: "enc:YQ==" }));
+    const io = memIo(JSON.stringify({ evil: "x", "claude-api": "enc:YQ==" }));
     const s = new CredentialStore(io, cipher());
-    expect(s.all()).toEqual([{ provider: "anthropic", key: "a" }]);
-    s.set("anthropic", "");
+    expect(s.all()).toEqual([{ provider: "claude-api", key: "a" }]);
+    s.set("claude-api", "");
     expect(s.all()).toEqual([]);
   });
 
   it("refuses to store without OS encryption", () => {
     const s = new CredentialStore(memIo(), cipher(false));
-    expect(() => s.set("anthropic", "k")).toThrow();
+    expect(() => s.set("claude-api", "k")).toThrow();
   });
 
   it("validates input and keeps secret RPCs main-only", () => {

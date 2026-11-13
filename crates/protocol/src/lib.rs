@@ -86,7 +86,13 @@ pub struct SessionCreateParams {
     /// `auto` (default) = let the model pick; otherwise one of [`EFFORT_LEVELS`].
     #[serde(default)]
     pub effort: Option<String>,
+    /// Answer style: `default` (or absent) adds nothing; see [`RESPONSE_STYLES`].
+    #[serde(default)]
+    pub style: Option<String>,
 }
+
+/// Answer styles the UI can pick (Settings → Chat). `default` = the plain system prompt.
+pub const RESPONSE_STYLES: [&str; 3] = ["default", "concise", "explanatory"];
 
 /// Effort levels the UI can pick, weakest first. `auto` (not listed) = send nothing.
 pub const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
@@ -242,6 +248,13 @@ pub struct SetAutoConfigParams {
 pub struct SetEffortParams {
     pub session_id: String,
     pub effort: String,
+}
+
+/// `session.set_style`: one of [`RESPONSE_STYLES`]; applies from the next turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStyleParams {
+    pub session_id: String,
+    pub style: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -510,6 +523,21 @@ pub struct SessionSummary {
     pub turns: u32,
 }
 
+/// Params of `session.prune`: delete session logs whose last event is older than
+/// `older_than_days` (≥ 1). `keep` = ids never deleted (pinned chats). Result: `{deleted}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionPruneParams {
+    pub older_than_days: u32,
+    #[serde(default)]
+    pub keep: Vec<String>,
+}
+
+/// Params of `session.delete`. The audit log is kept. Result: `{deleted}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDeleteParams {
+    pub session_ids: Vec<String>,
+}
+
 /// Params of `session.resume`. Result: [`SessionResumeResult`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionResumeParams {
@@ -682,12 +710,12 @@ pub struct ModelInfo {
     /// Level the UI marks "Recommended"; empty when `efforts` is empty.
     #[serde(default)]
     pub default_effort: String,
-    /// Provider id (`company-gateway`, `anthropic`, `claude-cli`, …) the picker groups by.
+    /// Provider id (`company-gateway`, `claude-api`, `claude-cli`, …) the picker groups by.
     #[serde(default)]
     pub provider: String,
     #[serde(default)]
     pub provider_label: String,
-    /// `openai_compat` | `anthropic` | `claude_cli`.
+    /// `openai_compat` | `claude_api` | `claude_cli`.
     #[serde(default)]
     pub provider_kind: String,
     /// False when the source cannot run now (no key, CLI missing); see `unavailable_reason`.
@@ -708,6 +736,16 @@ fn default_true() -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn new_settings_params_default_cleanly() {
+        let p: SessionCreateParams = serde_json::from_value(json!({"workspace": "w"})).unwrap();
+        assert!(p.style.is_none());
+        let p: SessionCreateParams = serde_json::from_value(json!({"workspace": "w", "style": "concise"})).unwrap();
+        assert_eq!(p.style.as_deref(), Some("concise"));
+        let p: SessionPruneParams = serde_json::from_value(json!({"older_than_days": 30})).unwrap();
+        assert!(p.keep.is_empty());
+    }
 
     #[test]
     fn error_event_without_info_is_backward_compatible() {

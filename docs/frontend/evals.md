@@ -13,7 +13,7 @@ Chạy eval agent ngay trong Studio, thay cho `npm run evals …`. Cách eval ch
 
 ## Mở trang
 
-- Settings (Appearance) → mục **Evals** → nút mở trang. Trang thay chỗ khung chat (giống Settings → Models); mở chat hoặc file khác thì trang đóng.
+- Settings → **Giới thiệu** → hàng **Evals** → nút mở trang (chỉ hiện khi Engine thấy thư mục `evals/`). Trang thay chỗ khung chat; mở chat hoặc file khác thì trang đóng.
 - Mục chỉ hiện khi Engine thấy thư mục `evals/` ở repo root (`eval.catalog` trả `available: true`), tức là khi chạy từ checkout của repo 5ilence.
 
 ## Bố cục

@@ -100,6 +100,33 @@ pub fn profile(mode: SessionMode) -> ModeProfile {
 }
 
 /// History with the mode instructions appended to the system message (not persisted).
+/// Settings → Chat → answer style. Appended per turn (like the mode), so a change applies
+/// to the next turn. `default` adds nothing.
+pub(super) const STYLE_CONCISE: &str = "## Answer style: concise
+Keep user-facing answers short: lead with the result, then only what the user needs to act on it. No preamble, no recap of what you did step by step, no closing offers. Use at most a few bullets; skip headings unless the answer is long by necessity. Code, paths and commands stay complete and exact.";
+pub(super) const STYLE_EXPLANATORY: &str = "## Answer style: explanatory
+The user wants to understand, not just get the result. After the answer, explain the why: the key idea behind the change or finding, the trade-off you chose, and one thing worth knowing for next time. Define terms the first time you use them. Stay concrete: tie every explanation to the actual code (`path:line`).";
+
+pub(super) fn style_system(style: &str) -> &'static str {
+    match style {
+        "concise" => STYLE_CONCISE,
+        "explanatory" => STYLE_EXPLANATORY,
+        _ => "",
+    }
+}
+
+/// Mode instructions plus the answer style, for `with_mode_system`.
+pub(super) fn turn_system(mode_extra: &str, style: &str) -> String {
+    let style = style_system(style);
+    match (mode_extra.is_empty(), style.is_empty()) {
+        (_, true) => mode_extra.to_string(),
+        (true, false) => style.to_string(),
+        (false, false) => format!("{mode_extra}
+
+{style}"),
+    }
+}
+
 pub(super) fn with_mode_system(messages: &[Value], extra: &str) -> Vec<Value> {
     let mut out = messages.to_vec();
     if extra.is_empty() {
@@ -112,4 +139,30 @@ pub(super) fn with_mode_system(messages: &[Value], extra: &str) -> Vec<Value> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn default_style_adds_nothing() {
+        assert_eq!(turn_system("", "default"), "");
+        assert_eq!(turn_system("## Mode: Ask", "default"), "## Mode: Ask");
+        assert_eq!(turn_system("## Mode: Ask", "bogus"), "## Mode: Ask");
+    }
+
+    #[test]
+    fn style_joins_after_the_mode() {
+        assert_eq!(turn_system("", "concise"), STYLE_CONCISE);
+        let both = turn_system("## Mode: Ask", "explanatory");
+        assert!(both.starts_with("## Mode: Ask\n\n## Answer style: explanatory"));
+    }
+
+    #[test]
+    fn styles_match_the_protocol_list() {
+        for s in silence_protocol::RESPONSE_STYLES {
+            assert_eq!(style_system(s).is_empty(), s == "default", "{s}");
+        }
+    }
 }

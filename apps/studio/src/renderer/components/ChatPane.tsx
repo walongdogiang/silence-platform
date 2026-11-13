@@ -39,6 +39,7 @@ import { ImageFrame } from "./ImageFrame";
 import type { EditTarget } from "../imageActions";
 import { ImageRefStrip } from "./WorkspaceImage";
 import { SoftScroll } from "./SoftScroll";
+import { transcriptOpen, type TranscriptView } from "../prefs";
 
 const MODES = [
   { id: "Plan", title: "Plan", desc: "hub.planDesc", Icon: ListChecks },
@@ -378,6 +379,7 @@ function AiFooter(props: {
 
 function AgentMeta(props: {
   turn: Turn;
+  view: TranscriptView;
   run?: RunMeter | null;
   awaitingPermission?: boolean;
   onRestoreCheckpoint?: (id: string) => void;
@@ -411,8 +413,16 @@ function AgentMeta(props: {
     routes.length > 0 ||
     tools.length > 0;
 
+  const opened = transcriptOpen(props.view, {
+    live: Boolean(props.turn.live),
+    thoughtHasBody: Boolean(thoughtBody),
+    thinkingLive,
+    hasSteps: steps.length > 0,
+    hasThought: Boolean(tLabel),
+  });
+
   return (
-    <details className={`msg-agent-meta${props.turn.live ? " live" : ""}`} open={props.turn.live || undefined}>
+    <details className={`msg-agent-meta${props.turn.live ? " live" : ""}`} open={(hasBody && opened.meta) || undefined}>
       <summary>
         <span
           className={props.turn.live ? `msg-pulse ${phase}` : undefined}
@@ -435,7 +445,7 @@ function AgentMeta(props: {
           {tLabel ? (
             <details
               className={`msg-thought-block${thinkingLive ? " live" : ""}`}
-              open={Boolean(thoughtBody) || thinkingLive || undefined}
+              open={opened.thought || undefined}
             >
               <summary>
                 <span className={`msg-thought-label${thinkingLive ? " active" : ""}`}>{tLabel}</span>
@@ -451,7 +461,7 @@ function AgentMeta(props: {
           ) : null}
 
           {explored.show ? (
-            <details className="msg-explored" open={props.turn.live && steps.length > 0 ? true : undefined}>
+            <details className="msg-explored" open={opened.explored || undefined}>
               <summary>
                 <span className={explored.stub ? "stub" : undefined}>{explored.label}</span>
                 {steps.length > 0 ? <ChevronDown size={13} className="msg-agent-meta-chev" /> : null}
@@ -504,7 +514,7 @@ function AgentMeta(props: {
           ) : null}
 
           {tools.length > 0 ? (
-            <details className="msg-agent-meta-trace">
+            <details className="msg-agent-meta-trace" open={opened.tools || undefined}>
               <summary>{t("meta.toolDetails")}</summary>
               {tools.map((l, j) => (
                 <pre key={j}>
@@ -553,6 +563,8 @@ export function ChatPane(props: {
   onChip?: (chip: string) => void;
   onUsePrompt?: (text: string) => void;
   onRetry?: () => void;
+  /** Settings → Chat → default view: which blocks of a turn start open. */
+  transcript?: TranscriptView;
   /** "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn prompt. Trả lỗi nếu không đính được. */
   onAttachEdited?: (png: Blob, prompt: string) => Promise<string | null>;
 }) {
@@ -713,6 +725,7 @@ export function ChatPane(props: {
               {showMeta ? (
                 <AgentMeta
                   turn={turn}
+                  view={props.transcript ?? "compact"}
                   run={props.run}
                   awaitingPermission={Boolean(props.perm)}
                   onRestoreCheckpoint={props.onRestoreCheckpoint}

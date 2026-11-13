@@ -40,7 +40,7 @@ pub(super) async fn run_cli_turn(
     let (system, tools, effort, resume, prior, workspace, sid) = {
         let s = session_arc.lock().await;
         let prof = profile(s.mode);
-        let msgs = with_mode_system(&s.messages, prof.system);
+        let msgs = with_mode_system(&s.messages, &turn_system(prof.system, &s.style));
         let system = msgs
             .first()
             .filter(|m| m["role"] == "system")

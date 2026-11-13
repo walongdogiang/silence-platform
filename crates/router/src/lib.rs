@@ -34,7 +34,7 @@ pub struct Provider {
     pub base_url: String,
     #[serde(default)]
     pub api_key_env: String,
-    /// Shown in the model picker and Settings ("Anthropic API", "OpenRouter", …).
+    /// Shown in the model picker and Settings ("Claude API", "OpenRouter", …).
     #[serde(default)]
     pub label: String,
     /// Executable for `claude_cli` providers (default `claude`).
@@ -357,7 +357,7 @@ mod tests {
 version: 1
 providers:
   - { id: gw, kind: openai_compat, base_url: "http://x", api_key_env: SILENCE_TEST_NO_SUCH_KEY_1 }
-  - { id: api, kind: anthropic, base_url: "http://y", api_key_env: SILENCE_TEST_NO_SUCH_KEY_2 }
+  - { id: api, kind: claude_api, base_url: "http://y", api_key_env: SILENCE_TEST_NO_SUCH_KEY_2 }
   - { id: cli, kind: claude_cli, command: claude }
 models:
   - { id: cli-strong, provider: cli, api_model: o, tier: strong, context_window: 1, vision: true }
@@ -385,7 +385,7 @@ models:
         assert_eq!(c.api_key(&api), "");
         let info = c.infos().into_iter().find(|m| m.id == "api-strong").unwrap();
         assert!(!info.available);
-        assert_eq!(info.provider_kind, "anthropic");
+        assert_eq!(info.provider_kind, "claude_api");
         c.set_credential("api", "sk-test").unwrap();
         assert_eq!(c.api_key(&api), "sk-test");
         assert!(c.infos().into_iter().find(|m| m.id == "api-strong").unwrap().available);

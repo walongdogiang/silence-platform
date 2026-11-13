@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ChatLine } from "../models";
 import { translator } from "../i18n";
-import { firstExchange, shownTitle, titleFrom, titleLocked } from "./ChatHistoryPanel";
+import { firstExchange, groupThreads, shownTitle, threadMarkdown, titleFrom, titleLocked } from "./ChatHistoryPanel";
+import type { ChatThread } from "../models";
 
 describe("titleFrom", () => {
   it("capitalizes the first letter, including Vietnamese diacritics", () => {
@@ -65,5 +66,54 @@ describe("titleLocked", () => {
     expect(titleLocked({ titleSource: "ai" })).toBe(true);
     expect(titleLocked({ titleSource: "user" })).toBe(true);
     expect(titleLocked({ forkedFromId: "x" })).toBe(true);
+  });
+});
+
+describe("groupThreads", () => {
+  const now = Date.now();
+  const mk = (id: string, extra: Partial<ChatThread> = {}): ChatThread => ({
+    id,
+    sessionId: "s",
+    workspace: "w",
+    title: `chat ${id}`,
+    preview: "",
+    updatedAt: now,
+    lines: [{ kind: "user", text: "hi" }],
+    ...extra,
+  });
+
+  it("puts pinned first and splits archived out of the day groups", () => {
+    const r = groupThreads([mk("a"), mk("b", { pinned: true }), mk("c", { archived: true })], "w", "");
+    expect(r.groups.map((g) => g.id)).toEqual(["pinned", "today"]);
+    expect(r.groups[0].items.map((t) => t.id)).toEqual(["b"]);
+    expect(r.groups[1].items.map((t) => t.id)).toEqual(["a"]);
+    expect(r.archived.map((t) => t.id)).toEqual(["c"]);
+  });
+
+  it("filters archived chats by search too, and skips empty chats and other workspaces", () => {
+    const r = groupThreads(
+      [mk("a"), mk("x", { archived: true, title: "needle" }), mk("e", { lines: [] }), mk("o", { workspace: "o" })],
+      "w",
+      "NEED",
+    );
+    expect(r.groups).toEqual([]);
+    expect(r.archived.map((t) => t.id)).toEqual(["x"]);
+  });
+});
+
+describe("threadMarkdown", () => {
+  it("renders user/assistant sections and merges tokens", () => {
+    const md = threadMarkdown({
+      title: "T",
+      lines: [
+        { kind: "user", text: "hello" },
+        { kind: "route", text: "r" },
+        { kind: "token", text: "Hi " },
+        { kind: "token", text: "there" },
+        { kind: "tool", name: "read", output: "x" },
+        { kind: "token", text: "done" },
+      ],
+    });
+    expect(md).toBe("# T\n\n## User\n\nhello\n\n## Assistant\n\nHi there\n\n`read`\n\n```\nx\n```\n\ndone\n");
   });
 });

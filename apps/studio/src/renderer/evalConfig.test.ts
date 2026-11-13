@@ -12,7 +12,7 @@ const task = (id: string, last?: "PASS" | "FAIL" | "ERROR"): EvalTaskInfo => ({
 const catalog: EvalCatalog = {
   available: true,
   running: false,
-  sources: [{ id: "anthropic", label: "Anthropic API", kind: "anthropic", available: true, unavailable_reason: "" }],
+  sources: [{ id: "claude-api", label: "Claude API", kind: "claude_api", available: true, unavailable_reason: "" }],
   suites: [
     { name: "modes", tasks: [task("M01"), task("A01", "FAIL")] },
     { name: "v0", tasks: [task("E01", "PASS"), task("B06", "ERROR"), task("X13")] },

@@ -77,6 +77,9 @@ pub(crate) struct Task {
     /// Session effort (`auto` default).
     #[serde(default)]
     effort: Option<String>,
+    /// Answer style (`default` | `concise` | `explanatory`), as Settings → Chat sets it.
+    #[serde(default)]
+    style: Option<String>,
     /// Env vars the task needs (e.g. `ANTHROPIC_API_KEY`); the task is skipped when one is unset.
     #[serde(default)]
     requires_env: Vec<String>,
@@ -128,6 +131,9 @@ struct PassIf {
     /// Regexes that must match no line of `audit.jsonl` (e.g. an executed blocked command).
     #[serde(default)]
     audit_absent: Vec<String>,
+    /// The final report must be at most this many characters (answer-style tasks).
+    #[serde(default)]
+    max_report_chars: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,6 +378,9 @@ impl Suite {
         }
         if let Some(e) = &effort {
             agent::set_effort(&ctx, &sid, e).await?;
+        }
+        if let Some(s) = &task.style {
+            agent::set_style(&ctx, &sid, s).await?;
         }
         // Base context (system + rules + tool schemas): only used when the provider
         // returns no usage and input tokens have to be estimated.
@@ -1051,6 +1060,9 @@ fn check_pass(
     verify_cmd: &str,
 ) -> bool {
     let hay = format!("{report}\n{plan}").to_lowercase();
+    if task.pass_if.max_report_chars.is_some_and(|n| report.trim().chars().count() > n) {
+        return false;
+    }
     for rel in &task.pass_if.unchanged {
         if std::fs::read(ws.join(rel)).ok() != std::fs::read(fixture.join(rel)).ok() {
             return false;
@@ -1370,7 +1382,7 @@ mod tests {
         let opts = RunOptions {
             only: vec!["E01-edit-add-pow".into(), "B06-bugfix-mul".into()],
             max_cost: Some(0.0),
-            source: Some("anthropic".into()),
+            source: Some("claude-api".into()),
             ..Default::default()
         };
         let mut seen = Vec::new();

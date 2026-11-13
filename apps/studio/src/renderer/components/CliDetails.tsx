@@ -6,7 +6,8 @@ import { useT } from "../i18n";
 const LOGIN_CMD = "claude auth login";
 
 /**
- * Claude CLI card body (Settings → Model sources): account, install, how 5ilence runs it, usage.
+ * Claude CLI card body (Settings → Model → Sources): account + today's usage up front; install,
+ * how 5ilence runs it and full usage sit under a collapsed "Technical details".
  * Data from `providers.cli_info` (Engine runs `claude --version` + `claude auth status`; no model
  * call). Shown only on this machine.
  */
@@ -52,8 +53,8 @@ export function CliDetails(props: { refreshKey?: number }) {
   const turns = (n: number) => t(n === 1 ? "cli.turns1" : "cli.turns", { n });
 
   return (
-    <div className="cli-details">
-      <section>
+    <div className="cli-body">
+      <section className="cli-account">
         <h4>{t("cli.account")}</h4>
         {!info.installed ? (
           <p className="hint">{t("cli.notInstalled")}</p>
@@ -92,60 +93,68 @@ export function CliDetails(props: { refreshKey?: number }) {
         {a?.logged_in && isSubscriptionLogin(a.auth_method) ? (
           <p className="cli-notice">{t("cli.subscriptionNotice")}</p>
         ) : null}
+        <p className="cli-today">
+          {t("cli.today")}: {turns(info.usage.turns_today)} · {fmtUsd(info.usage.usd_today)}
+        </p>
       </section>
 
-      <section>
-        <h4>{t("cli.install")}</h4>
-        <dl className="cli-kv">
-          <dt>{t("cli.version")}</dt>
-          <dd>{info.version || "—"}</dd>
-          <dt>{t("cli.command")}</dt>
-          <dd>
-            <code>{info.program}</code>
-          </dd>
-          {a?.config_dir ? (
-            <>
-              <dt>{t("cli.configDir")}</dt>
+      <details className="cli-more">
+        <summary>{t("cli.more")}</summary>
+        <div className="cli-details">
+          <section>
+            <h4>{t("cli.install")}</h4>
+            <dl className="cli-kv">
+              <dt>{t("cli.version")}</dt>
+              <dd>{info.version || "—"}</dd>
+              <dt>{t("cli.command")}</dt>
               <dd>
-                <code>{a.config_dir}</code>
+                <code>{info.program}</code>
               </dd>
-            </>
-          ) : null}
-        </dl>
-        <p className="provider-note">{t("cli.commandHint")}</p>
-      </section>
+              {a?.config_dir ? (
+                <>
+                  <dt>{t("cli.configDir")}</dt>
+                  <dd>
+                    <code>{a.config_dir}</code>
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+            <p className="provider-note">{t("cli.commandHint")}</p>
+          </section>
 
-      <section>
-        <h4>{t("cli.howRuns")}</h4>
-        <ul className="cli-guards">
-          {info.safeguards.map(([what, flag]) => (
-            <li key={flag}>
-              <span>{what}</span>
-              <code>{flag}</code>
-            </li>
-          ))}
-        </ul>
-        {info.models.length ? (
-          <p className="provider-note">
-            {t("cli.models", { list: info.models.map(([label, id]) => `${label} (${id})`).join(", ") })}
-          </p>
-        ) : null}
-      </section>
+          <section>
+            <h4>{t("cli.howRuns")}</h4>
+            <ul className="cli-guards">
+              {info.safeguards.map(([what, flag]) => (
+                <li key={flag}>
+                  <span>{what}</span>
+                  <code>{flag}</code>
+                </li>
+              ))}
+            </ul>
+            {info.models.length ? (
+              <p className="provider-note">
+                {t("cli.models", { list: info.models.map(([label, id]) => `${label} (${id})`).join(", ") })}
+              </p>
+            ) : null}
+          </section>
 
-      <section>
-        <h4>{t("cli.usage")}</h4>
-        <dl className="cli-kv">
-          <dt>{t("cli.today")}</dt>
-          <dd>
-            {turns(info.usage.turns_today)} · {fmtUsd(info.usage.usd_today)}
-          </dd>
-          <dt>{t("cli.allTime")}</dt>
-          <dd>
-            {turns(info.usage.turns_total)} · {fmtUsd(info.usage.usd_total)}
-          </dd>
-        </dl>
-        <p className="provider-note">{t("cli.usageNote")}</p>
-      </section>
+          <section>
+            <h4>{t("cli.usage")}</h4>
+            <dl className="cli-kv">
+              <dt>{t("cli.today")}</dt>
+              <dd>
+                {turns(info.usage.turns_today)} · {fmtUsd(info.usage.usd_today)}
+              </dd>
+              <dt>{t("cli.allTime")}</dt>
+              <dd>
+                {turns(info.usage.turns_total)} · {fmtUsd(info.usage.usd_total)}
+              </dd>
+            </dl>
+            <p className="provider-note">{t("cli.usageNote")}</p>
+          </section>
+        </div>
+      </details>
     </div>
   );
 }

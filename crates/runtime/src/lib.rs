@@ -8,6 +8,7 @@ pub mod eval_rpc;
 pub mod eval_runner;
 pub mod gateway;
 pub mod images;
+pub mod mcp_config;
 pub mod org;
 pub mod permissions;
 pub mod provider_error;

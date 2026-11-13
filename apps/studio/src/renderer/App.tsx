@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import mountains from "./assets/wallpapers/mountains.png";
-import { AppearancePanel } from "./components/AppearancePanel";
 import { BottomPanel, type PanelTab } from "./components/BottomPanel";
 import {
   ChatHistoryPanel,
@@ -41,17 +40,17 @@ import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds
 import { DiffPane } from "./components/DiffPane";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
 import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
-import { NetworkPanel } from "./components/NetworkPanel";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import { EvalsPage } from "./components/EvalsPage";
 import {
+  loadDefaultSource,
   loadPick,
-  loadPreferredProvider,
   modelForSource,
   modelSources,
   normalizeEffort,
   resolveSource,
   savePick,
-  savePreferredProvider,
   type Effort,
 } from "./effort";
 import { TitleBar } from "./components/TitleBar";
@@ -78,6 +77,20 @@ import {
 } from "./theme/appearance";
 import { loadModelPrefs, lockedModels, saveModelPrefs, visibleModels } from "./theme/modelsPrefs";
 import type { CliInfo, ContextUsage, ModelInfo, SessionEvent } from "./types";
+import { loadPrefs, savePrefs, type Prefs } from "./prefs";
+import { pinnedSessionIds, pruneThreads } from "./retention";
+
+/** xterm colours from the theme tokens, so the light theme gets a light terminal. */
+function terminalTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    background: v("--workspace", "#191a1c"),
+    foreground: v("--text-primary", "#f0efec"),
+    cursor: v("--accent", "#e5a05b"),
+    selectionBackground: v("--surface-hover", "#303134"),
+  };
+}
 
 function loadShellView(): ShellView {
   const v = localStorage.getItem("silence.shell.view");
@@ -85,6 +98,7 @@ function loadShellView(): ShellView {
 }
 
 function loadOpenTabs(): string[] {
+  if (!loadPrefs().restoreSession) return [];
   try {
     const raw = localStorage.getItem("silence.shell.openTabs");
     if (!raw) return [];
@@ -230,11 +244,17 @@ function sealThoughtMs(lines: ChatLine[], startedAt: number): ChatLine[] {
 
 export function App() {
   const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
+  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
+  /** Latest prefs for the Engine event listener (registered once). */
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   /** UI strings in the chosen language (App sits above `LangContext`, so no `useT` here). */
   const t = translator(appearance.lang);
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
-  const [showNetwork, setShowNetwork] = useState(false);
-  /** Settings → Evals full page (dev: only when the Engine sees an `evals/` folder). */
+  /** Settings dialog: open on `section`; `n` changes on every request so it can re-target. */
+  const [settings, setSettings] = useState<{ section: SettingsSection; n: number } | null>(null);
+  const openSettings = (section: SettingsSection = loadSettingsSection()) => setSettings({ section, n: Date.now() });
+  /** Settings → Giới thiệu → Evals full page (dev: only when the Engine sees an `evals/` folder). */
   const [showEvals, setShowEvals] = useState(false);
   const [evalsAvailable, setEvalsAvailable] = useState(false);
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
@@ -243,14 +263,15 @@ export function App() {
   const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
   const [outputLog, setOutputLog] = useState<string[]>([]);
   const [historyHidden, setHistoryHidden] = useState(() => localStorage.getItem("silence.shell.history") === "1");
-  const [appearOpen, setAppearOpen] = useState(false);
 
   const [workspace, setWorkspace] = useState(() => localStorage.getItem("silence.shell.workspace") ?? "");
   const [sessionId, setSessionId] = useState("");
   const [model, setModel] = useState(() => loadPick().model);
   const [effort, setEffort] = useState<Effort>(() => loadPick().effort);
   /** Model source the picker shows (provider id); also the provider Auto prefers. */
-  const [source, setSource] = useState(() => loadPreferredProvider());
+  // Starts on the default from Settings → Model sources (the Claude CLI when unset); the
+  // composer's Source row switches for this run only.
+  const [source, setSource] = useState(() => loadDefaultSource());
   const [models, setModels] = useState<ModelInfo[]>([]);
   /** Auto settings per source (`silence.auto.v1`), pushed to the Engine with `auto.set_config`. */
   const [autoCfgs, setAutoCfgs] = useState<Record<string, AutoConfig>>(() => loadAuto());
@@ -261,8 +282,12 @@ export function App() {
   const activeThreadRef = useRef("");
   /** The turn stopped at the Auto spend cap (`done` with stop `budget`). */
   const [budgetHit, setBudgetHit] = useState(false);
-  /** Settings → Models → scroll to Auto (`NetworkPanel.focusAuto`). */
+  /** Settings → Models → Auto tab (`NetworkPanel.focusAuto`). */
   const [focusAuto, setFocusAuto] = useState(0);
+  /** Picker → Add models → Settings → Model → Models tab with the add form open. */
+  const [focusAdd, setFocusAdd] = useState(0);
+  /** Picker → Source → Set up → Settings → Model → Sources tab. */
+  const [focusSources, setFocusSources] = useState(0);
   // The Evals entry only shows when the Engine finds `evals/` (dev checkout).
   useEffect(() => {
     void window.silence
@@ -317,6 +342,9 @@ export function App() {
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => loadOpenTabs());
   const [activeThreadId, setActiveThreadId] = useState("");
   activeThreadRef.current = activeThreadId;
+  /** Title of the open chat, for the "agent finished" notice. */
+  const threadTitleRef = useRef("");
+  threadTitleRef.current = threads.find((x) => x.id === activeThreadId)?.title ?? "";
   const spend = spendByThread[activeThreadId] ?? EMPTY_SPEND;
   /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
@@ -351,6 +379,26 @@ export function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [appearance]);
+
+  useEffect(() => {
+    savePrefs(prefs);
+  }, [prefs]);
+
+  // Settings → Dữ liệu → Giữ lịch sử chat: dọn một lần khi mở Studio (chat đã ghim luôn giữ).
+  useEffect(() => {
+    const days = prefs.retentionDays;
+    if (!days) return;
+    const { removed } = pruneThreads(threads, days, Date.now());
+    if (removed.length) {
+      const gone = new Set(removed.map((t) => t.id));
+      setThreads((xs) => xs.filter((t) => !gone.has(t.id)));
+      setOpenTabIds((ids) => ids.filter((id) => !gone.has(id)));
+    }
+    void window.silence
+      ?.rpc("session.prune", { older_than_days: days, keep: pinnedSessionIds(threads) })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once at startup
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("silence.shell.panel", panelOpen ? "1" : "0");
@@ -427,7 +475,7 @@ export function App() {
 
   // Tiêu đề AI (như ChatGPT/Claude): một lần, sau khi lượt đầu có câu trả lời. Lỗi thì giữ tiêu đề tạm.
   useEffect(() => {
-    if (busy || !activeThreadId) return;
+    if (busy || !activeThreadId || !prefs.autoTitle) return;
     const t = threads.find((x) => x.id === activeThreadId);
     if (!t || t.titleSource === "ai" || t.titleSource === "user") return;
     if (titleRequestedRef.current.has(t.id)) return;
@@ -435,7 +483,7 @@ export function App() {
     if (!ex) return;
     titleRequestedRef.current.add(t.id);
     void requestTitle(t.id, sessionId, ex.user, ex.reply);
-  }, [busy, activeThreadId, lines, threads, sessionId]);
+  }, [busy, activeThreadId, lines, threads, sessionId, prefs.autoTitle]);
 
   useEffect(() => {
     if (activeThreadId) return;
@@ -536,7 +584,12 @@ export function App() {
         setPermError(false);
         setPerm({ request_id: ev.request_id, name: ev.name, input: ev.input, reason: ev.reason, risk: ev.risk });
         // Cửa sổ không ở phía trước thì báo ra desktop. Chỉ gửi lý do (không gửi lệnh).
-        void window.silence.notifyPermission?.(ev.risk?.reasons[0]?.title ?? ev.reason).catch(() => undefined);
+        const np = prefsRef.current;
+        if (np.notifyPermission || np.flashTaskbar) {
+          void window.silence
+            .notifyPermission?.(ev.risk?.reasons[0]?.title ?? ev.reason, { notify: np.notifyPermission, flash: np.flashTaskbar })
+            .catch(() => undefined);
+        }
       } else if (ev.type === "trace" && ev.event === "policy.blocked") {
         // Risk Engine chặn lệnh (tầng 3): biến bước "Running …" đang chạy thành "Blocked <lý do>".
         const step = blockedStep(ev.detail);
@@ -592,6 +645,13 @@ export function App() {
         setBusy(false);
         setRun(null);
         void refreshCost();
+        // Chỉ gửi tên chat, không gửi nội dung trả lời (thông báo hiện cả trên màn hình khoá).
+        const np = prefsRef.current;
+        if (np.notifyDone || np.flashTaskbar) {
+          void window.silence
+            .notifyDone?.(threadTitleRef.current, { notify: np.notifyDone, flash: np.flashTaskbar })
+            .catch(() => undefined);
+        }
       } else if (ev.type === "cost") {
         setRun((m) => addCost(m, ev));
         const tid = activeThreadRef.current;
@@ -709,7 +769,6 @@ export function App() {
   /** Switch the picker's source: list only its models, keep or reset the model, tell the Engine. */
   function chooseSource(id: string) {
     setSource(id);
-    savePreferredProvider(id);
     setModel((cur) => modelForSource(cur, id, allModels));
     void window.silence
       ?.rpc("providers.set_preferred", { provider: preferredFor(id) })
@@ -724,11 +783,12 @@ export function App() {
   useEffect(() => {
     savePick({ model, effort });
   }, [model, effort]);
-  // Keep source + model consistent with the catalog: a gone source → the first usable one; a
-  // model that is gone or belongs to another source → Auto (or the CLI default model).
+  // Keep source + model consistent with the catalog: a gone source → the default (Claude CLI
+  // unless set in Settings), never switched just because it is unusable; a model that is gone
+  // or belongs to another source → Auto.
   useEffect(() => {
     if (models.length === 0) return;
-    const src = resolveSource(source, sources);
+    const src = resolveSource(source, sources, loadDefaultSource());
     if (src !== source) {
       chooseSource(src);
       return;
@@ -748,10 +808,11 @@ export function App() {
 
   useEffect(() => {
     if (!termEl) return;
+    const p = prefsRef.current;
     const t = new Terminal({
-      theme: { background: "#191A1C", foreground: "#F0EFEC", cursor: "#E5A05B" },
-      fontSize: 12,
-      fontFamily: "Cascadia Code, Consolas, monospace",
+      theme: terminalTheme(),
+      fontSize: p.codeFontSize,
+      fontFamily: p.codeFont,
     });
     const f = new FitAddon();
     t.loadAddon(f);
@@ -771,6 +832,21 @@ export function App() {
       fit.current = null;
     };
   }, [termEl]);
+
+  // Font, size and colours follow Settings without recreating the terminal (scrollback stays).
+  useEffect(() => {
+    const t = term.current;
+    if (!t) return;
+    t.options.fontFamily = prefs.codeFont;
+    t.options.fontSize = prefs.codeFontSize;
+    t.options.theme = terminalTheme();
+    fit.current?.fit();
+  }, [prefs.codeFont, prefs.codeFontSize, appearance]);
+
+  // Giữ máy thức khi agent đang chạy (nếu bật). Main giữ một blocker duy nhất.
+  useEffect(() => {
+    void window.silence?.keepAwake?.(busy && prefs.keepAwake).catch(() => undefined);
+  }, [busy, prefs.keepAwake]);
 
   useEffect(() => {
     if (panelOpen && panelTab === "terminal") fit.current?.fit();
@@ -857,7 +933,6 @@ export function App() {
     setImages([]);
     setBusy(false);
     setRun(null);
-    setShowNetwork(false);
     setShowEvals(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
@@ -870,7 +945,20 @@ export function App() {
     const parentId = activeThreadId;
     if (!parentId) return;
     const cut = Math.max(0, Math.min(endLineInclusive, lines.length - 1));
-    const sliced = lines.slice(0, cut + 1).map((l) => ({ ...l }));
+    await forkLines(parentId, lines.slice(0, cut + 1));
+  }
+
+  /** Fork cả đoạn chat `id` (menu ⋯ ở lịch sử). */
+  async function forkThread(id: string) {
+    if (!workspace || busy) return;
+    const src = id === activeThreadId ? lines : threads.find((t) => t.id === id)?.lines;
+    if (!src) return;
+    await forkLines(id, src);
+  }
+
+  async function forkLines(parentId: string, src: ChatLine[]) {
+    if (!workspace) return;
+    const sliced = src.map((l) => ({ ...l }));
     if (sliced.length === 0) return;
     snapshotActive();
     const parent = threads.find((t) => t.id === parentId);
@@ -925,6 +1013,39 @@ export function App() {
     setThreads((xs) => xs.map((x) => (x.id === id ? { ...x, title: t, titleSource: "user" } : x)));
   }
 
+  function patchThread(id: string, patch: Partial<Pick<ChatThread, "pinned" | "archived" | "unread">>) {
+    setThreads((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }
+
+  function archiveThread(id: string, archived: boolean) {
+    if (archived) {
+      // Lưu trữ thì rời khỏi tab (như đóng tab), thread vẫn còn trong lịch sử.
+      const wasActive = id === activeThreadId;
+      const otherTab = openTabIds.some(
+        (x) => x !== id && threads.some((t) => t.id === x && t.workspace === workspace),
+      );
+      if (openTabIds.includes(id)) closeTab(id);
+      patchThread(id, { archived: true, pinned: false });
+      // Như xoá: lưu trữ chat đang mở mà không còn tab nào thì mở chat mới, không rơi về màn hình chào.
+      if (wasActive && !otherTab) void newChat();
+    } else {
+      patchThread(id, { archived: false });
+    }
+  }
+
+  /** Thêm tab cho thread mà không đổi thread đang mở. */
+  function openInNewTab(id: string) {
+    const t = threads.find((x) => x.id === id);
+    if (!t) return;
+    if (t.archived) patchThread(id, { archived: false });
+    setShellView("chat");
+    setOpenTabIds((ids) => {
+      if (ids.includes(id)) return ids;
+      const at = ids.indexOf(activeThreadId);
+      return at < 0 ? [...ids, id] : [...ids.slice(0, at + 1), id, ...ids.slice(at + 1)];
+    });
+  }
+
   async function newChat() {
     if (!workspace) return;
     // Đang ở chat trống thì dùng lại, không đẻ thêm chat rỗng.
@@ -966,9 +1087,9 @@ export function App() {
     const t = threads.find((x) => x.id === id);
     if (!t) return;
     setShellView("chat");
-    setShowNetwork(false);
     setShowEvals(false);
     rememberThread(id);
+    if (t.unread || t.archived) patchThread(id, { unread: false, archived: false });
     if (id !== activeThreadId) {
       snapshotActive();
       setActiveThreadId(id);
@@ -1013,6 +1134,22 @@ export function App() {
     setPerm(null);
   }
 
+  /** Settings → Dữ liệu → Xoá toàn bộ: mọi chat (kể cả đã ghim) và log của Engine. Audit giữ nguyên. */
+  async function clearHistory(): Promise<number> {
+    const listed = (await window.silence.rpc("session.list").catch(() => ({ sessions: [] }))) as {
+      sessions: { session_id: string }[];
+    };
+    const ids = new Set([...threads.map((t) => t.sessionId), ...listed.sessions.map((s) => s.session_id)]);
+    ids.delete("");
+    const r = (await window.silence.rpc("session.delete", { session_ids: [...ids] })) as { deleted: string[] };
+    setThreads([]);
+    setOpenTabIds([]);
+    setActiveThreadId("");
+    setLines([]);
+    void newChat();
+    return r.deleted.length;
+  }
+
   function deleteThread(id: string) {
     const rest = threads.filter((t) => t.id !== id);
     const nextOpenIds = openTabIds.filter((x) => x !== id);
@@ -1053,8 +1190,7 @@ export function App() {
       const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
       setFile(rel);
       setReviewOpen(true);
-      setShowNetwork(false);
-      setShowEvals(false);
+        setShowEvals(false);
       setFileText(r.text);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -1108,6 +1244,10 @@ export function App() {
       await window.silence.rpc("session.set_mode", { session_id: sid, mode: turnMode });
       // Engine cũ (protocol < 0.1.11) chưa có set_effort: bỏ qua, lượt vẫn chạy với mặc định model.
       await window.silence.rpc("session.set_effort", { session_id: sid, effort }).catch(() => undefined);
+      // Settings → Trò chuyện → Phong cách trả lời: áp từ lượt này (Engine cũ không biết method thì bỏ qua).
+      await window.silence
+        .rpc("session.set_style", { session_id: sid, style: prefsRef.current.responseStyle })
+        .catch(() => undefined);
       // Engine restart (watch mode) loses Auto settings: re-send the active source's with the turn.
       await pushAuto(source, autoFor(autoCfgs, source))?.catch(() => undefined);
       // A new live session for this thread (Engine restart, reopened app) starts at $0: carry the
@@ -1271,7 +1411,7 @@ export function App() {
       setPrompt((p) => (p.trim() ? p : t("app.reviewPrompt")));
       focusComposer();
     } else if (byChip[chip]) setMode(byChip[chip]);
-    else if (chip === "More") setAppearOpen(true);
+    else if (chip === "More") openSettings();
   }
 
   async function answerPerm(allow: boolean, scope: PermScope) {
@@ -1406,9 +1546,8 @@ export function App() {
       onSource={chooseSource}
       sourceAccounts={cliEmail ? { "claude_cli": cliEmail } : undefined}
       onSetupSources={() => {
-        setShowNetwork(true);
-        setShowEvals(false);
-        setShellView("chat");
+        setFocusSources(Date.now());
+        openSettings("models");
       }}
       busy={busy}
       onStop={() => void stop()}
@@ -1417,16 +1556,13 @@ export function App() {
       context={contextUsage}
       onOpenFile={(p) => void openFile(p)}
       onAddModels={() => {
-        setShowNetwork(true);
-        setShowEvals(false);
-        setShellView("chat");
+        setFocusAdd(Date.now());
+        openSettings("models");
       }}
       lockedIds={locked.map((m) => m.id)}
       onEnableModel={(id) => {
         setFocusModel({ id, n: Date.now() });
-        setShowNetwork(true);
-        setShowEvals(false);
-        setShellView("chat");
+        openSettings("models");
       }}
       autoConfig={autoFor(autoCfgs, source)}
       onAutoConfig={changeAuto}
@@ -1434,9 +1570,7 @@ export function App() {
       spend={spend}
       onAutoMore={() => {
         setFocusAuto(Date.now());
-        setShowNetwork(true);
-        setShowEvals(false);
-        setShellView("chat");
+        openSettings("models");
       }}
     />
   );
@@ -1477,6 +1611,7 @@ export function App() {
     <div className={showReview ? "chat-split" : "chat-col-fill"}>
       <div className="chat-col">
         <ChatPane
+          transcript={prefs.transcript}
           lines={lines}
           plan={plan}
           perm={perm}
@@ -1534,6 +1669,7 @@ export function App() {
           }}
           onReviewTab={setReviewSub}
           showChangesSignal={showChangesSignal}
+          code={{ font: prefs.codeFont, size: prefs.codeFontSize, minimap: prefs.minimap }}
         />
       ) : null}
     </div>
@@ -1584,7 +1720,7 @@ export function App() {
         }}
         onToggleChatWorkspace={() => setShellView((v) => (v === "chat" ? "hidden" : "chat"))}
         onToggleHistory={toggleHistory}
-        onSettings={() => setAppearOpen(true)}
+        onSettings={() => openSettings()}
         onOpenWorkspace={() => void openWorkspace()}
         onQuit={() => void window.silence?.window.close()}
       />
@@ -1603,27 +1739,7 @@ export function App() {
             />
           ) : null}
           <div className="work-body">
-            {chatHidden
-              ? null
-              : showEvals
-                ? <EvalsPage models={models} />
-                : showNetwork
-                ? (
-                  <NetworkPanel
-                    catalog={models}
-                    prefs={modelPrefs}
-                    onPrefs={setModelPrefs}
-                    activeModel={model}
-                    onSourcesChanged={loadModels}
-                    focus={focusModel}
-                    autoConfigs={autoCfgs}
-                    onAutoConfig={changeAutoFor}
-                    activeSource={source}
-                    spentUsd={spend.usd}
-                    focusAuto={focusAuto}
-                  />
-                )
-                : chatMain}
+            {chatHidden ? null : showEvals ? <EvalsPage models={models} /> : chatMain}
           </div>
           <BottomPanel
             open={panelOpen}
@@ -1645,37 +1761,63 @@ export function App() {
             onSelect={selectThread}
             onDelete={deleteThread}
             onRename={renameThread}
-            onCustomize={() => setAppearOpen(true)}
+            onPin={(id, pinned) => patchThread(id, { pinned })}
+            onMarkUnread={(id, unread) => patchThread(id, { unread })}
+            onArchive={archiveThread}
+            onOpenInTab={openInNewTab}
+            onFork={(id) => void forkThread(id)}
+            forkDisabled={busy}
+            onCustomize={() => openSettings()}
             onToggle={toggleHistory}
           />
         ) : null}
       </div>
-      <AppearancePanel
-        open={appearOpen}
-        value={appearance}
-        onChange={setAppearance}
-        onClose={() => setAppearOpen(false)}
-        workspace={workspace}
-        onOpenEvals={
-          evalsAvailable
-            ? () => {
-                setShowEvals(true);
-                setShowNetwork(false);
-                setShellView("chat");
-                setAppearOpen(false);
-              }
-            : undefined
-        }
-        permMode={permMode}
-        onPermMode={(m) => {
-          setPermMode(m);
-          savePermMode(m);
-          // Áp dụng ngay cho phiên đang mở (các phiên khác đồng bộ ở lượt gửi kế tiếp).
-          if (sessionId) {
-            void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: m }).catch(() => undefined);
+      {settings ? (
+        <SettingsDialog
+          open={settings}
+          onClose={() => setSettings(null)}
+          appearance={appearance}
+          onAppearance={setAppearance}
+          prefs={prefs}
+          onPrefs={setPrefs}
+          chatCount={threads.length}
+          onClearHistory={clearHistory}
+          onOpenEvals={
+            evalsAvailable
+              ? () => {
+                  setShowEvals(true);
+                  setShellView("chat");
+                  setSettings(null);
+                }
+              : undefined
           }
-        }}
-      />
+          workspace={workspace}
+          permMode={permMode}
+          onPermMode={(m) => {
+            setPermMode(m);
+            savePermMode(m);
+            // Áp dụng ngay cho phiên đang mở (các phiên khác đồng bộ ở lượt gửi kế tiếp).
+            if (sessionId) {
+              void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: m }).catch(() => undefined);
+            }
+          }}
+          models={{
+            catalog: models,
+            prefs: modelPrefs,
+            onPrefs: setModelPrefs,
+            activeModel: model,
+            onSourcesChanged: loadModels,
+            focus: focusModel,
+            autoConfigs: autoCfgs,
+            onAutoConfig: changeAutoFor,
+            activeSource: source,
+            spentUsd: spend.usd,
+            focusAuto,
+            focusAdd,
+            focusSources,
+          }}
+        />
+      ) : null}
     </div>
     </LangContext.Provider>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { permissionNotice, shouldNotify } from "./notify";
+import { doneNotice, noticeOpts, permissionNotice, shouldNotify } from "./notify";
 
 const win = (focused: boolean, minimized = false, visible = true) => ({
   isFocused: () => focused,
@@ -27,5 +27,20 @@ describe("permission notification", () => {
     expect(shouldNotify(win(true, true))).toBe(true);
     expect(shouldNotify(win(true, false, false))).toBe(true);
     expect(shouldNotify(null)).toBe(false);
+  });
+});
+
+describe("done notification", () => {
+  it("shows only the chat name, clipped", () => {
+    expect(doneNotice("Sửa lỗi build")).toEqual({ title: "5ilence đã xong", body: "Sửa lỗi build" });
+    expect(doneNotice("").body).toBe("Agent đã trả lời xong.");
+    expect(doneNotice(42).body).toBe("Agent đã trả lời xong.");
+    expect(doneNotice("y".repeat(200)).body.length).toBe(90);
+  });
+
+  it("reads renderer options, defaulting to on", () => {
+    expect(noticeOpts(undefined)).toEqual({ notify: true, flash: true });
+    expect(noticeOpts({ notify: false })).toEqual({ notify: false, flash: true });
+    expect(noticeOpts({ notify: false, flash: false })).toEqual({ notify: false, flash: false });
   });
 });

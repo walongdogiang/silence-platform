@@ -148,10 +148,15 @@ export function AutoSettings(props: {
   models: ModelInfo[];
   /** USD the active chat spent (only when this is the active source). */
   spentUsd?: number;
+  /** Models switched off in the Models tab: listed greyed out in the pool so the link is visible. */
+  offModels?: ModelInfo[];
+  /** Jump to the Models tab (picker switches). */
+  onOpenModels?: () => void;
 }) {
   const t = useT();
   const cfg = props.config;
   const ofSource = props.models.filter((m) => m.provider === props.source);
+  const offOfSource = (props.offModels ?? []).filter((m) => m.provider === props.source);
   const pool = cfg.pool ?? [];
   const cands = autoCandidates(cfg, props.source, props.models);
   const set = (patch: Partial<AutoConfig>) => props.onChange({ ...cfg, ...patch });
@@ -199,6 +204,19 @@ export function AutoSettings(props: {
             </small>
           </button>
         ))}
+      </div>
+
+      <div className="auto-section auto-budget">
+        <span>
+          {t("auto.capChat")}
+          <small>{props.spentUsd ? t("auto.capChatUsed", { usd: fmtUsd(props.spentUsd) }) : t("auto.capChatNone")}</small>
+        </span>
+        <BudgetInput
+          t={t}
+          label={t("auto.capChat")}
+          value={cfg.budget_usd}
+          onChange={(v) => props.onChange(withBudget(cfg, v))}
+        />
       </div>
 
       {cfg.preset === "custom" ? (
@@ -267,31 +285,34 @@ export function AutoSettings(props: {
         <p className="auto-note">{t("auto.note")}</p>
       </div>
 
-      {ofSource.length > 1 ? (
+      {ofSource.length > 1 || offOfSource.length > 0 ? (
         <div className="auto-section">
           <p className="auto-section-title">{t("auto.pool")}</p>
+          <p className="auto-note auto-pool-hint">
+            {t("auto.poolHint")}{" "}
+            {props.onOpenModels ? (
+              <button type="button" className="link-btn" onClick={props.onOpenModels}>
+                {t("auto.poolOpenModels")}
+              </button>
+            ) : null}
+          </p>
           {ofSource.map((m) => (
             <label key={m.id} className="auto-pool-row" title={m.opt_in ? t("auto.poolCostly") : undefined}>
               <input type="checkbox" checked={inPool(m)} onChange={() => togglePool(m.id)} />
               <span>{shortName(m)}</span>
             </label>
           ))}
+          {offOfSource.map((m) => (
+            <label key={m.id} className="auto-pool-row off" title={t("auto.poolOffInModels")}>
+              <input type="checkbox" checked={false} disabled />
+              <span>{shortName(m)}</span>
+              <small>{t("auto.poolOffInModels")}</small>
+            </label>
+          ))}
           {impact ? <p className="auto-impact">{impact}</p> : null}
         </div>
       ) : null}
 
-      <div className="auto-section auto-budget">
-        <span>
-          {t("auto.capChat")}
-          <small>{props.spentUsd ? t("auto.capChatUsed", { usd: fmtUsd(props.spentUsd) }) : t("auto.capChatNone")}</small>
-        </span>
-        <BudgetInput
-          t={t}
-          label={t("auto.capChat")}
-          value={cfg.budget_usd}
-          onChange={(v) => props.onChange(withBudget(cfg, v))}
-        />
-      </div>
     </div>
   );
 }

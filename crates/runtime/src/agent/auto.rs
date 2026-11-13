@@ -612,7 +612,7 @@ models:
     fn effort_steps_up_within_model_levels() {
         let yaml = r#"
 version: 1
-providers: [{ id: a, kind: anthropic, base_url: "http://x" }]
+providers: [{ id: a, kind: claude_api, base_url: "http://x" }]
 models:
   - { id: m, provider: a, api_model: m, tier: mid, context_window: 1, efforts: [low, medium, high], default_effort: medium }
   - { id: n, provider: a, api_model: n, tier: mid, context_window: 1 }

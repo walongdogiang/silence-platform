@@ -1,7 +1,7 @@
 # Ba nguồn model:
 #   company-gateway — OpenRouter (OpenAI-compatible). Env: SILENCE_API_KEY, SILENCE_API_BASE.
 #                     SILENCE_MODEL_* override api_model nếu set.
-#   anthropic       — Anthropic Messages API trực tiếp. Env: ANTHROPIC_API_KEY (hoặc nhập ở
+#   claude-api      — Claude API (Messages API) trực tiếp. Env: ANTHROPIC_API_KEY (hoặc nhập ở
 #                     Settings → Model sources), ANTHROPIC_BASE_URL.
 #   claude-cli      — Claude CLI đã đăng nhập trên máy (thử nghiệm, chỉ dùng nội bộ). Auto ở
 #                     source này chỉ chọn trong các model @cli.
@@ -19,9 +19,9 @@ providers:
     base_url: ${SILENCE_API_BASE:-https://openrouter.ai/api/v1}
     api_key_env: SILENCE_API_KEY
 
-  - id: anthropic
-    label: Anthropic API
-    kind: anthropic
+  - id: claude-api
+    label: Claude API
+    kind: claude_api
     base_url: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
     api_key_env: ANTHROPIC_API_KEY
 
@@ -109,10 +109,10 @@ models:
     input_cost_per_1m: 0
     output_cost_per_1m: 0
 
-  # --- Anthropic API trực tiếp (giá Anthropic; cache read 0.1×, cache write 1.25×) ---
+  # --- Claude API trực tiếp (giá Claude API; cache read 0.1×, cache write 1.25×) ---
   - id: claude-haiku@api
     label: Claude Haiku 5.5
-    provider: anthropic
+    provider: claude-api
     api_model: claude-haiku-5-5
     tier: fast
     context_window: 1000000
@@ -126,7 +126,7 @@ models:
 
   - id: claude-sonnet@api
     label: Claude Sonnet 5.5
-    provider: anthropic
+    provider: claude-api
     api_model: claude-sonnet-5-5
     tier: mid
     context_window: 1000000
@@ -140,7 +140,7 @@ models:
 
   - id: claude-opus@api
     label: Claude Opus 5.5
-    provider: anthropic
+    provider: claude-api
     api_model: claude-opus-5-5
     tier: strong
     context_window: 1000000

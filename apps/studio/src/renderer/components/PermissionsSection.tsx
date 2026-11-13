@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useT, type T } from "../i18n";
 import { PERM_MODES, type UiPermMode } from "../permissionUi";
+import { SettingRow } from "./settings/SettingRow";
 
 /** "edit:src/**" → { tool: "edit", scope: "src/**" }; "shell" → tool-wide. */
 function describe(entry: string, t: T) {
@@ -75,36 +76,45 @@ export function PermissionsSection(props: { workspace: string; mode: UiPermMode;
     }
   }
 
+  const wsName = props.workspace.split(/[\/]/).filter(Boolean).pop() ?? "";
+
   return (
-    <div className="appear-sec">
-      <h3>{t("perms.mode")}</h3>
-      <PermissionModePicker mode={props.mode} onMode={props.onMode} />
-      <h3>{t("perms.remembered")}</h3>
-      {!props.workspace ? (
-        <p className="muted">{t("perms.openWorkspace")}</p>
-      ) : err ? (
-        <p className="perm-error" role="alert">{err}</p>
-      ) : entries === null ? (
-        <p className="muted">{t("common.loading")}</p>
-      ) : entries.length === 0 ? (
-        <p className="muted">{t("perms.none")}</p>
-      ) : (
-        <ul className="perm-list">
-          {entries.map((e) => {
-            const d = describe(e, t);
-            return (
-              <li key={e}>
-                <span>
-                  <strong>{d.tool}</strong> · {d.scope}
-                </span>
-                <button type="button" className="icon-btn" aria-label={t("perms.revokeN", { entry: e })} title={t("perms.revoke")} onClick={() => void revoke(e)}>
-                  <X size={14} />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+    <>
+      <SettingRow id="perm-mode" label={t("perms.mode")} desc={t("perms.mode.desc")} wide>
+        <PermissionModePicker mode={props.mode} onMode={props.onMode} />
+      </SettingRow>
+      <SettingRow
+        id="perm-remembered"
+        label={t("perms.remembered")}
+        desc={wsName ? t("perms.remembered.descWs", { name: wsName }) : t("perms.remembered.desc")}
+        wide
+      >
+        {!props.workspace ? (
+          <p className="muted">{t("perms.openWorkspace")}</p>
+        ) : err ? (
+          <p className="perm-error" role="alert">{err}</p>
+        ) : entries === null ? (
+          <p className="muted">{t("common.loading")}</p>
+        ) : entries.length === 0 ? (
+          <p className="muted">{t("perms.none")}</p>
+        ) : (
+          <ul className="perm-list">
+            {entries.map((e) => {
+              const d = describe(e, t);
+              return (
+                <li key={e}>
+                  <span>
+                    <strong>{d.tool}</strong> · {d.scope}
+                  </span>
+                  <button type="button" className="icon-btn" aria-label={t("perms.revokeN", { entry: e })} title={t("perms.revoke")} onClick={() => void revoke(e)}>
+                    <X size={14} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SettingRow>
+    </>
   );
 }

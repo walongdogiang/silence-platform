@@ -15,11 +15,10 @@ const TAB_LABEL: Record<"changes" | "tests" | "logs" | "preview", MsgKey> = {
   preview: "review.preview",
 };
 
+/** Font, size and minimap come from Settings → Appearance → Code & terminal. */
+export type CodeView = { font: string; size: number; minimap: boolean };
+
 const baseOptions = {
-  minimap: { enabled: false },
-  fontSize: 13,
-  lineHeight: 20,
-  fontFamily: "Cascadia Code, Consolas, monospace",
   scrollBeyondLastLine: false,
   automaticLayout: true,
   glyphMargin: false,
@@ -48,8 +47,20 @@ export function DiffPane(props: {
   onReviewTab?: (t: ReviewTab) => void;
   /** Đổi mỗi lần user bấm mở diff từ thẻ trong chat: đưa về tab Changes. */
   showChangesSignal?: number;
+  code: CodeView;
 }) {
   const t = useT();
+  const { font, size, minimap } = props.code;
+  const options = useMemo(
+    () => ({
+      ...baseOptions,
+      fontFamily: font,
+      fontSize: size,
+      lineHeight: Math.round(size * 1.55),
+      minimap: { enabled: minimap },
+    }),
+    [font, size, minimap],
+  );
   const [sub, setSub] = useState<ReviewTab>("changes");
   const theme = useMonacoTheme();
   const loadingEl = <div className="placeholder compact">{t("review.loadingEditor")}</div>;
@@ -156,7 +167,7 @@ export function DiffPane(props: {
                   modified={props.diff.after}
                   loading={loadingEl}
                   options={{
-                    ...baseOptions,
+                    ...options,
                     readOnly: true,
                     originalEditable: false,
                     renderSideBySide: true,
@@ -175,7 +186,7 @@ export function DiffPane(props: {
                   value={props.fileText}
                   loading={loadingEl}
                   onChange={(v) => props.onChange(v ?? "")}
-                  options={baseOptions}
+                  options={options}
                 />
               ) : (
                 <div className="placeholder compact">{t("review.pickFile")}</div>

@@ -52,6 +52,12 @@ export type ChatThread = {
   forkedFromId?: string;
   /** auto = cắt từ prompt (tạm); ai = Engine sinh (`chat.title`); user = đổi tên tay. ai/user không bị ghi đè. */
   titleSource?: "auto" | "ai" | "user";
+  /** Ghim lên nhóm "Đã ghim" đầu lịch sử. */
+  pinned?: boolean;
+  /** Lưu trữ: ẩn khỏi nhóm ngày và tab, xem lại ở nhóm "Đã lưu trữ". */
+  archived?: boolean;
+  /** Đánh dấu chưa đọc (tay); tự xoá khi mở thread. */
+  unread?: boolean;
 };
 
 /** `applied`: Engine already wrote the file (Balanced) — card offers Undo, not Apply/Reject. */

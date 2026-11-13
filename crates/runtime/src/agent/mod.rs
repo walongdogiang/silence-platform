@@ -69,6 +69,9 @@ pub struct Session {
     /// `auto` or one of `silence_protocol::EFFORT_LEVELS`. Memory only: the UI re-sends it
     /// before each turn (`session.set_effort`), like the model.
     pub effort: String,
+    /// Answer style (`default` | `concise` | `explanatory`). Memory only: the UI re-sends it
+    /// before each turn (`session.set_style`), like the effort.
+    pub style: String,
     /// Claude CLI conversation id (`--resume`) while the session stays on a CLI model.
     /// Memory only; cleared when the model changes.
     pub cli_session: Option<String>,
@@ -167,6 +170,7 @@ pub async fn create_session(
         permission,
         model,
         effort: "auto".into(),
+        style: "default".into(),
         cli_session: None,
         messages: vec![json!({"role":"system","content": system})],
         logged_len: 0,
@@ -340,7 +344,13 @@ async fn run_turn(
         std::mem::take(&mut s.budget_pass)
     };
     // Claude CLI: an explicit CLI model, or Auto on the CLI source.
-    match cli_turn_pick(&ctx.catalog, &*session_arc.lock().await, pass_cap)? {
+    // Bind first: a guard inside the `match` scrutinee would live through the whole match and
+    // deadlock `run_cli_turn`, which locks the session again (no event ever, eval "no event").
+    let cli_pick = {
+        let s = session_arc.lock().await;
+        cli_turn_pick(&ctx.catalog, &s, pass_cap)?
+    };
+    match cli_pick {
         CliPick::OverCap => {
             rollback_user_message(&ctx, &session_arc, 1, &text).await;
             emit(&tx, SessionEvent::Done { stop: "budget".into() });
@@ -439,7 +449,7 @@ async fn run_turn(
             if let Some(arr) = tools.as_array_mut() {
                 arr.extend(mcp_tools(&ctx, read_only).await);
             }
-            (with_mode_system(&s.messages, prof.system), tools)
+            (with_mode_system(&s.messages, &turn_system(prof.system, &s.style)), tools)
         };
 
         let mut token_buf = String::new();
@@ -1257,6 +1267,21 @@ pub async fn set_effort(ctx: &AppCtx, session_id: &str, effort: &str) -> Result<
     Ok(())
 }
 
+pub async fn set_style(ctx: &AppCtx, session_id: &str, style: &str) -> Result<()> {
+    if !silence_protocol::RESPONSE_STYLES.contains(&style) {
+        return Err(anyhow!("unknown style {style}"));
+    }
+    let session = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    session.lock().await.style = style.to_string();
+    Ok(())
+}
+
 /// Stop the running turn. The abort flag is only read between model calls, so a permission
 /// the turn is waiting on is denied here: otherwise Stop would hang until the user answers.
 pub async fn abort(ctx: &AppCtx, session_id: &str) -> Result<()> {
@@ -1895,5 +1920,63 @@ mod permission_tests {
         assert_eq!(out, "read-only subagent cannot mutate");
         let task = ToolCall { id: "t".into(), name: "task".into(), arguments: "{}".into() };
         assert!(subagent_tool(&ctx, &s, &None, &task, false).await.contains("not available"));
+    }
+
+    /// Regression: `run_turn` held the session lock across `run_cli_turn`, which locks it again,
+    /// so a CLI turn hung forever without a single event (eval: "no event for 120s").
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cli_turn_does_not_deadlock_on_session_lock() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        // Fake `claude`: answers `--version`, otherwise reads the prompt and prints one result.
+        let result = r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"s1","total_cost_usd":0,"usage":{}}"#;
+        let command = if cfg!(windows) {
+            let p = bin.path().join("fakeclaude.cmd");
+            std::fs::write(
+                &p,
+                format!("@echo off\r\nif \"%1\"==\"--version\" (echo 9.9.9& exit /b 0)\r\nmore >nul\r\necho {result}\r\n"),
+            )
+            .unwrap();
+            p
+        } else {
+            let p = bin.path().join("fakeclaude");
+            std::fs::write(
+                &p,
+                format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 9.9.9; exit 0; fi\ncat >/dev/null\necho '{result}'\n"),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            p
+        };
+        let raw = serde_json::from_value(json!({
+            "version": 1,
+            "providers": [{"id": "cli", "kind": "claude_cli", "command": command.to_string_lossy()}],
+            "models": [{"id": "m@cli", "provider": "cli", "api_model": "m", "tier": "fast", "context_window": 100000}],
+        }))
+        .unwrap();
+        let ctx = Arc::new(AppCtx::new(Catalog::from_raw(raw), AuditLog::open(data.path()).unwrap()));
+        let id = create_session(&ctx, ws.path().to_str().unwrap(), Some("m@cli".into()), SessionMode::Agent, PermissionMode::Ask)
+            .await
+            .unwrap();
+        let mut rx = subscribe(&ctx, &id).await;
+        prompt(ctx.clone(), id.clone(), "hi".into()).await.unwrap();
+        let done = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while let Some(ev) = rx.recv().await {
+                match ev {
+                    SessionEvent::Done { stop } => return Ok(stop),
+                    SessionEvent::Error { message, error } => return Err(format!("{message} {error:?}")),
+                    _ => {}
+                }
+            }
+            Err("channel closed".into())
+        })
+        .await
+        .expect("CLI turn hung (session lock deadlock?)");
+        assert_eq!(done.unwrap(), "stop");
     }
 }

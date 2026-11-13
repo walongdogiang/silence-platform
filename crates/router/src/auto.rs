@@ -312,7 +312,7 @@ models:
 version: 1
 providers:
   - { id: gw, kind: openai_compat, base_url: "http://x" }
-  - { id: api, kind: anthropic, base_url: "http://y" }
+  - { id: api, kind: claude_api, base_url: "http://y" }
 models:
   - { id: claude-haiku, provider: gw, api_model: h, tier: fast, context_window: 1 }
   - { id: claude-sonnet, provider: gw, api_model: s, tier: mid, context_window: 1 }

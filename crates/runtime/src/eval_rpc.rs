@@ -446,7 +446,7 @@ mod tests {
         let mut c = cfg("v0", &["E01-edit-add-pow"]);
         c.source = Some("nope".into());
         assert!(h.validate(&c, &catalog).is_err());
-        c.source = Some("anthropic".into());
+        c.source = Some("claude-api".into());
         c.repeat = 9;
         assert!(h.validate(&c, &catalog).is_err());
         c.repeat = 2;
@@ -458,7 +458,7 @@ mod tests {
         let h = host(Path::new("."));
         let catalog = Catalog::load(&h.config_path).unwrap();
         let mut c = cfg("v0", &["E01-edit-add-pow"]);
-        c.source = Some("anthropic".into());
+        c.source = Some("claude-api".into());
         let v = h.estimate(&c, &catalog).unwrap();
         let model = v["estimate"]["tasks"][0]["model"].as_str().unwrap().to_string();
         assert!(model.ends_with("@api"), "{model}");

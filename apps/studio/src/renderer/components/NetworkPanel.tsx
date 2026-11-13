@@ -1,209 +1,300 @@
-import { useEffect, useRef, useState } from "react";
+import { RotateCcw } from "lucide-react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { ModelInfo } from "../types";
-import { isModelOn, modelTitle, toggleModel, type ModelPrefs } from "../theme/modelsPrefs";
+import { isModelOn, type ModelPrefs } from "../theme/modelsPrefs";
 import { ProviderSources } from "./ProviderSources";
 import { AutoSettings } from "./AutoSettings";
-import { useT } from "../i18n";
-import { autoFor, type AutoConfig } from "../autoConfig";
-import { modelSources } from "../effort";
+import { ModelListTab } from "./ModelListTab";
+import { useT, type MsgKey } from "../i18n";
+import { DEFAULT_AUTO, autoFor, shortName, type AutoConfig } from "../autoConfig";
+import { DEFAULT_SOURCE_KIND, loadDefaultSource, modelSources, saveDefaultSource } from "../effort";
+import {
+  NETWORK_TABS,
+  defaultPrefs,
+  isFreshFocus,
+  loadNetworkTab,
+  sameValue,
+  saveNetworkTab,
+  type NetworkTab,
+} from "../networkTabs";
 
+/** What App needs to warn before leaving the page with unsaved changes. */
+export type NetworkGuard = { dirty: boolean; save: () => void; discard: () => void };
+
+const TAB_LABEL: Record<NetworkTab, MsgKey> = {
+  sources: "net.tab.sources",
+  auto: "net.tab.auto",
+  models: "net.tab.models",
+};
+
+/**
+ * Settings → Model: one header with what is in use, then three tabs — Sources (keys, Claude CLI),
+ * Auto (per-source routing) and Models (picker switches + add OpenRouter slug). The tab is
+ * remembered; links from the composer jump to the right tab.
+ *
+ * Edits (default source, Auto, model switches) stay a draft until **Save**; **Cancel** drops the
+ * draft; **Reset to default** puts the current tab's defaults into the draft. API keys keep their
+ * own Save button on each source card (a secret is never held in a draft).
+ */
 export function NetworkPanel(props: {
   catalog: ModelInfo[];
   prefs: ModelPrefs;
   onPrefs: (next: ModelPrefs) => void;
   activeModel: string;
   onSourcesChanged?: () => void;
-  /** Scroll to + flash this model's row (from the picker's Enable button). `n` re-triggers. */
+  /** Open Models, scroll to + flash this model's row (picker's Enable button). `n` re-triggers. */
   focus?: { id: string; n: number } | null;
-  /** Auto settings per source; omitted = no Auto section. */
+  /** Auto settings per source; omitted = no Auto tab. */
   autoConfigs?: Record<string, AutoConfig>;
   onAutoConfig?: (source: string, next: AutoConfig) => void;
-  /** Source shown first in the Auto section (the picker's). */
+  /** Source shown first in the Auto tab (the picker's). */
   activeSource?: string;
   /** USD the active chat spent (shown on the active source's tab). */
   spentUsd?: number;
-  /** Scroll to the Auto section (picker → Auto settings → More settings…). `n` re-triggers. */
+  /** Open the Auto tab (picker → Auto settings → More settings…). Re-triggers when it changes. */
   focusAuto?: number;
+  /** Open Models with the add form (picker → Add models). Re-triggers when it changes. */
+  focusAdd?: number;
+  /** Open the Sources tab (picker → Source → Set up). Re-triggers when it changes. */
+  focusSources?: number;
+  /** Inside the Settings dialog: no page title (the dialog shows it), no own scroll. */
+  embedded?: boolean;
+  /** Switch to this tab (Settings search / General → Change). Re-triggers when `n` changes. */
+  focusTab?: { tab: NetworkTab; n: number } | null;
+  /** Filled every render with the draft state; cleared on unmount. */
+  guardRef?: MutableRefObject<NetworkGuard | null>;
 }) {
-  const listRef = useRef<HTMLUListElement>(null);
-  const [flash, setFlash] = useState("");
-  useEffect(() => {
-    if (!props.focus) return;
-    const row = listRef.current?.querySelector<HTMLElement>(`[data-model="${CSS.escape(props.focus.id)}"]`);
-    row?.scrollIntoView({ block: "center", behavior: "smooth" });
-    row?.querySelector<HTMLElement>(".switch")?.focus({ preventScroll: true });
-    setFlash(props.focus.id);
-    const t = window.setTimeout(() => setFlash(""), 1800);
-    return () => window.clearTimeout(t);
-  }, [props.focus]);
-  const [slug, setSlug] = useState("");
-  const [label, setLabel] = useState("");
-  const [tier, setTier] = useState("mid");
-  const [err, setErr] = useState("");
   const t = useT();
   const sources = modelSources(props.catalog);
+  const hasAuto = Boolean(props.onAutoConfig) && sources.length > 0;
+  const [tab, setTabState] = useState<NetworkTab>(() => loadNetworkTab());
+  const shownTab: NetworkTab = tab === "auto" && !hasAuto ? "sources" : tab;
   const [autoSrc, setAutoSrc] = useState(props.activeSource ?? "");
-  const autoRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!props.focusAuto) return;
-    setAutoSrc(props.activeSource ?? "");
-    autoRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.focusAuto]);
-  const autoSource = sources.some((x) => x.id === autoSrc) ? autoSrc : (sources[0]?.id ?? "");
-  // Auto picks among the models the user left on.
-  const visible = props.catalog.filter((m) => isModelOn(m, props.prefs));
-  const extrasIds = new Set(props.prefs.extras.map((e) => e.id));
-  const rows = [
-    ...props.catalog,
-    ...props.prefs.extras.filter((e) => !props.catalog.some((c) => c.id === e.id)),
-  ];
+  const [savedDefault, setSavedDefault] = useState(() => loadDefaultSource());
+  /** Drafts: `null` / missing key = unchanged. */
+  const [draftDefault, setDraftDefault] = useState<string | null>(null);
+  const [draftAuto, setDraftAuto] = useState<Record<string, AutoConfig>>({});
+  const [draftPrefs, setDraftPrefs] = useState<ModelPrefs | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const flashTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
 
+  const prefs = draftPrefs ?? props.prefs;
+  const defaultSource = draftDefault ?? savedDefault;
+  const autoOf = (src: string) => draftAuto[src] ?? autoFor(props.autoConfigs ?? {}, src);
+  const dirtyTabs: Record<NetworkTab, boolean> = {
+    sources: draftDefault !== null,
+    auto: Object.keys(draftAuto).length > 0,
+    models: draftPrefs !== null,
+  };
+  const dirty = dirtyTabs.sources || dirtyTabs.auto || dirtyTabs.models;
 
-  function add() {
-    const id = slug.trim();
-    if (!id.includes("/")) {
-      setErr(t("models.badSlug"));
-      return;
-    }
-    if (rows.some((m) => m.id === id)) {
-      setErr(t("models.duplicate"));
-      return;
-    }
-    setErr("");
-    const extra: ModelInfo = {
-      id,
-      label: label.trim() || undefined,
-      api_model: id,
-      tier,
-      context_window: 128000,
-      tools: true,
-      vision: false,
-    };
-    props.onPrefs({ ...props.prefs, extras: [...props.prefs.extras, extra] });
-    setSlug("");
-    setLabel("");
+  function editDefault(v: string) {
+    setDraftDefault(v === savedDefault ? null : v);
   }
-
-  function removeExtra(id: string) {
-    props.onPrefs({
-      ...props.prefs,
-      extras: props.prefs.extras.filter((e) => e.id !== id),
-      disabled: props.prefs.disabled.filter((x) => x !== id),
+  function editAuto(src: string, next: AutoConfig) {
+    const saved = autoFor(props.autoConfigs ?? {}, src);
+    setDraftAuto((d) => {
+      const { [src]: _old, ...rest } = d;
+      return sameValue(next, saved) ? rest : { ...rest, [src]: next };
     });
   }
+  function editPrefs(next: ModelPrefs) {
+    setDraftPrefs(sameValue(next, props.prefs) ? null : next);
+  }
+  function cancel() {
+    setDraftDefault(null);
+    setDraftAuto({});
+    setDraftPrefs(null);
+  }
+  function save() {
+    if (!dirty) return;
+    if (draftDefault !== null) {
+      saveDefaultSource(draftDefault);
+      setSavedDefault(draftDefault);
+    }
+    for (const [src, cfg] of Object.entries(draftAuto)) props.onAutoConfig?.(src, cfg);
+    if (draftPrefs) props.onPrefs(draftPrefs);
+    cancel();
+    setSavedFlash(true);
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setSavedFlash(false), 2000);
+  }
+  function resetTab() {
+    if (shownTab === "sources") editDefault("");
+    else if (shownTab === "auto") editAuto(autoSource, DEFAULT_AUTO);
+    else editPrefs(defaultPrefs(props.prefs));
+  }
+  if (props.guardRef) props.guardRef.current = { dirty, save, discard: cancel };
+  useEffect(() => {
+    const ref = props.guardRef;
+    return () => {
+      if (ref) ref.current = null;
+    };
+  }, [props.guardRef]);
+
+  const resetTip: Record<NetworkTab, MsgKey> = {
+    sources: "net.resetTip.sources",
+    auto: "net.resetTip.auto",
+    models: "net.resetTip.models",
+  };
+
+  function setTab(next: NetworkTab) {
+    setTabState(next);
+    saveNetworkTab(next);
+  }
+
+  useEffect(() => {
+    if (isFreshFocus(props.focus?.n)) setTab("models");
+  }, [props.focus]);
+  useEffect(() => {
+    if (isFreshFocus(props.focusAdd)) setTab("models");
+  }, [props.focusAdd]);
+  useEffect(() => {
+    if (isFreshFocus(props.focusSources)) setTab("sources");
+  }, [props.focusSources]);
+  useEffect(() => {
+    if (props.focusTab && isFreshFocus(props.focusTab.n)) setTab(props.focusTab.tab);
+  }, [props.focusTab]);
+  useEffect(() => {
+    if (!isFreshFocus(props.focusAuto)) return;
+    setAutoSrc(props.activeSource ?? "");
+    setTab("auto");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.focusAuto]);
+
+  const autoSource = sources.some((x) => x.id === autoSrc) ? autoSrc : (sources[0]?.id ?? "");
+  // Auto picks among the models the user left on.
+  const visible = props.catalog.filter((m) => isModelOn(m, prefs));
+  const rows = [...props.catalog, ...prefs.extras.filter((e) => !props.catalog.some((c) => c.id === e.id))];
+  const onCount = rows.filter((m) => isModelOn(m, prefs)).length;
+
+  const def =
+    sources.find((s) => s.id === defaultSource) ?? sources.find((s) => s.kind === DEFAULT_SOURCE_KIND) ?? sources[0];
+  const active = sources.find((s) => s.id === props.activeSource) ?? def;
+  const sourcesWarn = Boolean(def && !def.available);
+  const modelName =
+    props.activeModel === "auto"
+      ? "Auto"
+      : (() => {
+          const m = rows.find((x) => x.id === props.activeModel);
+          return m ? shortName(m) : props.activeModel;
+        })();
 
   return (
-    <div className="network-page">
-      <ProviderSources onChanged={props.onSourcesChanged} />
-      {props.onAutoConfig && autoSource ? (
-        <section className="auto-panel" ref={autoRef}>
-          <header>
-            <h2>{t("auto.title")}</h2>
-            <p>{t("auto.intro")}</p>
-          </header>
-          {sources.length > 1 ? (
-            <div className="auto-source-tabs" role="tablist">
-              {sources.map((x) => (
-                <button
-                  key={x.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={x.id === autoSource}
-                  className={x.id === autoSource ? "active" : undefined}
-                  onClick={() => setAutoSrc(x.id)}
-                >
-                  {x.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <AutoSettings
-            config={autoFor(props.autoConfigs ?? {}, autoSource)}
-            onChange={(next) => props.onAutoConfig?.(autoSource, next)}
-            source={autoSource}
-            models={visible}
-            spentUsd={autoSource === props.activeSource ? props.spentUsd : undefined}
-          />
-        </section>
-      ) : null}
-      <header>
-        <h2>{t("models.title")}</h2>
-        <p>{t("models.intro")}</p>
-      </header>
-      <ul className="model-switch-list" ref={listRef}>
-        {rows.map((m) => (
-          <li key={m.id} data-model={m.id} className={flash === m.id ? "flash" : undefined}>
-            <div>
-              <b>{modelTitle(m)}</b>
-              <small>
-                {m.provider_label ? `${m.provider_label} · ` : ""}
-                {m.id}
-              </small>
-              {m.opt_in ? <small className="model-optin">{t("models.optIn")}</small> : null}
-            </div>
-            {extrasIds.has(m.id) ? (
-              <button type="button" className="ghost" onClick={() => removeExtra(m.id)}>
-                {t("common.delete")}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={`switch${isModelOn(m, props.prefs) ? " on" : ""}`}
-              role="switch"
-              aria-checked={isModelOn(m, props.prefs)}
-              aria-label={t("models.enableN", { model: modelTitle(m) })}
-              onClick={() => props.onPrefs(toggleModel(m, props.prefs))}
-            />
-          </li>
-        ))}
-      </ul>
-      <form
-        className="model-add"
-        onSubmit={(e) => {
+    <div
+      className={`network-page${props.embedded ? " in-dialog" : ""}`}
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
           e.preventDefault();
-          add();
-        }}
-      >
-        <h3>{t("model.add")}</h3>
-        <label className="field">
-          {t("models.slug")}
-          <input
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            placeholder="google/gemini-2.5-pro"
+          save();
+        }
+      }}
+    >
+      <header className="net-head">
+        {props.embedded ? null : <h2>{t("net.title")}</h2>}
+        <p className="net-status">
+          {t("net.status.model")} <b>{modelName}</b>
+          {active ? (
+            <>
+              {" · "}
+              {t("net.status.source")} <b>{active.label}</b>
+              {!active.available ? <span className="net-warn"> ({t("src.notAvailable")})</span> : null}
+            </>
+          ) : null}
+        </p>
+      </header>
+
+      <div className="network-tabs" role="tablist" aria-label={t("net.title")}>
+        {NETWORK_TABS.filter((id) => id !== "auto" || hasAuto).map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`net-tab-${id}`}
+            aria-selected={shownTab === id}
+            aria-controls={`net-panel-${id}`}
+            className={shownTab === id ? "active" : undefined}
+            onClick={() => setTab(id)}
+          >
+            {t(TAB_LABEL[id])}
+            {id === "models" ? <span className="net-count">{onCount}</span> : null}
+            {dirtyTabs[id] ? (
+              <span className="net-unsaved" title={t("net.tabUnsaved")} aria-label={t("net.tabUnsaved")}>
+                •
+              </span>
+            ) : null}
+            {id === "sources" && sourcesWarn ? (
+              <span className="net-dot" title={t("net.defaultUnavailable")} aria-label={t("net.defaultUnavailable")} />
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id={`net-panel-${shownTab}`} aria-labelledby={`net-tab-${shownTab}`}>
+        {shownTab === "sources" ? (
+          <ProviderSources onChanged={props.onSourcesChanged} defaultSource={defaultSource} onDefaultChange={editDefault} />
+        ) : null}
+
+        {shownTab === "auto" && hasAuto ? (
+          <section className="auto-panel">
+            <p className="net-intro">{t("auto.intro")}</p>
+            {sources.length > 1 ? (
+              <div className="auto-source-tabs" role="tablist">
+                {sources.map((x) => (
+                  <button
+                    key={x.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={x.id === autoSource}
+                    className={x.id === autoSource ? "active" : undefined}
+                    onClick={() => setAutoSrc(x.id)}
+                  >
+                    {x.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <AutoSettings
+              config={autoOf(autoSource)}
+              onChange={(next) => editAuto(autoSource, next)}
+              source={autoSource}
+              models={visible}
+              spentUsd={autoSource === props.activeSource ? props.spentUsd : undefined}
+              offModels={props.catalog.filter((m) => !isModelOn(m, prefs))}
+              onOpenModels={() => setTab("models")}
+            />
+          </section>
+        ) : null}
+
+        {shownTab === "models" ? (
+          <ModelListTab
+            catalog={props.catalog}
+            prefs={prefs}
+            onPrefs={editPrefs}
+            focus={props.focus}
+            focusAdd={props.focusAdd}
+            onOpenSources={() => setTab("sources")}
           />
-        </label>
-        <label className="field">
-          {t("models.displayName")}
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Gemini 2.5 Pro" />
-        </label>
-        <label className="field">
-          {t("models.tier")}
-          <select value={tier} onChange={(e) => setTier(e.target.value)}>
-            <option value="fast">{t("models.tier.fast")}</option>
-            <option value="high-fast">{t("models.tier.highFast")}</option>
-            <option value="mid">{t("models.tier.mid")}</option>
-            <option value="strong">{t("models.tier.strong")}</option>
-            <option value="free">{t("models.tier.free")}</option>
-          </select>
-        </label>
-        {err ? <p className="hint">{err}</p> : null}
-        <button type="submit" className="primary">
-          {t("models.addToPicker")}
+        ) : null}
+      </div>
+
+      <div className={`net-actions${dirty ? " dirty" : ""}`} role="region" aria-label={t("net.actions")}>
+        <button type="button" className="btn-light" onClick={resetTab} title={t(resetTip[shownTab])}>
+          <RotateCcw size={14} aria-hidden="true" />
+          {t("net.reset")}
         </button>
-      </form>
-      <p className="hint">
-        {t("models.current")}{" "}
-        {props.activeModel === "auto"
-          ? "Auto"
-          : modelTitle(
-              rows.find((m) => m.id === props.activeModel) ?? {
-                id: props.activeModel,
-                tier: "",
-              },
-            )}
-      </p>
+        {/* No visible status text (the buttons show it); screen readers still hear it. */}
+        <span className="sr-only" aria-live="polite">
+          {dirty ? t("net.unsaved") : savedFlash ? t("net.saved") : ""}
+        </span>
+        <button type="button" className="btn-light" onClick={cancel} disabled={!dirty}>
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn-solid" onClick={save} disabled={!dirty} title="Ctrl+S">
+          {t("common.save")}
+        </button>
+      </div>
     </div>
   );
 }

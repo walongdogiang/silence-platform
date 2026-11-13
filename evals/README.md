@@ -58,7 +58,7 @@ Mặc định lượt chạy từ Studio không ghi `history/runs.jsonl` (profil
 
 ## Chọn source
 
-`--source <provider>` (CLI) hoặc ô **Nguồn** (Studio) chạy mọi task trên một nguồn: OpenRouter `company-gateway`, Anthropic API `anthropic`, Claude CLI `claude-cli`.
+`--source <provider>` (CLI) hoặc ô **Nguồn** (Studio) chạy mọi task trên một nguồn: OpenRouter `company-gateway`, Claude API `claude-api`, Claude CLI `claude-cli`.
 - Model được **giữ tier, đổi nguồn**: cùng họ model trước (`claude-haiku` → `claude-haiku@api`), không có thì model cùng tier của nguồn đó. Không có cả hai thì task thành SKIP, kèm lý do.
 - Task `auto` chạy Auto trong nguồn đã chọn.
 - Ghim (`models.yaml`) và hiệu chỉnh vẫn dùng id của OpenRouter; một bộ ghim dùng chung cho mọi nguồn.

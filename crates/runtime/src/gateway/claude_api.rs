@@ -1,4 +1,4 @@
-//! Anthropic Messages API (`POST /v1/messages`, SSE). The session history stays in the
+//! Claude API (Messages API) (`POST /v1/messages`, SSE). The session history stays in the
 //! OpenAI chat shape the rest of the Engine uses; this module converts at the edge.
 //!
 //! Assistant turns that came from this API carry their raw content blocks under
@@ -15,7 +15,7 @@ use std::time::Duration;
 
 pub const API_VERSION: &str = "2023-06-01";
 /// Field on an assistant message holding the API's own content blocks.
-pub const RAW_BLOCKS_KEY: &str = "anthropic_content";
+pub const RAW_BLOCKS_KEY: &str = "claude_content";
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn chat(
@@ -125,7 +125,7 @@ fn mark_cache(block: Option<&mut Value>) {
     }
 }
 
-/// OpenAI `tools: [{type:function, function:{name, description, parameters}}]` → Anthropic.
+/// OpenAI `tools: [{type:function, function:{name, description, parameters}}]` → Claude API.
 pub(super) fn convert_tools(tools: &Value) -> Vec<Value> {
     tools
         .as_array()
@@ -148,7 +148,7 @@ pub(super) fn convert_tools(tools: &Value) -> Vec<Value> {
         .collect()
 }
 
-/// OpenAI chat history → (system texts, Anthropic messages). Consecutive user-side messages
+/// OpenAI chat history → (system texts, Claude API messages). Consecutive user-side messages
 /// (tool results, then any user text) merge into one user message, as the API expects.
 pub(super) fn convert_messages(messages: &[Value]) -> (Vec<String>, Vec<Value>) {
     let mut system = Vec::new();
@@ -446,7 +446,7 @@ mod tests {
         ModelEntry {
             id: "claude-opus@api".into(),
             label: String::new(),
-            provider: "anthropic".into(),
+            provider: "claude-api".into(),
             api_model: "claude-opus-5-5".into(),
             tier: "strong".into(),
             context_window: 1_000_000,

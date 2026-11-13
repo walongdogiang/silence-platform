@@ -100,3 +100,18 @@ tasks:
       test: test_moving_average
       audit_matches:
         - '"kind":"route".*"slot":"strong"'
+
+  - id: S01-style-concise
+    kind: explore
+    mode: ask
+    style: concise
+    # Settings → Trò chuyện → Phong cách trả lời = Ngắn gọn. Ở style mặc định câu này thường ra
+    # một đoạn giải thích dài kèm ví dụ; concise phải trả lời đúng mà ngắn.
+    prompt: "mean() trong src/stats.py làm gì khi danh sách rỗng?"
+    pass_if:
+      unchanged:
+        - src/stats.py
+      report_mentions:
+        - mean
+        - ZeroDivisionError
+      max_report_chars: 600

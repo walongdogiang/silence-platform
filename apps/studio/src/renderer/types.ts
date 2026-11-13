@@ -89,7 +89,7 @@ export type ModelInfo = {
   /** Provider id the picker groups by. */
   provider?: string;
   provider_label?: string;
-  provider_kind?: "openai_compat" | "anthropic" | "claude_cli";
+  provider_kind?: "openai_compat" | "claude_api" | "claude_cli";
   available?: boolean;
   unavailable_reason?: string;
   /** Hidden from the picker until switched on in Settings. */
@@ -118,10 +118,23 @@ export type CliInfo = {
 };
 
 /** Row of `providers.status`. Keys are never returned, only `has_key`. */
+/** Copy of `McpServerView` in packages/protocol (Studio does not import it yet). */
+export type McpServerView = {
+  name: string;
+  command: string;
+  args: string[];
+  env_keys: string[];
+  enabled: boolean;
+  approved: boolean;
+  status: "running" | "error" | "off" | "needs_approval" | "stopped";
+  error: string | null;
+  tools: { name: string; description: string; read_only: boolean }[];
+};
+
 export type ProviderStatus = {
   id: string;
   label: string;
-  kind: "openai_compat" | "anthropic" | "claude_cli";
+  kind: "openai_compat" | "claude_api" | "claude_cli";
   has_key: boolean;
   needs_key: boolean;
   cli_version?: string;

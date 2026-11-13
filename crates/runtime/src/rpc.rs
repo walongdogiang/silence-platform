@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use silence_protocol::{
     ApprovePlanParams, ChatTitleParams, DiffApplyParams, DiffRejectParams, FsReadParams, FsTreeParams,
-    McpServerConfig, PermissionDecision, PromptParams, RpcNotification, RpcRequest, RpcResponse,
+    PermissionDecision, PromptParams, RpcNotification, RpcRequest, RpcResponse,
     SessionCreateParams, SessionEvent, TerminalStartParams, TerminalWriteParams,
 };
 use silence_tools::Workspace;
@@ -93,6 +93,29 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         "ping" => Ok(json!({"ok": true, "protocol": silence_protocol::PROTOCOL_VERSION})),
         "session.create" => session_create(state.clone(), writer.clone(), req.params).await,
         "session.list" => Ok(json!({"sessions": state.ctx.store.list()?})),
+        // Settings → Dữ liệu. Only `events.jsonl` folders; the audit log is never deleted.
+        "session.prune" => {
+            let p: silence_protocol::SessionPruneParams = serde_json::from_value(req.params)?;
+            if p.older_than_days == 0 {
+                anyhow::bail!("older_than_days must be at least 1");
+            }
+            let mut keep: std::collections::HashSet<String> = p.keep.into_iter().collect();
+            // Sessions open in this Engine are in use: never prune them.
+            keep.extend(state.ctx.sessions.lock().await.keys().cloned());
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(p.older_than_days));
+            Ok(json!({"deleted": state.ctx.store.prune(cutoff, &keep).await?}))
+        }
+        "session.delete" => {
+            let p: silence_protocol::SessionDeleteParams = serde_json::from_value(req.params)?;
+            let mut deleted = Vec::new();
+            for id in p.session_ids {
+                if state.ctx.store.delete(&id).await? {
+                    deleted.push(id);
+                }
+            }
+            Ok(json!({"deleted": deleted}))
+        }
+        "engine.data_dir" => Ok(json!({"path": state.ctx.audit.dir().to_string_lossy()})),
         "session.resume" => session_resume(state.clone(), writer.clone(), req.params).await,
         "session.prompt" => {
             let p: PromptParams = serde_json::from_value(req.params)?;
@@ -149,6 +172,11 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         "session.set_effort" => {
             let p: silence_protocol::SetEffortParams = serde_json::from_value(req.params)?;
             agent::set_effort(&state.ctx, &p.session_id, &p.effort).await?;
+            Ok(json!({"ok": true}))
+        }
+        "session.set_style" => {
+            let p: silence_protocol::SetStyleParams = serde_json::from_value(req.params)?;
+            agent::set_style(&state.ctx, &p.session_id, &p.style).await?;
             Ok(json!({"ok": true}))
         }
         "session.set_permission" => {
@@ -281,23 +309,11 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             agent::reject_diff(&state.ctx, &p.session_id, &p.path).await?;
             Ok(json!({"ok": true}))
         }
-        "mcp.list" => Ok(json!({"servers": state.ctx.mcp.list().await})),
-        "mcp.add" => {
-            let cfg: McpServerConfig = serde_json::from_value(req.params)?;
-            let tools = state.ctx.mcp.add(cfg).await?;
-            Ok(json!({
-                "tools": tools.iter().map(|t| json!({"name": t.name, "description": t.description})).collect::<Vec<_>>()
-            }))
-        }
-        "mcp.remove" => {
-            let name = req
-                .params
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            state.ctx.mcp.remove(name).await;
-            Ok(json!({"ok": true}))
-        }
+        // Settings → Tools. Per workspace (`.silence/mcp.json`); see `mcp_config`.
+        "mcp.list" => crate::mcp_config::rpc_list(&state.ctx, &req.params).await,
+        "mcp.add" => crate::mcp_config::rpc_add(&state.ctx, &req.params).await,
+        "mcp.remove" => crate::mcp_config::rpc_remove(&state.ctx, &req.params).await,
+        "mcp.set_enabled" => crate::mcp_config::rpc_set_enabled(&state.ctx, &req.params).await,
         "audit.query" => {
             let sid = req.params.get("session_id").and_then(|v| v.as_str());
             let limit = req
@@ -330,8 +346,13 @@ async fn session_create(state: Arc<RpcState>, writer: SharedWriter, params: Valu
     let p: SessionCreateParams = serde_json::from_value(params)?;
     client_permission_allowed(p.permission)?;
     let id = agent::create_session(&state.ctx, &p.workspace, p.model, p.mode, p.permission).await?;
+    // Approved MCP servers of this workspace come up with its first session.
+    crate::mcp_config::autostart(&state.ctx, &p.workspace).await;
     if let Some(effort) = p.effort.as_deref() {
         agent::set_effort(&state.ctx, &id, effort).await?;
+    }
+    if let Some(style) = p.style.as_deref() {
+        agent::set_style(&state.ctx, &id, style).await?;
     }
     let rx = agent::subscribe(&state.ctx, &id).await;
     pump_events(writer, id.clone(), rx);

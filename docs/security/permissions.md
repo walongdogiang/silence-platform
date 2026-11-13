@@ -22,12 +22,17 @@ Vấn đề cần giải: hỏi mọi thứ thì agent phải dừng liên tục
 
 ## Tham khảo
 
-| | Claude Code | Cursor | Codex CLI | 5ilence |
-| --- | --- | --- | --- | --- |
-| Phân tầng | auto mode: model phân loại từng hành động | allowlist/denylist lệnh | danh sách lệnh an toàn + approval policy | Luật cứng 4 tầng; model phân loại cho vùng xám là việc sau |
-| Sandbox | shell sandbox (file + mạng) | terminal sandbox | Auto = ghi trong workspace, không mạng | Job Object (đã có); chặn mạng (sau) |
-| Nhớ quyền | theo mẫu `Bash(npm test:*)` | allowlist lệnh | — | theo mẫu lệnh (B3) |
-| Chặn cứng | deny rules, hook PreToolUse | denylist, chặn xoá file/dotfile | — | Tầng 3 trong Engine |
+Đối chiếu tài liệu chính thức, 11/2026:
+
+| | Claude Code | Cursor | Codex | VS Code / Copilot | 5ilence |
+| --- | --- | --- | --- | --- | --- |
+| Phân tầng | auto mode: classifier xét từng hành động | Auto-review (mặc định): allowlist, sandbox, rồi classifier | sandbox mode + approval policy | mức duyệt: Default / Bypass / Autopilot | Luật cứng 4 tầng; classifier cho vùng xám là việc sau |
+| Sandbox | khuyên chạy bypass trong container/VM | chặn mạng mặc định, ghi trong workspace; macOS + Linux | `workspace-write`, tắt mạng mặc định; có Windows gốc | độc lập với mức duyệt; macOS, Linux, WSL2 | Job Object (đã có); chặn mạng (sau) |
+| Nhớ quyền | theo mẫu `Bash(npm test:*)` | allowlist lệnh | — | auto-approve theo lệnh | theo mẫu lệnh (B3) |
+| Chặn cứng | deny rules, hook PreToolUse | file-deletion / external-file protection | — | — | Tầng 3 trong Engine |
+| Chế độ bỏ qua hết | `bypassPermissions`, công tắc "Allow bypass permissions mode"; admin tắt bằng `disableBypassPermissionsMode` | Run Everything (không sandbox, không classifier) | `--yolo` = `danger-full-access` + `never`, "not recommended" | Bypass Approvals / Autopilot | **Không có.** `yolo` chỉ dùng trong `eval_runner` |
+
+Điểm chung: chế độ bỏ qua hết luôn có, nhưng không bên nào đặt làm mặc định, kèm cảnh báo "chỉ dùng trong container/VM", và admin tắt được. Hướng đầu tư là **tự chạy trong ranh giới sandbox**, cũng là hướng của `autonomous`. Lý do không thêm bypass: [backlog.md](backlog.md).
 
 ## 4 tầng
 
@@ -139,6 +144,13 @@ B3 đã có: tiêu đề theo lý do chính, **lệnh thật** nguyên văn, dan
 - **Stop** (`session.abort`): Engine từ chối mọi permission đang chờ rồi dừng lượt, nên không còn kẹt ở `Stopping…` đợi người dùng; Studio gỡ card ngay.
 - **Thông báo desktop** (`silence-notify-permission`): chỉ hiện khi cửa sổ không ở phía trước (ẩn, thu nhỏ, mất focus). Nội dung chỉ gồm **lý do** (tiêu đề tầng), không bao giờ có lệnh hay đường dẫn, vì thông báo xuất hiện cả trên màn hình khoá. Bấm vào thì đưa cửa sổ lên.
 - Tầng 3 không hiện card hỏi. Engine gửi `trace{event:"policy.blocked", detail:{code,title,detail,tool}}`; chat biến bước `Running …` thành `Blocked <lý do tiếng Việt>`. Model nhận `hint` tiếng Anh để chọn cách khác.
+
+## MCP server (Settings → Công cụ)
+
+- Cấu hình theo workspace ở `.silence/mcp.json` (`crates/runtime/src/mcp_config.rs`). Server là một lệnh Engine chạy, và file có thể đến từ repo clone về, nên server **chỉ chạy khi user trên máy này đã cho phép đúng lệnh đó**: dấu vân tay (workspace, tên, lệnh, args, tên biến env) lưu ở `<data_dir>/mcp-approved.json`. Đổi lệnh/args trong file = cần cho phép lại.
+- Thêm từ Studio: hiện nguyên dòng lệnh và hỏi xác nhận trước khi lưu và chạy. Bật lại server từ file = cho phép.
+- `mcp.list` không bao giờ trả giá trị env (chỉ tên biến). Giá trị `${VAR}` lấy từ môi trường của Engine lúc khởi động server, để secret không nằm trong file.
+- Mỗi lần gọi tool MCP vẫn qua Risk Engine (`MCP_CALL` / `MCP_READ`) và gây taint như trước.
 
 ## Chọn chế độ (Settings)
 

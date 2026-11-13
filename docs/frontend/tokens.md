@@ -1,10 +1,10 @@
 ---
-description: Token màu và appearance của Studio — palette dark mặc định, panel Appearance, scrollbar, icon, màu link và syntax.
+description: Token màu và appearance của Studio — palette dark mặc định, mục Giao diện trong Settings, scrollbar, icon, màu link và syntax.
 type: spec
 code:
   - apps/studio/src/renderer/theme/tokens.css
   - apps/studio/src/renderer/theme/appearance.ts
-  - apps/studio/src/renderer/components/AppearancePanel.tsx
+  - apps/studio/src/renderer/components/settings/AppearanceSection.tsx
 ---
 # Tokens & appearance
 
@@ -25,7 +25,9 @@ Accent chỉ cho hành động chính (mode, send, focus). Không sơn cam cả 
 
 ## Appearance
 
-`silence.appearance.v2`: theme, palette, accent, density, wallpaper, blur, reduceMotion. Panel `AppearancePanel.tsx`. Customize history → mở panel này.
+`silence.appearance.v2`: theme, palette, accent, density, wallpaper, blur, reduceMotion. Chỉnh ở Settings → **Giao diện** (`settings/AppearanceSection.tsx`), áp dụng ngay; "Đặt lại mặc định" cuối mục (nút duy nhất để reset giao diện; bấm hai lần trong 4 giây mới đặt lại) chỉ đặt lại giao diện, giữ ngôn ngữ, model và quyền. Nút phụ `.btn-light` theo theme (nền `--surface-2`, viền `--border-strong`), nút chính `.btn-solid` màu accent. Settings dùng scrollbar mảnh theo token `--scroll-thumb-idle`.
+
+**Code & terminal** (cuối mục Giao diện, lưu ở `silence.prefs.v1`): font code (mặc định `Cascadia Code, Consolas, monospace`), cỡ chữ 12–15, minimap. Monaco (`DiffPane.tsx`) và xterm đọc từ `prefs`; xterm lấy `--workspace` / `--text-primary` / `--accent` / `--surface-hover` nên theme Sáng có terminal sáng. Đổi tuỳ chọn cập nhật `term.options`, không tạo lại terminal. Công tắc dùng `.switch` (nền `--accent`, núm trắng), chấm màu có dấu ✓ khi chọn.
 
 ## Scrollbar (Cursor-like)
 
