@@ -1,4 +1,5 @@
 use crate::agent::{self, AppCtx};
+use crate::eval_rpc::{EvalConfig, EvalHost};
 use crate::pty::TerminalSession;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -16,13 +17,23 @@ use tokio::sync::{mpsc, Mutex};
 pub struct RpcState {
     pub ctx: Arc<AppCtx>,
     pub terminals: Mutex<HashMap<String, Arc<TerminalSession>>>,
+    /// `eval.*`: suites under `<repo_root>/evals`, one run at a time.
+    pub evals: Arc<EvalHost>,
 }
 
 impl RpcState {
+    /// Evals resolve against the working directory and `config/models.yaml` there.
     pub fn new(ctx: Arc<AppCtx>) -> Self {
+        let root = std::env::current_dir().unwrap_or_else(|_| ".".into());
+        let config = root.join("config/models.yaml");
+        Self::with_paths(ctx, root, config)
+    }
+
+    pub fn with_paths(ctx: Arc<AppCtx>, repo_root: std::path::PathBuf, config_path: std::path::PathBuf) -> Self {
         Self {
             ctx,
             terminals: Mutex::new(HashMap::new()),
+            evals: Arc::new(EvalHost::new(repo_root, config_path)),
         }
     }
 }
@@ -204,6 +215,25 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             state.ctx.catalog.set_credential(&p.provider, p.key.trim())?;
             Ok(json!({"ok": true}))
         }
+        "eval.catalog" => state.evals.catalog(&state.ctx.catalog).await,
+        "eval.estimate" => {
+            let cfg: EvalConfig = serde_json::from_value(req.params)?;
+            state.evals.estimate(&cfg, &state.ctx.catalog)
+        }
+        "eval.start" => {
+            let cfg: EvalConfig = serde_json::from_value(req.params)?;
+            let rx = state.evals.start(&cfg, &state.ctx.catalog)?;
+            pump_eval(writer, rx);
+            Ok(json!({"ok": true}))
+        }
+        "eval.cancel" => Ok(json!({"cancelled": state.evals.cancel()})),
+        "eval.runs" => Ok(state.evals.runs(20)),
+        "eval.task" => {
+            let suite = req.params.get("suite").and_then(|v| v.as_str()).unwrap_or("");
+            let task = req.params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            let attempt = req.params.get("attempt").and_then(|v| v.as_u64()).map(|n| n as u32);
+            state.evals.task_detail(suite, task, attempt)
+        }
         "auto.set_config" => {
             let p: silence_protocol::SetAutoConfigParams = serde_json::from_value(req.params)?;
             state.ctx.catalog.set_auto(&p.provider, p.config)?;
@@ -336,6 +366,18 @@ async fn session_resume(state: Arc<RpcState>, writer: SharedWriter, params: Valu
     let rx = agent::subscribe(&state.ctx, &p.session_id).await;
     pump_events(writer, p.session_id, rx);
     Ok(serde_json::to_value(result)?)
+}
+
+/// `eval.progress` notifications for a Studio eval run.
+fn pump_eval(writer: SharedWriter, mut rx: mpsc::UnboundedReceiver<crate::eval_runner::EvalProgress>) {
+    tokio::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            let notice = RpcNotification::new("eval.progress", json!(p));
+            if let Ok(v) = serde_json::to_value(&notice) {
+                let _ = write_json(&writer, &v).await;
+            }
+        }
+    });
 }
 
 fn pump_events(

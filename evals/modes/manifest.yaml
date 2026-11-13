@@ -1,6 +1,6 @@
 # Eval theo mode — fixture sample-app. Mỗi task đặt `mode` (agent/plan/ask/debug/review/multitask).
 # Read-only modes (ask/review/plan) dùng `unchanged` để chắc chắn không file nào bị sửa.
-# Runner: silence-engine evals --dir evals/modes   (cần SILENCE_API_BASE / SILENCE_API_KEY)
+# Hướng dẫn chạy, ghim model, lịch sử: evals/README.md
 
 workspace: fixtures/sample-app
 setup: []
@@ -56,7 +56,7 @@ tasks:
       test: test_mul
 
   # Model Auto: chọn slot theo mode + mục đích, không đọc prompt (crates/runtime/src/agent/auto.rs).
-  # Kiểm slot qua dòng `route` trong audit (`detail.slot`, `detail.escalated`).
+  # Kiểm slot qua dòng `route` trong audit (`detail.slot`). Metrics ghi `slots`, `escalated`, `usd_by_slot`.
   - id: A01-auto-plan-frontier
     kind: plan
     mode: plan
@@ -91,8 +91,9 @@ tasks:
     model: auto
     # Lỗi off-by-one dễ sửa sai lần đầu: nếu test còn đỏ sau khi sửa, Auto leo cấp (effort rồi
     # Frontier). Pass chỉ đòi test xanh và lượt bắt đầu ở Strong; có leo hay không thì xem
-    # `"escalated":true` trong audit (không bắt buộc: model sửa đúng ngay thì không leo). Logic leo
+    # `escalated` trong metrics (không bắt buộc: model sửa đúng ngay thì không leo). Logic leo
     # cấp được kiểm chắc chắn bằng unit test (`agent/auto.rs`); task này kiểm đường đi thật.
+    # CI chạy với `--retry-failed`.
     prompt: "test_moving_average đang fail. Sửa moving_average trong src/stats.py, chạy lại test cho tới khi xanh."
     verify_filter: test_moving_average
     pass_if:

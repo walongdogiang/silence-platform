@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld("silence", {
     ipcRenderer.on("silence-event", listener);
     return () => ipcRenderer.removeListener("silence-event", listener);
   },
+  /** Eval run progress (`eval.progress` from the Engine). */
+  onEval: (cb: (payload: unknown) => void) => {
+    const listener = (_: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on("silence-eval", listener);
+    return () => ipcRenderer.removeListener("silence-eval", listener);
+  },
+  /** Show an eval result folder in the file manager (main allows evals/results only). */
+  revealEval: (target: string) => ipcRenderer.invoke("silence-reveal-eval", target) as Promise<boolean>,
   window: {
     minimize: () => ipcRenderer.invoke("win-min"),
     maximize: () => ipcRenderer.invoke("win-max"),

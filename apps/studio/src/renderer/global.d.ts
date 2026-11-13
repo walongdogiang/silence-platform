@@ -25,6 +25,10 @@ declare global {
         ) => Promise<Array<{ provider: string; has_key: boolean; last4: string }>>;
       };
       onEvent: (cb: (payload: unknown) => void) => () => void;
+      /** `eval.progress` of a Studio eval run. */
+      onEval?: (cb: (payload: unknown) => void) => () => void;
+      /** Show an eval result folder (main allows `evals/results` only). */
+      revealEval?: (target: string) => Promise<boolean>;
       window: {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;

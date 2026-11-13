@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun, X } from "lucide-react";
+import { FlaskConical, Monitor, Moon, Sun, X } from "lucide-react";
 import { PermissionsSection } from "./PermissionsSection";
 import { LANGS, useT, type MsgKey } from "../i18n";
 import type { UiPermMode } from "../permissionUi";
@@ -39,6 +39,8 @@ export function AppearancePanel(props: {
   workspace?: string;
   permMode: UiPermMode;
   onPermMode: (m: UiPermMode) => void;
+  /** Open Settings → Evals; omitted when the Engine has no evals (not a dev checkout). */
+  onOpenEvals?: () => void;
 }) {
   const t = useT();
   if (!props.open) return null;
@@ -156,6 +158,16 @@ export function AppearancePanel(props: {
       </div>
 
       <PermissionsSection workspace={props.workspace ?? ""} mode={props.permMode} onMode={props.onPermMode} />
+
+      {props.onOpenEvals ? (
+        <div className="appear-sec">
+          <h3>{t("evals.title")}</h3>
+          <button type="button" className="appear-link" onClick={props.onOpenEvals} title={t("evals.openHint")}>
+            <FlaskConical size={14} aria-hidden="true" />
+            {t("evals.openHint")}
+          </button>
+        </div>
+      ) : null}
 
       <button type="button" className="ghost" onClick={() => props.onChange({ ...DEFAULT_APPEARANCE })}>
         {t("appear.reset")}
