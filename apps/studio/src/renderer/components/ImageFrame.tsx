@@ -1,6 +1,7 @@
 import { Check, Copy, Download, PencilLine } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { copyImageToClipboard, downloadImage, downloadPng, fileNameFor, isSvgDataUrl } from "../imageActions";
+import { useT } from "../i18n";
 
 /**
  * Ảnh trong chat có thanh thao tác khi hover / focus (như app ảnh): góc phải trên **Tải**
@@ -25,6 +26,7 @@ export function ImageFrame(props: {
   onEdit?: () => void;
   onImgError?: () => void;
 }) {
+  const t = useT();
   const { src } = props;
   const svg = isSvgDataUrl(src);
   const [menu, setMenu] = useState(false);
@@ -52,7 +54,7 @@ export function ImageFrame(props: {
       copyTimer.current = setTimeout(() => setCopied(false), COPIED_MS);
     } catch {
       setCopied(false);
-      flash("Không copy được");
+      flash(t("img.copyFailedShort"));
     }
   }
 
@@ -61,7 +63,7 @@ export function ImageFrame(props: {
     try {
       await downloadPng(src, fileNameFor(src, { path: props.path, name: props.name, ext: "png" }));
     } catch {
-      flash("Không xuất được PNG");
+      flash(t("img.pngFailed"));
     }
   }
 
@@ -70,7 +72,7 @@ export function ImageFrame(props: {
       className={`img-frame${props.compact ? " compact" : ""}${menu || copied ? " menu-open" : ""}${props.className ? ` ${props.className}` : ""}`}
       onMouseLeave={() => setMenu(false)}
     >
-      <button type="button" className="img-frame-open" title={props.title ?? "Bấm để phóng to"} onClick={props.onOpen}>
+      <button type="button" className="img-frame-open" title={props.title ?? t("img.clickToZoom")} onClick={props.onOpen}>
         <img src={src} alt={props.alt} style={props.imgStyle} onError={props.onImgError} />
       </button>
       <span className="img-frame-tools">
@@ -83,8 +85,8 @@ export function ImageFrame(props: {
           <button
             type="button"
             className="img-frame-btn"
-            title={svg ? "Tải ảnh (PNG / SVG)" : "Tải ảnh"}
-            aria-label="Tải ảnh"
+            title={svg ? t("img.downloadSvgTip") : t("img.download")}
+            aria-label={t("img.download")}
             aria-haspopup={svg ? "menu" : undefined}
             aria-expanded={svg ? menu : undefined}
             onClick={() => (svg ? setMenu((v) => !v) : downloadImage(src, fileNameFor(src, { path: props.path, name: props.name })))}
@@ -93,9 +95,9 @@ export function ImageFrame(props: {
           </button>
           {svg && menu ? (
             <span className="img-frame-menu" role="menu">
-              <button type="button" role="menuitem" title="PNG, nét gấp đôi" onClick={() => void png()}>
+              <button type="button" role="menuitem" title={t("img.png2x")} onClick={() => void png()}>
                 <Download size={15} />
-                Download as PNG
+                {t("img.downloadPng")}
               </button>
               <button
                 type="button"
@@ -106,7 +108,7 @@ export function ImageFrame(props: {
                 }}
               >
                 <Download size={15} />
-                Download as SVG
+                {t("img.downloadSvg")}
               </button>
             </span>
           ) : null}
@@ -114,8 +116,8 @@ export function ImageFrame(props: {
         <button
           type="button"
           className={`img-frame-btn img-frame-copy${copied ? " copied" : ""}`}
-          title={copied ? "Copied" : "Copy as image"}
-          aria-label="Copy as image"
+          title={copied ? t("common.copied") : t("img.copyAs")}
+          aria-label={t("img.copyAs")}
           onClick={() => void copy()}
         >
           <span className="img-frame-swap" aria-hidden="true">
@@ -128,19 +130,19 @@ export function ImageFrame(props: {
           </span>
         </button>
         <span className="sr-only" role="status">
-          {copied ? "Copied" : ""}
+          {copied ? t("common.copied") : ""}
         </span>
       </span>
       {props.onEdit ? (
         <button
           type="button"
           className="img-frame-edit"
-          title="Chỉnh sửa hình ảnh: đánh dấu rồi nhờ agent sửa"
-          aria-label="Chỉnh sửa hình ảnh"
+          title={t("img.editImageTip")}
+          aria-label={t("img.editImage")}
           onClick={props.onEdit}
         >
           <PencilLine size={14} />
-          {props.compact ? null : <span>Chỉnh sửa</span>}
+          {props.compact ? null : <span>{t("img.edit")}</span>}
         </button>
       ) : null}
     </span>

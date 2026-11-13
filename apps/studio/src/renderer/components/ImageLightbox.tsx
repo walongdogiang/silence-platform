@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Copy, Download, PencilLine, X } from "lucide
 import { useEffect, useRef, useState } from "react";
 import { copyImageToClipboard } from "../pastedImages";
 import { downloadImage, downloadPng, fileNameFor, isSvgDataUrl } from "../imageActions";
+import { useT } from "../i18n";
 
 /** Ảnh đang phóng to: danh sách ảnh của cùng một tin + vị trí đang xem. */
 export type LightboxState = { images: string[]; index: number } | null;
@@ -18,6 +19,7 @@ export function ImageLightbox(props: {
   /** Mở trình chỉnh sửa cho ảnh đang xem. */
   onEdit?: (src: string) => void;
 }) {
+  const t = useT();
   const [index, setIndex] = useState(props.index);
   const [actual, setActual] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -60,9 +62,9 @@ export function ImageLightbox(props: {
   async function copy() {
     try {
       await copyImageToClipboard(src);
-      setStatus("Đã copy ảnh");
+      setStatus(t("img.copied"));
     } catch {
-      setStatus("Không copy được ảnh");
+      setStatus(t("img.copyFailed"));
     }
   }
 
@@ -74,7 +76,7 @@ export function ImageLightbox(props: {
     try {
       await downloadPng(src, fileNameFor(src, { n: index + 1, ext: "png" }));
     } catch {
-      setStatus("Không xuất được PNG");
+      setStatus(t("img.pngFailed"));
     }
   }
 
@@ -83,7 +85,7 @@ export function ImageLightbox(props: {
       className="lightbox"
       role="dialog"
       aria-modal="true"
-      aria-label="Xem ảnh"
+      aria-label={t("img.viewer")}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -101,33 +103,33 @@ export function ImageLightbox(props: {
         ) : null}
         <span className="lightbox-spacer" />
         {props.onEdit ? (
-          <button type="button" className="lightbox-btn" onClick={() => props.onEdit?.(src)} title="Chỉnh sửa: đánh dấu rồi nhờ agent sửa">
+          <button type="button" className="lightbox-btn" onClick={() => props.onEdit?.(src)} title={t("img.editTip")}>
             <PencilLine size={15} />
-            <span>Chỉnh sửa</span>
+            <span>{t("img.edit")}</span>
           </button>
         ) : null}
-        <button type="button" className="lightbox-btn" onClick={() => void copy()} title="Copy ảnh">
+        <button type="button" className="lightbox-btn" onClick={() => void copy()} title={t("img.copy")}>
           <Copy size={15} />
-          <span>Copy</span>
+          <span>{t("common.copy")}</span>
         </button>
         {isSvg ? (
           <>
-            <button type="button" className="lightbox-btn" onClick={() => void savePng()} title="Lưu PNG (nét gấp đôi)">
+            <button type="button" className="lightbox-btn" onClick={() => void savePng()} title={t("img.savePng")}>
               <Download size={15} />
               <span>PNG</span>
             </button>
-            <button type="button" className="lightbox-btn" onClick={save} title="Lưu SVG (vector, sửa được)">
+            <button type="button" className="lightbox-btn" onClick={save} title={t("img.saveSvg")}>
               <Download size={15} />
               <span>SVG</span>
             </button>
           </>
         ) : (
-          <button type="button" className="lightbox-btn" onClick={save} title="Lưu ảnh">
+          <button type="button" className="lightbox-btn" onClick={save} title={t("img.save")}>
             <Download size={15} />
-            <span>Lưu</span>
+            <span>{t("common.save")}</span>
           </button>
         )}
-        <button ref={closeRef} type="button" className="lightbox-btn" onClick={onClose} title="Đóng (Esc)" aria-label="Đóng">
+        <button ref={closeRef} type="button" className="lightbox-btn" onClick={onClose} title={t("img.closeEsc")} aria-label={t("common.close")}>
           <X size={16} />
         </button>
       </div>
@@ -139,8 +141,8 @@ export function ImageLightbox(props: {
       >
         <img
           src={src}
-          alt={`Ảnh ${index + 1}`}
-          title={actual ? "Vừa khung" : "Kích thước thật"}
+          alt={t("img.alt", { n: index + 1 })}
+          title={actual ? t("img.fit") : t("img.actual")}
           onClick={() => setActual((v) => !v)}
         />
       </div>
@@ -149,7 +151,7 @@ export function ImageLightbox(props: {
           <button
             type="button"
             className="lightbox-nav prev"
-            aria-label="Ảnh trước"
+            aria-label={t("img.prev")}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => setIndex((i) => (i - 1 + count) % count)}
           >
@@ -158,7 +160,7 @@ export function ImageLightbox(props: {
           <button
             type="button"
             className="lightbox-nav next"
-            aria-label="Ảnh sau"
+            aria-label={t("img.next")}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => setIndex((i) => (i + 1) % count)}
           >

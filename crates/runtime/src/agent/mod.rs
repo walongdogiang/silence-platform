@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
+mod auto;
 mod changes;
 mod cli;
 mod modes;
@@ -36,10 +37,12 @@ pub use plan::approve_plan;
 pub use policy::{decide_permission, decide_permission_scoped, list_permissions, revoke_permission};
 pub use resume::resume_session;
 pub use usage::context_usage;
+pub(crate) use auto::{record_aux_cost, title_pick, ToolOutcome};
 
 /// Tool result the model sees when the user denies a permission ask.
 pub(crate) const DENIED_BY_USER: &str = "permission denied by user";
 
+use auto::*;
 use changes::*;
 use modes::*;
 use policy::*;
@@ -60,6 +63,9 @@ pub struct Session {
     pub mode: SessionMode,
     pub permission: PermissionMode,
     pub model: String,
+    /// Provider Auto routes within (the picker's source). Empty = preferred / first HTTP source.
+    /// Memory only: the UI re-sends it with `session.set_model`.
+    pub source: String,
     /// `auto` or one of `silence_protocol::EFFORT_LEVELS`. Memory only: the UI re-sends it
     /// before each turn (`session.set_effort`), like the model.
     pub effort: String,
@@ -88,10 +94,21 @@ pub struct Session {
     /// prompt + completion tokens of the last successful call, as reported by the provider.
     /// That reply is now part of history, so this is the measured size of the context.
     pub last_prompt_tokens: Option<u32>,
+    /// USD of the last model call (a CLI turn counts as one call). Estimates the next call for
+    /// the Auto spend cap. Memory only.
+    pub last_call_usd: f64,
     /// The conversation already holds MCP output or fetched web content (prompt-injection
     /// channel): the Risk Engine raises contained shell commands to `ask`. Stays set for the
     /// session, because that content stays in history.
     pub tainted: bool,
+    /// USD spent by this session since it was loaded (turns, sub-agents, titles). Memory only.
+    pub spent_usd: f64,
+    /// The user allowed one more turn past the Auto spend cap (`session.budget_continue`).
+    pub budget_pass: bool,
+    /// Auto on the Claude CLI: the last turn ended in trouble, so the next starts on Frontier.
+    pub cli_hot: bool,
+    /// Tool calls finished since the loop last looked (escalation signals).
+    pub tool_log: Vec<ToolOutcome>,
 }
 
 pub struct AppCtx {
@@ -162,7 +179,13 @@ pub async fn create_session(
         abort: false,
         last_model: None,
         last_prompt_tokens: None,
+        last_call_usd: 0.0,
         tainted: false,
+        source: String::new(),
+        spent_usd: 0.0,
+        budget_pass: false,
+        cli_hot: false,
+        tool_log: Vec::new(),
     };
     persist_messages(ctx, &mut session).await;
     ctx.sessions
@@ -307,28 +330,34 @@ async fn run_turn(
     tx: Option<mpsc::UnboundedSender<SessionEvent>>,
 ) -> Result<()> {
     let mut needs_vision = !images.is_empty();
-    {
+    let pass_cap = {
         let mut s = session_arc.lock().await;
         s.abort = false;
+        s.tool_log.clear();
         let content = crate::images::user_content(&redact(&text), &images);
         s.messages.push(json!({"role":"user","content": content}));
         persist_messages(&ctx, &mut s).await;
-    }
-    // A Claude CLI model is always an explicit pick (Auto never routes there).
-    let requested = session_arc.lock().await.model.clone();
-    let is_cli = ctx
-        .catalog
-        .model(&requested)
-        .ok()
-        .and_then(|m| ctx.catalog.provider_for(m).ok())
-        .is_some_and(|p| p.is_cli());
-    if is_cli {
-        let r = cli::run_cli_turn(ctx.clone(), session_arc.clone(), requested, text.clone(), tx.clone()).await;
-        if r.is_err() {
+        std::mem::take(&mut s.budget_pass)
+    };
+    // Claude CLI: an explicit CLI model, or Auto on the CLI source.
+    match cli_turn_pick(&ctx.catalog, &*session_arc.lock().await, pass_cap)? {
+        CliPick::OverCap => {
             rollback_user_message(&ctx, &session_arc, 1, &text).await;
+            emit(&tx, SessionEvent::Done { stop: "budget".into() });
+            return Ok(());
         }
-        return r;
+        CliPick::Run(pick) => {
+            let r = cli::run_cli_turn(ctx.clone(), session_arc.clone(), pick, text.clone(), tx.clone()).await;
+            if r.is_err() {
+                rollback_user_message(&ctx, &session_arc, 1, &text).await;
+            }
+            return r;
+        }
+        CliPick::NotCli => {}
     }
+    let rules = ctx.catalog.raw.escalation.clone();
+    let mut esc = Escalation::default();
+    let mut last_route: Option<String> = None;
     let mut empty_streak = 0;
     let mut loops: u32 = 0;
     loop {
@@ -343,7 +372,7 @@ async fn run_turn(
             );
             break;
         }
-        let (model_id, task_class, reason, read_only, context_window, effort) = {
+        let (pick, read_only, context_window, effort, can_rise, debug) = {
             let s = session_arc.lock().await;
             if s.abort {
                 emit(
@@ -354,40 +383,47 @@ async fn run_turn(
                 );
                 return Ok(());
             }
-            let decision = pick_model(&ctx.catalog, &s, text.as_str(), needs_vision)?;
+            let pick = pick_main(&ctx.catalog, &s, &esc, needs_vision)?;
+            let model = ctx.catalog.resolve(&pick.model_id)?;
+            if over_cap(&ctx.catalog, &s, pass_cap, next_call_usd(&s, &model)) {
+                drop(s);
+                rollback_user_message(&ctx, &session_arc, loops, &text).await;
+                emit(&tx, SessionEvent::Done { stop: "budget".into() });
+                return Ok(());
+            }
             let prof = profile(s.mode);
-            let model = ctx.catalog.resolve(&decision.model_id)?;
+            let auto = pick.slot.is_some();
             (
-                decision.model_id,
-                decision.task_class.as_str().to_string(),
-                decision.reason,
+                pick,
                 prof.read_only,
                 model.context_window,
-                s.effort.clone(),
+                call_effort(&model, &s.effort, auto && esc.effort_bump),
+                auto && effort_can_rise(&model, &s.effort),
+                s.mode == SessionMode::Debug,
             )
         };
-        emit(
-            &tx,
-            SessionEvent::Route {
-                task_class: task_class.clone(),
-                model_id: model_id.clone(),
-                reason: reason.clone(),
-            },
-        );
-        let _ = ctx
-            .audit
-            .append(now_event(
-                &session_arc.lock().await.id,
-                "route",
-                &model_id,
-                "",
-                "",
-                0,
-                0,
-                0.0,
-                json!({"reason": reason, "class": task_class}),
-            ))
-            .await;
+        let model_id = pick.model_id.clone();
+        // One Route per change (first call, new model, new escalation), not per step.
+        let route_key = format!("{model_id}|{effort}|{}", esc.why);
+        if last_route.as_deref() != Some(route_key.as_str()) {
+            last_route = Some(route_key);
+            esc.changed = false;
+            emit(&tx, pick.route_event());
+            let _ = ctx
+                .audit
+                .append(now_event(
+                    &session_arc.lock().await.id,
+                    "route",
+                    &model_id,
+                    "",
+                    "",
+                    0,
+                    0,
+                    0.0,
+                    json!({"reason": pick.reason, "class": pick.purpose, "slot": pick.slot_str(), "escalated": pick.escalated}),
+                ))
+                .await;
+        }
 
         let (messages, tools) = {
             let mut s = session_arc.lock().await;
@@ -407,6 +443,7 @@ async fn run_turn(
         };
 
         let mut token_buf = String::new();
+        let mut answered_by = model_id.clone();
         let result = gateway::chat(
             &ctx.catalog,
             &model_id,
@@ -436,8 +473,13 @@ async fn run_turn(
                     .downcast_ref::<ProviderError>()
                     .map(|e| e.code.retryable())
                     .unwrap_or(false);
-                let upgraded = if retryable {
-                    silence_router::escalate(&ctx.catalog, "timeout")?
+                // Only Auto moves to a stronger model; an explicit pick is the user's call.
+                let upgraded = if retryable && pick.slot.is_some() && !esc.frontier {
+                    esc.provider_retry(&rules);
+                    let s = session_arc.lock().await;
+                    pick_main(&ctx.catalog, &s, &esc, needs_vision)
+                        .map(|p| p.model_id)
+                        .unwrap_or_else(|_| model_id.clone())
                 } else {
                     model_id.clone()
                 };
@@ -449,6 +491,15 @@ async fn run_turn(
                             detail: json!({"from": model_id, "to": upgraded, "err": err.to_string()}),
                         },
                     );
+                    let retry = Pick {
+                        model_id: upgraded.clone(),
+                        escalated: true,
+                        slot: Some(silence_protocol::Slot::Frontier),
+                        reason: format!("{} · retry after provider error", pick.reason),
+                        ..pick.clone()
+                    };
+                    emit(&tx, retry.route_event());
+                    answered_by = upgraded.clone();
                     match gateway::chat(
                         &ctx.catalog,
                         &upgraded,
@@ -482,6 +533,7 @@ async fn run_turn(
             }
         };
 
+        let model_id = answered_by;
         let model_entry = ctx.catalog.resolve(&model_id)?;
         let usd = gateway::chat_cost_usd(&model_entry, &result);
         emit(
@@ -490,10 +542,14 @@ async fn run_turn(
                 input_tokens: result.input_tokens,
                 output_tokens: result.output_tokens,
                 usd,
+                slot: pick.slot_str(),
+                baseline_usd: baseline_usd(&ctx.catalog, &pick, &result, usd),
             },
         );
         let sid = {
             let mut s = session_arc.lock().await;
+            s.spent_usd += usd;
+            s.last_call_usd = usd;
             s.last_model = Some(model_id.clone());
             if result.input_tokens > 0 {
                 s.last_prompt_tokens = Some(result.input_tokens + result.output_tokens);
@@ -516,16 +572,18 @@ async fn run_turn(
             .await;
 
         if result.tool_calls.is_empty() {
+            // Auto: an empty reply is retried a step up (effort, then Frontier), at most twice.
+            if result.content.trim().is_empty() && pick.slot.is_some() && !esc.frontier && empty_streak < 2 {
+                empty_streak += 1;
+                esc.empty_output(&rules, can_rise);
+                if esc.changed {
+                    continue;
+                }
+            }
             {
                 let mut s = session_arc.lock().await;
                 s.messages.push(result.assistant_message(None));
                 persist_messages(&ctx, &mut s).await;
-            }
-            if result.content.trim().is_empty() {
-                empty_streak += 1;
-                if empty_streak >= 2 {
-                    let _ = silence_router::escalate(&ctx.catalog, "empty_output");
-                }
             }
             emit(
                 &tx,
@@ -580,54 +638,83 @@ async fn run_turn(
             s.messages.push(json!({"role": "user", "content": view_image_content(&viewed)}));
             persist_messages(&ctx, &mut s).await;
         }
+        let outcomes = std::mem::take(&mut session_arc.lock().await.tool_log);
+        if pick.slot.is_some() {
+            esc.observe_step(&outcomes, &rules, debug, can_rise);
+        }
         let _ = messages_tokens;
     }
     Ok(())
 }
 
-/// Model for the next call: requested model, or on Auto the router's pick — where a mode
-/// may pin a tier (Debug/Review → strong). Explicit picks win.
-fn pick_model(
-    catalog: &Catalog,
-    s: &Session,
-    user_text: &str,
-    needs_vision: bool,
-) -> Result<silence_router::RouteDecision> {
-    let mut decision = pick_model_for(catalog, &s.model, s.mode, user_text)?;
-    if needs_vision && s.model == "auto" {
-        prefer_vision(catalog, &mut decision);
-    }
-    Ok(decision)
+/// Auto session at its spend cap, or whose next call (estimate `next_usd`) would pass it — unless
+/// the user allowed one more turn.
+fn over_cap(catalog: &Catalog, s: &Session, pass: bool, next_usd: f64) -> bool {
+    let (spent, cap) = budget(catalog, s);
+    !pass && cap.is_some_and(|c| spent >= c || spent + next_usd > c)
 }
 
-fn pick_model_for(
-    catalog: &Catalog,
-    requested: &str,
-    mode: SessionMode,
-    user_text: &str,
-) -> Result<silence_router::RouteDecision> {
-    let mut decision = silence_router::route(catalog, requested, user_text)?;
-    if requested == "auto" {
-        if let Some(tier) = profile(mode).tier {
-            if let Ok(m) = catalog.by_tier(tier) {
-                decision.model_id = m.id.clone();
-                decision.reason = format!("mode {mode:?} -> tier {tier}");
-            }
+/// Estimated USD of the next call on `model`: the last call's cost when it ran on the same model
+/// (steps of a turn are alike, and it already reflects prompt caching), else the history priced in
+/// full plus a typical reply. Overestimates rather than under.
+fn next_call_usd(s: &Session, model: &silence_router::ModelEntry) -> f64 {
+    if s.last_call_usd > 0.0 && s.last_model.as_deref() == Some(model.id.as_str()) {
+        return s.last_call_usd;
+    }
+    let input = messages_tokens(&s.messages) as u32 + NEXT_CALL_TOOLS_TOKENS;
+    gateway::cost_usd(model, input, NEXT_CALL_OUTPUT_TOKENS)
+}
+
+/// Tool definitions sent with every call (rough, for the cap estimate).
+const NEXT_CALL_TOOLS_TOKENS: u32 = 4_000;
+/// A typical reply (text + tool calls) for the cap estimate.
+const NEXT_CALL_OUTPUT_TOKENS: u32 = 2_000;
+
+enum CliPick {
+    NotCli,
+    OverCap,
+    Run(Pick),
+}
+
+/// Does this turn run on the Claude CLI (explicit CLI model, or Auto on the CLI source)?
+fn cli_turn_pick(catalog: &Catalog, s: &Session, pass_cap: bool) -> Result<CliPick> {
+    if s.model == "auto" {
+        let src = catalog.auto_source(&s.source);
+        if !catalog.provider(&src).is_ok_and(|p| p.is_cli()) {
+            return Ok(CliPick::NotCli);
         }
+        let pick = pick_main(catalog, s, &Escalation::carried(s.cli_hot), false)?;
+        let model = catalog.resolve(&pick.model_id)?;
+        if over_cap(catalog, s, pass_cap, next_call_usd(s, &model)) {
+            return Ok(CliPick::OverCap);
+        }
+        return Ok(CliPick::Run(pick));
     }
-    Ok(decision)
+    let is_cli = catalog
+        .model(&s.model)
+        .ok()
+        .and_then(|m| catalog.provider_for(m).ok())
+        .is_some_and(|p| p.is_cli());
+    if !is_cli {
+        return Ok(CliPick::NotCli);
+    }
+    Ok(CliPick::Run(Pick {
+        model_id: s.model.clone(),
+        purpose: "cli".into(),
+        slot: None,
+        reason: "user pick (Claude CLI)".into(),
+        escalated: false,
+        source: String::new(),
+    }))
 }
 
-/// Auto with pasted images: keep the pick if it has vision, else the first vision model
-/// (catalog order). No vision model at all → keep the pick; the gateway drops the images.
-fn prefer_vision(catalog: &Catalog, decision: &mut silence_router::RouteDecision) {
-    if catalog.resolve(&decision.model_id).is_ok_and(|m| m.vision) {
-        return;
+/// Model the next main call of `requested` in `mode` would use (context meter; no escalation).
+fn preview_model(catalog: &Catalog, requested: &str, mode: SessionMode, source: &str) -> Result<String> {
+    if requested != "auto" && !requested.is_empty() {
+        catalog.resolve(requested)?;
+        return Ok(requested.to_string());
     }
-    if let Some(m) = catalog.vision_model() {
-        decision.reason = format!("{} -> {} (images need vision)", decision.reason, m.id);
-        decision.model_id = m.id.clone();
-    }
+    Ok(catalog.route_auto(source, mode_slot(catalog, source, mode), false)?.model_id)
 }
 
 /// Built-in tool definitions for a mode (no MCP): workspace tools, mode tools, `task`.
@@ -957,9 +1044,11 @@ async fn dispatch_tool(
     // Every remaining tool (read, grep, write, edit, shell, …) goes through the Risk Engine.
     let verdict = match gate(ctx, session_arc, tx, &tc.name, &args, false).await? {
         Gate::Run(v) => v,
+        // A denial or a policy block is not the model struggling: no escalation signal.
         Gate::Denied => return Ok(DENIED_BY_USER.into()),
         Gate::Blocked(msg) => return Ok(blocked(tx, tc, msg)),
     };
+    let is_test = verdict.codes.iter().any(|c| c == "BUILD_TEST");
     if tc.name == "shell" {
         let payload = args.to_string();
         let org = session_arc.lock().await.org.clone();
@@ -972,13 +1061,20 @@ async fn dispatch_tool(
     let stage_files = matches!(tc.name.as_str(), "write" | "edit")
         && matches!(permission, PermissionMode::Ask | PermissionMode::Allowlist);
     if stage_files {
-        return stage_file_tool(ctx, session_arc, tx, tc, &args).await;
+        let r = stage_file_tool(ctx, session_arc, tx, tc, &args).await;
+        // Staged, not written: a red test after it says nothing about the edit yet.
+        record_outcome(session_arc, tc, r.is_ok(), false, false).await;
+        return r;
     }
 
     let ws = session_arc.lock().await.workspace.clone();
     let result = silence_tools::execute(&ws, &tc.name, &args).await;
     if result.is_ok() && verdict.brings_external_content() {
         session_arc.lock().await.tainted = true;
+    }
+    match &result {
+        Ok(out) => record_outcome(session_arc, tc, out.ok, is_test, out.diff.is_some()).await,
+        Err(_) => record_outcome(session_arc, tc, false, is_test, false).await,
     }
     match result {
         Ok(out) => {
@@ -1041,6 +1137,18 @@ async fn dispatch_tool(
     }
 }
 
+/// Note a finished tool call for Auto's escalation (read by the loop after each step).
+async fn record_outcome(session_arc: &Arc<Mutex<Session>>, tc: &ToolCall, ok: bool, test: bool, wrote: bool) {
+    session_arc.lock().await.tool_log.push(ToolOutcome {
+        name: tc.name.clone(),
+        signature: format!("{} {}", tc.name, tc.arguments),
+        ok,
+        test,
+        wrote,
+        mutating: silence_tools::mutates(&tc.name),
+    });
+}
+
 /// Switch the mode (agent / plan / ask) of a live session.
 pub async fn set_mode(ctx: &AppCtx, session_id: &str, mode: SessionMode) -> Result<()> {
     let session = ctx
@@ -1056,9 +1164,13 @@ pub async fn set_mode(ctx: &AppCtx, session_id: &str, mode: SessionMode) -> Resu
 }
 
 /// Switch the model of a live session (the picker changes after `session.create`).
-pub async fn set_model(ctx: &AppCtx, session_id: &str, model: &str) -> Result<()> {
+/// `source` (Auto only): the provider Auto routes within; `None` keeps the current one.
+pub async fn set_model(ctx: &AppCtx, session_id: &str, model: &str, source: Option<&str>) -> Result<()> {
     if model != "auto" {
         ctx.catalog.resolve(model)?;
+    }
+    if let Some(src) = source.filter(|s| !s.is_empty()) {
+        ctx.catalog.provider(src)?;
     }
     let session = ctx
         .sessions
@@ -1069,14 +1181,63 @@ pub async fn set_model(ctx: &AppCtx, session_id: &str, model: &str) -> Result<()
         .ok_or_else(|| anyhow!("unknown session"))?;
     {
         let mut s = session.lock().await;
-        if s.model != model {
+        let source = source.map(str::to_string).unwrap_or_else(|| s.source.clone());
+        if s.model != model || s.source != source {
             // The CLI conversation no longer matches the history once another model answered.
+            // Auto switching between CLI models keeps it: the CLI holds the whole history.
             s.cli_session = None;
+            s.cli_hot = false;
         }
         s.model = model.to_string();
+        s.source = source;
     }
     log_append(ctx, session_id, LogBody::ModelChanged { model: model.to_string() }).await;
     Ok(())
+}
+
+/// Let the next turn run past the Auto spend cap once.
+pub async fn budget_continue(ctx: &AppCtx, session_id: &str) -> Result<()> {
+    let session = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    session.lock().await.budget_pass = true;
+    Ok(())
+}
+
+/// Raise the session's spend to what the UI recorded for this chat (a new live session after an
+/// Engine restart starts at $0). Never lowers it, so the cap cannot be reset from the client.
+pub async fn carry_spend(ctx: &AppCtx, session_id: &str, usd: f64) -> Result<()> {
+    if !usd.is_finite() || usd < 0.0 {
+        return Err(anyhow!("usd must be a positive number"));
+    }
+    let session = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    let mut s = session.lock().await;
+    s.spent_usd = s.spent_usd.max(usd);
+    Ok(())
+}
+
+/// `session.spend`: what the session spent since it was loaded and its Auto cap.
+pub async fn session_spend(ctx: &AppCtx, session_id: &str) -> Result<Value> {
+    let session = ctx
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown session"))?;
+    let s = session.lock().await;
+    let (spent, cap) = budget(&ctx.catalog, &s);
+    Ok(json!({"spent_usd": spent, "budget_usd": cap}))
 }
 
 /// Set the effort preference (`auto` or a level). Each call maps it to what the routed model
@@ -1131,7 +1292,7 @@ mod permission_tests {
     use std::time::Duration;
 
     fn test_ctx(data: &std::path::Path) -> Arc<AppCtx> {
-        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": [], "routes": {}})).unwrap();
+        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": []})).unwrap();
         let audit = AuditLog::open(data).unwrap();
         Arc::new(AppCtx::new(Catalog::from_raw(raw), audit))
     }
@@ -1599,9 +1760,12 @@ mod permission_tests {
         }
         assert!(profile(SessionMode::Plan).submit_plan);
         assert!(!profile(SessionMode::Ask).submit_plan);
-        assert_eq!(profile(SessionMode::Debug).tier, Some("strong"));
-        assert_eq!(profile(SessionMode::Review).tier, Some("strong"));
-        assert_eq!(profile(SessionMode::Agent).tier, None);
+        use silence_protocol::Slot;
+        assert_eq!(profile(SessionMode::Plan).slot, Slot::Frontier);
+        assert_eq!(profile(SessionMode::Review).slot, Slot::Frontier);
+        assert_eq!(profile(SessionMode::Debug).slot, Slot::Strong);
+        assert_eq!(profile(SessionMode::Agent).slot, Slot::Strong);
+        assert_eq!(profile(SessionMode::Ask).slot, Slot::Strong);
     }
 
     #[test]

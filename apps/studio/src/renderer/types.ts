@@ -29,8 +29,10 @@ export type SessionEvent =
   /** `applied`: already written (Balanced) — UI offers Undo instead of Apply/Reject. */
   | { type: "diff"; path: string; before: string; after: string; applied?: boolean }
   | { type: "trace"; event: string; detail: unknown }
-  | { type: "route"; task_class: string; model_id: string; reason: string }
-  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number }
+  /** `slot` on Auto (`frontier|strong|small`); `escalated` when Auto moved up on trouble. */
+  | { type: "route"; task_class: string; model_id: string; reason: string; slot?: string; escalated?: boolean }
+  /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
+  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: string; baseline_usd?: number }
   | { type: "terminal"; data: string }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };

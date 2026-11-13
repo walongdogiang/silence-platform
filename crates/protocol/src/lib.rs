@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.11";
+pub const PROTOCOL_VERSION: &str = "0.1.12";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -160,6 +160,83 @@ pub struct SetPreferredParams {
     pub provider: String,
 }
 
+/// Slot of the Auto model. Auto never reads the prompt: it picks a slot from the phase (mode)
+/// and the purpose of the call, then escalates on trouble. Ordered weakest first.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Slot {
+    Small,
+    #[default]
+    Strong,
+    Frontier,
+}
+
+impl Slot {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Strong => "strong",
+            Self::Frontier => "frontier",
+        }
+    }
+}
+
+/// Model ids the `custom` preset pins per slot. Empty = the `balanced` default for that slot.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct AutoSlots {
+    #[serde(default)]
+    pub frontier: String,
+    #[serde(default)]
+    pub strong: String,
+    #[serde(default)]
+    pub small: String,
+}
+
+/// Auto settings of one source (provider). Studio keeps one per source and sends it with
+/// `auto.set_config`; the Engine keeps it in memory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoConfig {
+    /// `balanced` (default) | `economy` | `max` | `custom`.
+    #[serde(default = "default_preset")]
+    pub preset: String,
+    /// Only read when `preset` is `custom`.
+    #[serde(default)]
+    pub slots: AutoSlots,
+    /// Model ids Auto may use on this source. Empty = every non-opt-in model of the source.
+    #[serde(default)]
+    pub pool: Vec<String>,
+    /// Spend cap per session in USD. `None` = no cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_usd: Option<f64>,
+    /// Slot of the main turn per mode (`plan`, `agent`, `ask`, `debug`, `review`, `multitask`).
+    /// Missing mode = its default (Plan/Review → Frontier, the rest → Strong).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mode_slots: std::collections::BTreeMap<String, Slot>,
+}
+
+fn default_preset() -> String {
+    "balanced".into()
+}
+
+impl Default for AutoConfig {
+    fn default() -> Self {
+        Self {
+            preset: default_preset(),
+            slots: AutoSlots::default(),
+            pool: Vec::new(),
+            budget_usd: None,
+            mode_slots: Default::default(),
+        }
+    }
+}
+
+/// Params of `auto.set_config`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetAutoConfigParams {
+    pub provider: String,
+    pub config: AutoConfig,
+}
+
 /// Params of `session.set_effort`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetEffortParams {
@@ -175,9 +252,9 @@ pub enum SessionMode {
     Plan,
     /// Read-only Q&A: read/search tools only, no edits, no plan submission.
     Ask,
-    /// Agent tools + evidence-first debugging workflow, strong tier on Auto.
+    /// Agent tools + evidence-first debugging workflow.
     Debug,
-    /// Read-only code review of the working tree / named files, strong tier on Auto.
+    /// Read-only code review of the working tree / named files.
     Review,
     /// Agent that splits work into independent sub-tasks and delegates them to sub-agents.
     Multitask,
@@ -339,14 +416,27 @@ pub enum SessionEvent {
         detail: Value,
     },
     Route {
+        /// Purpose of the call (`agent`, `plan`, `title`, `subagent:explore`, `cli`, …).
         task_class: String,
         model_id: String,
         reason: String,
+        /// Auto slot (`frontier|strong|small`); empty for an explicit model pick.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        slot: String,
+        /// Auto moved up (effort or slot) because the turn ran into trouble.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        escalated: bool,
     },
     Cost {
         input_tokens: u32,
         output_tokens: u32,
         usd: f64,
+        /// Auto slot that spent it; empty for an explicit model pick.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        slot: String,
+        /// Same tokens priced on the source's strongest model (the "all Opus" baseline).
+        #[serde(default)]
+        baseline_usd: f64,
     },
     Terminal {
         data: String,

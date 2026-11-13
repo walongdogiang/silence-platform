@@ -1,22 +1,31 @@
 import { describe, expect, it } from "vitest";
 import type { ChatLine } from "../models";
-import { firstExchange, titleFrom, titleLocked } from "./ChatHistoryPanel";
+import { translator } from "../i18n";
+import { firstExchange, shownTitle, titleFrom, titleLocked } from "./ChatHistoryPanel";
 
 describe("titleFrom", () => {
   it("capitalizes the first letter, including Vietnamese diacritics", () => {
-    expect(titleFrom([{ kind: "user", text: "sửa lại biến so_a" }])).toBe("Sửa lại biến so_a");
-    expect(titleFrom([{ kind: "user", text: "đổi tên file" }])).toBe("Đổi tên file");
+    expect(titleFrom([{ kind: "user", text: "sửa lại biến so_a" }], "Đoạn chat mới")).toBe("Sửa lại biến so_a");
+    expect(titleFrom([{ kind: "user", text: "đổi tên file" }], "Đoạn chat mới")).toBe("Đổi tên file");
   });
 
   it("keeps the rest of the text as typed and still truncates", () => {
-    expect(titleFrom([{ kind: "user", text: "fix getUserID bug" }])).toBe("Fix getUserID bug");
-    const t = titleFrom([{ kind: "user", text: "a".repeat(80) }]);
+    expect(titleFrom([{ kind: "user", text: "fix getUserID bug" }], "Đoạn chat mới")).toBe("Fix getUserID bug");
+    const t = titleFrom([{ kind: "user", text: "a".repeat(80) }], "Đoạn chat mới");
     expect(t.length).toBe(48);
     expect(t.endsWith("…")).toBe(true);
   });
 
   it("falls back when there is no user text", () => {
-    expect(titleFrom([])).toBe("Đoạn chat mới");
+    expect(titleFrom([], "Đoạn chat mới")).toBe("Đoạn chat mới");
+  });
+
+  it("shows a default title in the UI language, keeps real titles", () => {
+    const en = translator("en");
+    expect(shownTitle("Đoạn chat mới", en)).toBe("New chat");
+    expect(shownTitle("Fork · Đoạn chat mới", en)).toBe("Fork · New chat");
+    expect(shownTitle("New chat", translator("vi"))).toBe("Đoạn chat mới");
+    expect(shownTitle("Sửa lại biến so_a", en)).toBe("Sửa lại biến so_a");
   });
 });
 

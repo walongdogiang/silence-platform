@@ -1,5 +1,6 @@
 import { PanelRight, Search, SlidersHorizontal, Sparkles, Trash2, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { translate, useT, type MsgKey, type T } from "../i18n";
 import type { ChatLine, ChatThread } from "../models";
 import { SoftScroll } from "./SoftScroll";
 
@@ -16,7 +17,8 @@ export function loadThreads(): ChatThread[] {
   }
 }
 
-export function titleFrom(lines: ChatLine[], fallback = "Đoạn chat mới"): string {
+/** Title from the first user message; `fallback` (e.g. "New chat" in the UI language) when there is none. */
+export function titleFrom(lines: ChatLine[], fallback: string): string {
   const u = lines.find((l) => l.kind === "user");
   if (u?.kind === "user" && u.text.trim()) {
     const t = u.text.trim().replace(/\s+/g, " ");
@@ -26,6 +28,16 @@ export function titleFrom(lines: ChatLine[], fallback = "Đoạn chat mới"): s
     return cased.length > 48 ? `${cased.slice(0, 47)}…` : cased;
   }
   return fallback;
+}
+
+/** Default titles of both languages ("Đoạn chat" = older builds), shown in the current UI language. */
+const DEFAULT_TITLES = new Set([translate("vi", "history.newChat"), translate("en", "history.newChat"), "Đoạn chat"]);
+
+/** Stored title as shown: a default "New chat" follows the UI language (also after "Fork · "). */
+export function shownTitle(title: string, t: T): string {
+  const fork = title.startsWith("Fork · ") ? "Fork · " : "";
+  const rest = title.slice(fork.length);
+  return DEFAULT_TITLES.has(rest) ? fork + t("history.newChat") : title;
 }
 
 /** Tiêu đề đã chốt (AI sinh hoặc user đổi tay) thì không tính lại từ prompt. */
@@ -64,11 +76,11 @@ export function previewFrom(lines: ChatLine[]): string {
 
 type DayGroup = "today" | "yesterday" | "week" | "older";
 
-const GROUP_LABEL: Record<DayGroup, string> = {
-  today: "Hôm nay",
-  yesterday: "Hôm qua",
-  week: "Tuần này",
-  older: "Trước đó",
+const GROUP_LABEL: Record<DayGroup, MsgKey> = {
+  today: "history.today",
+  yesterday: "history.yesterday",
+  week: "history.week",
+  older: "history.older",
 };
 
 const GROUP_ORDER: DayGroup[] = ["today", "yesterday", "week", "older"];
@@ -114,6 +126,7 @@ export function ChatHistoryPanel(props: {
   onCustomize: () => void;
   onToggle: () => void;
 }) {
+  const tr = useT();
   const [q, setQ] = useState("");
   const dotClass = (id: string) => {
     if (id !== props.activeId) return "history-dot";
@@ -122,8 +135,8 @@ export function ChatHistoryPanel(props: {
   const dotTitle = (id: string) =>
     id === props.activeId && props.runState
       ? props.runState === "waiting"
-        ? "Đang chờ bạn duyệt"
-        : "Đang chạy"
+        ? tr("history.waiting")
+        : tr("history.running")
       : undefined;
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState("");
@@ -201,7 +214,7 @@ export function ChatHistoryPanel(props: {
     }
     return GROUP_ORDER.filter((g) => map.has(g)).map((g) => ({
       id: g,
-      label: GROUP_LABEL[g],
+      label: tr(GROUP_LABEL[g]),
       items: map.get(g) ?? [],
     }));
   }, [props.threads, props.workspace, q]);
@@ -214,8 +227,8 @@ export function ChatHistoryPanel(props: {
         <button
           type="button"
           className="history-toggle"
-          title="Toggle Agents Side Bar (Ctrl+Alt+U)"
-          aria-label="Ẩn thanh Agents"
+          title={tr("shell.toggleAgents")}
+          aria-label={tr("shell.hideAgents")}
           onClick={props.onToggle}
         >
           <PanelRight size={15} strokeWidth={1.75} />
@@ -228,29 +241,29 @@ export function ChatHistoryPanel(props: {
         onClick={props.onNewChat}
       >
         <Sparkles size={15} />
-        New Agent
+        {tr("history.newAgent")}
       </button>
       <label className="history-action history-search">
         <Search size={15} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("history.search")} />
       </label>
       <button
         type="button"
         className="history-action"
-        title="Chưa gắn"
+        title={tr("common.notWiredCap")}
         onClick={() => setAutoHint(true)}
       >
         <Workflow size={15} />
-        Automations
+        {tr("history.automations")}
       </button>
       <button type="button" className="history-action" onClick={props.onCustomize}>
         <SlidersHorizontal size={15} />
-        Customize
+        {tr("history.customize")}
       </button>
       <SoftScroll className="history-list" deps={[groups, q, autoHint, props.workspace, empty, props.activeId, now]}>
-        {autoHint && <p className="hint">Automations chưa gắn backend.</p>}
-        {!props.workspace && <p className="hint">Mở workspace để xem lịch sử.</p>}
-        {props.workspace && empty && !q && <p className="hint">Chưa có đoạn chat.</p>}
+        {autoHint && <p className="hint">{tr("history.automationsHint")}</p>}
+        {!props.workspace && <p className="hint">{tr("history.noWorkspace")}</p>}
+        {props.workspace && empty && !q && <p className="hint">{tr("history.empty")}</p>}
         {groups.map((g) => (
           <section key={g.id}>
             <span className="history-group">{g.label}</span>
@@ -262,7 +275,7 @@ export function ChatHistoryPanel(props: {
                     <input
                       autoFocus
                       value={draft}
-                      aria-label="Đổi tên đoạn chat"
+                      aria-label={tr("history.rename")}
                       maxLength={80}
                       onChange={(e) => setDraft(e.target.value)}
                       onFocus={(e) => e.currentTarget.select()}
@@ -277,20 +290,20 @@ export function ChatHistoryPanel(props: {
                   <button
                     type="button"
                     className="history-open"
-                    title="Double-click để đổi tên"
+                    title={tr("history.renameTip")}
                     onClick={() => props.onSelect(t.id)}
                     onDoubleClick={() => startRename(t)}
                   >
                     <span className={dotClass(t.id)} title={dotTitle(t.id)} />
-                    <strong>{t.title}</strong>
+                    <strong>{shownTitle(t.title, tr)}</strong>
                     <em>{relativeTime(t.updatedAt, now)}</em>
                   </button>
                 )}
                 <button
                   type="button"
                   className="history-del"
-                  title="Xóa đoạn chat"
-                  aria-label="Xóa đoạn chat"
+                  title={tr("history.delete")}
+                  aria-label={tr("history.delete")}
                   onClick={() => props.onDelete(t.id)}
                 >
                   <Trash2 size={13} />
@@ -303,8 +316,8 @@ export function ChatHistoryPanel(props: {
       <div className="history-user">
         <span className="avatar">5</span>
         <div>
-          <b>Local</b>
-          <small>Developer</small>
+          <b>{tr("history.local")}</b>
+          <small>{tr("history.developer")}</small>
         </div>
       </div>
     </aside>

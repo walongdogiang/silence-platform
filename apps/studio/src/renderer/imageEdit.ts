@@ -4,6 +4,8 @@
  * pixel thật — lịch sử undo/redo, xuất dấu thành SVG để ghép lên ảnh, và prompt điền sẵn.
  */
 
+import type { T } from "./i18n";
+
 export type Pt = { x: number; y: number };
 
 export type Mark =
@@ -170,15 +172,17 @@ export function marksToSvg(marks: Mark[], w: number, h: number): string {
 // ---------- Prompt ----------
 
 /** Chuỗi điền sẵn composer khi "Gửi cho agent". Ghim có toạ độ để agent sửa đúng chỗ. */
-export function editPrompt(opts: { title?: string; path?: string; isSvg: boolean; pins: { at: Pt; note: string }[] }): string {
-  const what = opts.title
-    ? `Sửa hình "${opts.title}"`
+export function editPrompt(
+  opts: { title?: string; path?: string; isSvg: boolean; pins: { at: Pt; note: string }[] },
+  t: T,
+): string {
+  const head = opts.title
+    ? t("edit.promptTitle", { title: opts.title })
     : opts.path
-      ? `Sửa ảnh \`${opts.path}\``
-      : "Sửa ảnh này";
-  const head = `${what} theo chỗ đánh dấu trong ảnh đính kèm`;
+      ? t("edit.promptPath", { path: opts.path })
+      : t("edit.promptThis");
   if (!opts.pins.length) return `${head}: `;
-  const unit = opts.isSvg ? " theo viewBox" : " px";
+  const unit = opts.isSvg ? t("edit.unitViewBox") : " px";
   const lines = opts.pins.map(
     (p, i) => `${i + 1}. (x=${Math.round(p.at.x)}, y=${Math.round(p.at.y)}${unit}): ${p.note.trim() || "…"}`,
   );

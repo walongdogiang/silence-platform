@@ -16,6 +16,8 @@ code:
 
 Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked for** (Thought + **Explored** + bước) → chữ AI → chân tin nhắn.
 
+Nhãn trong file này ghi bản tiếng Anh; UI hiện theo ngôn ngữ đã chọn ([i18n.md](i18n.md)).
+
 ## Cấu trúc một lượt (Cursor-like)
 
 ```

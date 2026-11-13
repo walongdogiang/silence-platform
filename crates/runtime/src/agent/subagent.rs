@@ -38,17 +38,18 @@ pub(super) async fn run_subagent(
             detail: json!({"kind": kind, "prompt": prompt}),
         },
     );
-    let (parent_id, parent_effort) = {
+    let (parent_id, parent_effort, pick, log_len) = {
         let p = parent.lock().await;
-        (p.id.clone(), p.effort.clone())
+        let pick = pick_aux(&ctx.catalog, &p.model, &p.source, Aux::Subagent(kind))?;
+        (p.id.clone(), p.effort.clone(), pick, p.tool_log.len())
     };
     // Explore is reading-heavy and cheap by design; the others follow the user's pick.
     let effort = if kind == "explore" { "low".to_string() } else { parent_effort };
-    let (model, read_only) = match kind {
-        "explore" => (ctx.catalog.by_tier("fast")?.id.clone(), true),
-        "review" => (ctx.catalog.by_tier("strong")?.id.clone(), true),
-        _ => (ctx.catalog.by_tier("mid")?.id.clone(), false),
-    };
+    let read_only = matches!(kind, "explore" | "review");
+    let model = pick.model_id.clone();
+    let entry = ctx.catalog.resolve(&model)?;
+    emit(tx, pick.route_event());
+    let (mut tok_in, mut tok_out, mut usd_total) = (0u32, 0u32, 0.0f64);
     let tools = silence_tools::openai_tools(read_only);
     let mut msgs = vec![
         json!({"role":"system","content": format!("{SYSTEM}\nYou are a {kind} sub-agent. You cannot spawn sub-agents. Return a concise summary.")}),
@@ -57,6 +58,21 @@ pub(super) async fn run_subagent(
     let mut acc = String::new();
     for _round in 0..SUBAGENT_MAX_ROUNDS {
         let result = gateway::chat(&ctx.catalog, &model, &msgs, &tools, &effort, |_| {}, |_| {}).await?;
+        let usd = gateway::chat_cost_usd(&entry, &result);
+        tok_in += result.input_tokens;
+        tok_out += result.output_tokens;
+        usd_total += usd;
+        parent.lock().await.spent_usd += usd;
+        emit(
+            tx,
+            SessionEvent::Cost {
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                usd,
+                slot: pick.slot_str(),
+                baseline_usd: baseline_usd(&ctx.catalog, &pick, &result, usd),
+            },
+        );
         if result.tool_calls.is_empty() {
             acc = result.content;
             break;
@@ -80,6 +96,9 @@ pub(super) async fn run_subagent(
             msgs.push(json!({"role":"tool","tool_call_id": tc.id, "content": redact(&out)}));
         }
     }
+    // The sub-agent's tool calls ran on the parent session: drop them from its escalation log
+    // (a sub-agent's failed greps are not the main turn struggling).
+    parent.lock().await.tool_log.truncate(log_len);
     let _ = ctx
         .audit
         .append(now_event(
@@ -88,10 +107,10 @@ pub(super) async fn run_subagent(
             &model,
             kind,
             "",
-            0,
-            0,
-            0.0,
-            json!({"kind": kind}),
+            tok_in,
+            tok_out,
+            usd_total,
+            json!({"kind": kind, "slot": pick.slot_str()}),
         ))
         .await;
     emit(

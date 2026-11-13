@@ -21,6 +21,17 @@ pub(super) fn history_tainted(messages: &[Value], root: &std::path::Path) -> boo
         })
 }
 
+/// USD the session spent, from the `cost` events in its log (turns, sub-agents, titles).
+pub(super) fn logged_spend(records: &[silence_protocol::LogRecord]) -> f64 {
+    records
+        .iter()
+        .filter_map(|r| match &r.body {
+            LogBody::Event { event: SessionEvent::Cost { usd, .. } } => Some(*usd),
+            _ => None,
+        })
+        .sum()
+}
+
 /// Bring a past session back from its event log. If the session is still live in memory it is
 /// left as is. Pending permission requests and staged diffs are not restored.
 ///
@@ -63,7 +74,13 @@ pub async fn resume_session(ctx: &AppCtx, session_id: &str) -> Result<SessionRes
             abort: false,
             last_model: None,
             last_prompt_tokens: None,
+            last_call_usd: 0.0,
             tainted,
+            source: String::new(),
+            spent_usd: logged_spend(&records),
+            budget_pass: false,
+            cli_hot: false,
+            tool_log: Vec::new(),
         };
         live.insert(session_id.to_string(), Arc::new(Mutex::new(session)));
     }
@@ -84,7 +101,7 @@ mod tests {
     use super::*;
 
     fn ctx(data: &std::path::Path) -> AppCtx {
-        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": [], "routes": {}})).unwrap();
+        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": []})).unwrap();
         AppCtx::new(Catalog::from_raw(raw), AuditLog::open(data).unwrap())
     }
 

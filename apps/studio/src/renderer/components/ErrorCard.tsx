@@ -1,5 +1,6 @@
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { errorCopy, errorDetail } from "../errorCopy";
+import { useT } from "../i18n";
 import type { ErrorInfo } from "../types";
 
 /** Thẻ lỗi inline trong lượt chat. Không toast/dialog; chi tiết kỹ thuật thu gọn. */
@@ -9,7 +10,8 @@ export function ErrorCard(props: {
   retryDisabled?: boolean;
   onRetry?: () => void;
 }) {
-  const c = errorCopy(props.info);
+  const t = useT();
+  const c = errorCopy(props.info, t);
   return (
     <div className="msg-error" role="alert">
       <div className="msg-error-head">
@@ -21,12 +23,12 @@ export function ErrorCard(props: {
       {c.canRetry && props.onRetry ? (
         <div className="row">
           <button type="button" className="ghost" disabled={props.retryDisabled} onClick={props.onRetry}>
-            <RotateCcw size={12} strokeWidth={1.75} /> Thử lại
+            <RotateCcw size={12} strokeWidth={1.75} /> {t("err.retry")}
           </button>
         </div>
       ) : null}
       <details className="msg-error-detail">
-        <summary>Chi tiết kỹ thuật</summary>
+        <summary>{t("err.details")}</summary>
         <pre>{errorDetail(props.info, props.message)}</pre>
       </details>
     </div>

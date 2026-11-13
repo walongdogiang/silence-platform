@@ -22,10 +22,11 @@ const PRIOR_MAX_CHARS: usize = 24_000;
 pub(super) async fn run_cli_turn(
     ctx: Arc<AppCtx>,
     session_arc: Arc<Mutex<Session>>,
-    model_id: String,
+    pick: Pick,
     text: String,
     tx: Option<mpsc::UnboundedSender<SessionEvent>>,
 ) -> Result<()> {
+    let model_id = pick.model_id.clone();
     let model = ctx.catalog.resolve(&model_id)?;
     let provider = ctx.catalog.provider_for(&model)?.clone();
     let Some((program, _version)) = crate::providers::resolve_cli(&provider.command).await else {
@@ -67,14 +68,7 @@ pub(super) async fn run_cli_turn(
         arr.extend(mcp_tools(&ctx, read_only).await);
     }
 
-    emit(
-        &tx,
-        SessionEvent::Route {
-            task_class: "cli".into(),
-            model_id: model_id.clone(),
-            reason: "user override (Claude CLI)".into(),
-        },
-    );
+    emit(&tx, pick.route_event());
 
     // Loopback MCP listener for this turn only.
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -116,6 +110,8 @@ pub(super) async fn run_cli_turn(
             input_tokens: out.input_tokens,
             output_tokens: out.output_tokens,
             usd: out.usd,
+            slot: pick.slot_str(),
+            baseline_usd: cli_baseline(&ctx.catalog, &pick, out.input_tokens, out.output_tokens, out.usd),
         },
     );
     let _ = ctx
@@ -135,11 +131,41 @@ pub(super) async fn run_cli_turn(
     {
         let mut s = session_arc.lock().await;
         s.last_model = Some(model_id.clone());
+        s.spent_usd += out.usd;
+        s.last_call_usd = out.usd;
+        // Auto cannot switch the CLI's model mid-turn: trouble in this turn makes the next one
+        // start on Frontier.
+        let outcomes = std::mem::take(&mut s.tool_log);
+        if pick.slot.is_some() {
+            let rules = &ctx.catalog.raw.escalation;
+            let mut esc = Escalation::default();
+            for o in &outcomes {
+                esc.observe_step(std::slice::from_ref(o), rules, s.mode == SessionMode::Debug, false);
+            }
+            s.cli_hot = esc.hot();
+        }
         s.messages.push(json!({"role": "assistant", "content": out.text}));
         persist_messages(&ctx, &mut s).await;
     }
     emit(&tx, SessionEvent::Done { stop: out.stop });
     Ok(())
+}
+
+/// "All Opus" price of a CLI turn: the CLI reports only its own USD, so price the tokens on the
+/// source's strongest model and scale by the CLI's ratio when the catalog has prices.
+fn cli_baseline(catalog: &Catalog, pick: &Pick, input: u32, output: u32, usd: f64) -> f64 {
+    if pick.slot.is_none() {
+        return usd;
+    }
+    let (Some(base), Ok(used)) = (catalog.baseline_model(&pick.source), catalog.resolve(&pick.model_id)) else {
+        return usd;
+    };
+    let b = gateway::cost_usd(base, input, output);
+    let u = gateway::cost_usd(&used, input, output);
+    if b <= 0.0 || u <= 0.0 {
+        return usd;
+    }
+    (usd * b / u).max(usd)
 }
 
 /// Earlier user/assistant text, for a session that switches to the CLI mid-way (the CLI has no

@@ -1,13 +1,16 @@
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::Deserialize;
-use silence_protocol::{ModelInfo, TaskClass};
+use silence_protocol::{AutoConfig, ModelInfo};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
+mod auto;
+pub use auto::{preset_tier, tier_rank, AutoPick};
+
 /// Provider kind whose models run through the local `claude` CLI, not an HTTP API.
-/// Auto routing and tier lookups never pick these: they are explicit picks only.
+/// Tier lookups never pick these; Auto does only when the session's source is the CLI.
 pub const KIND_CLAUDE_CLI: &str = "claude_cli";
 pub const KIND_OPENAI_COMPAT: &str = "openai_compat";
 const ALL_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
@@ -17,11 +20,8 @@ pub struct CatalogFile {
     pub version: u32,
     #[serde(default)]
     pub default_model: String,
-    #[serde(default)]
-    pub optimize: String,
     pub providers: Vec<Provider>,
     pub models: Vec<ModelEntry>,
-    pub routes: HashMap<String, String>,
     #[serde(default)]
     pub escalation: Escalation,
 }
@@ -108,12 +108,18 @@ fn default_true() -> bool {
     true
 }
 
+/// Signals that let Auto escalate (`test_fail_after_edit`, `repeated_tool_error`, `no_progress`,
+/// `empty_output`, `provider_retry`). Empty = all on.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Escalation {
     #[serde(default)]
     pub on: Vec<String>,
-    #[serde(default)]
-    pub to: String,
+}
+
+impl Escalation {
+    pub fn enabled(&self, signal: &str) -> bool {
+        self.on.is_empty() || self.on.iter().any(|s| s == signal)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +129,8 @@ pub struct Catalog {
     preferred: Arc<RwLock<String>>,
     /// Keys set at runtime from Settings (provider id → key). Win over the env var.
     credentials: Arc<RwLock<HashMap<String, String>>>,
+    /// Auto settings per provider (`auto.set_config`). Missing = `AutoConfig::default()`.
+    auto: Arc<RwLock<HashMap<String, AutoConfig>>>,
 }
 
 impl Catalog {
@@ -156,6 +164,7 @@ impl Catalog {
             raw,
             preferred: Arc::new(RwLock::new(String::new())),
             credentials: Arc::new(RwLock::new(HashMap::new())),
+            auto: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -167,8 +176,8 @@ impl Catalog {
             .ok_or_else(|| anyhow!("unknown provider {id}"))
     }
 
-    /// Set the provider Auto prefers. `""` = catalog order. A CLI provider is refused:
-    /// Auto never routes to the CLI.
+    /// Set the provider tier lookups (and Auto without a session source) prefer. `""` = catalog
+    /// order. A CLI provider is refused: Auto on the CLI comes from the session's source.
     pub fn set_preferred(&self, provider_id: &str) -> Result<()> {
         if !provider_id.is_empty() && self.provider(provider_id)?.is_cli() {
             return Err(anyhow!("Auto cannot route to the Claude CLI; pick a CLI model explicitly"));
@@ -330,75 +339,6 @@ impl Catalog {
     }
 }
 
-pub fn classify(text: &str) -> TaskClass {
-    let t = text.to_lowercase();
-    let architect = ["architect", "thiết kế", "design system", "adr", "refactor lớn"];
-    let debug = ["bug", "fail", "error", "panic", "stack trace", "sửa lỗi", "không chạy"];
-    let explore = ["where", "tìm", "liệt kê", "explain", "đọc", "explore", "mô tả"];
-    let edit = ["thêm", "sửa", "implement", "add ", "fix ", "đổi", "write"];
-    if architect.iter().any(|k| t.contains(k)) {
-        return TaskClass::Architect;
-    }
-    if debug.iter().any(|k| t.contains(k)) {
-        return TaskClass::Debug;
-    }
-    if edit.iter().any(|k| t.contains(k)) {
-        return TaskClass::Edit;
-    }
-    if explore.iter().any(|k| t.contains(k)) {
-        return TaskClass::Explore;
-    }
-    TaskClass::Chat
-}
-
-pub struct RouteDecision {
-    pub task_class: TaskClass,
-    pub model_id: String,
-    pub reason: String,
-}
-
-pub fn route(catalog: &Catalog, requested: &str, user_text: &str) -> Result<RouteDecision> {
-    if requested != "auto" && !requested.is_empty() {
-        catalog.resolve(requested)?;
-        return Ok(RouteDecision {
-            task_class: classify(user_text),
-            model_id: requested.to_string(),
-            reason: "user override".into(),
-        });
-    }
-    let class = classify(user_text);
-    let tier = catalog
-        .raw
-        .routes
-        .get(class.as_str())
-        .map(|s| s.as_str())
-        .unwrap_or("mid");
-    let model = catalog.by_tier(tier)?;
-    Ok(RouteDecision {
-        task_class: class,
-        model_id: model.id.clone(),
-        reason: format!("auto {} -> tier {tier}", class.as_str()),
-    })
-}
-
-pub fn escalate(catalog: &Catalog, reason: &str) -> Result<String> {
-    let to = if catalog.raw.escalation.to.is_empty() {
-        "strong"
-    } else {
-        catalog.raw.escalation.to.as_str()
-    };
-    if catalog
-        .raw
-        .escalation
-        .on
-        .iter()
-        .any(|x| x == reason || catalog.raw.escalation.on.is_empty())
-    {
-        return Ok(catalog.by_tier(to)?.id.clone());
-    }
-    Ok(catalog.by_tier(to)?.id.clone())
-}
-
 fn expand_env(text: &str) -> String {
     let re = Regex::new(r"\$\{([A-Z0-9_]+)(?::-([^}]*))?\}").expect("regex");
     re.replace_all(text, |caps: &regex::Captures| {
@@ -424,7 +364,6 @@ models:
   - { id: gw-strong, provider: gw, api_model: o, tier: strong, context_window: 1 }
   - { id: api-strong, provider: api, api_model: o, tier: strong, context_window: 1, vision: true,
       efforts: [low, medium, high], default_effort: medium }
-routes: {}
 "#;
 
     #[test]
@@ -434,7 +373,7 @@ routes: {}
         c.set_preferred("api").unwrap();
         assert_eq!(c.by_tier("strong").unwrap().id, "api-strong");
         assert_eq!(c.vision_model().unwrap().id, "api-strong");
-        assert!(c.set_preferred("cli").is_err(), "Auto never routes to the CLI");
+        assert!(c.set_preferred("cli").is_err(), "tier lookups never use the CLI");
         c.set_preferred("").unwrap();
         assert_eq!(c.by_tier("strong").unwrap().id, "gw-strong");
     }
@@ -499,7 +438,6 @@ providers:
 models:
   - { id: pricey, provider: gw, api_model: p, tier: strong, context_window: 1, vision: true, opt_in: true }
   - { id: normal, provider: gw, api_model: n, tier: strong, context_window: 1, vision: true }
-routes: {}
 "#;
         let c = Catalog::from_yaml(yaml).unwrap();
         assert_eq!(c.by_tier("strong").unwrap().id, "normal");

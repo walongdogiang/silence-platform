@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DiffHunk } from "../diffSummary";
 import { languageFor, useTokens, type Tok } from "../syntax";
 import { inlineChanges, type ParsedDiff } from "../unifiedDiff";
+import { useT } from "../i18n";
 
 /** Một dòng code có màu; `mark` = vùng [s, e) được tô đậm (phần chữ đổi trong diff). */
 export function TokenLine(props: { text: string; tokens?: Tok[] | null; mark?: [number, number] }) {
@@ -42,6 +43,7 @@ export function TokenLine(props: { text: string; tokens?: Tok[] | null; mark?: [
 }
 
 export function CopyButton(props: { text: string; label?: string }) {
+  const tr = useT();
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
@@ -52,20 +54,21 @@ export function CopyButton(props: { text: string; label?: string }) {
     <button
       type="button"
       className="code-copy"
-      title={done ? "Đã chép" : "Chép"}
-      aria-label={done ? "Đã chép" : (props.label ?? "Chép code")}
+      title={done ? tr("code.copied") : tr("code.copy")}
+      aria-label={done ? tr("code.copied") : (props.label ?? tr("code.copyCode"))}
       onClick={() => {
         void navigator.clipboard?.writeText(props.text).then(() => setDone(true));
       }}
     >
       {done ? <Check size={13} /> : <Copy size={13} />}
-      <span>{done ? "Đã chép" : "Copy"}</span>
+      <span>{done ? tr("code.copied") : tr("common.copy")}</span>
     </button>
   );
 }
 
 /** Bảng diff unified: vạch màu | số dòng | code có syntax highlight + tô phần chữ đổi. */
 export function DiffTable(props: { hunks: DiffHunk[]; lang: string }) {
+  const tr = useT();
   const flat = useMemo(() => props.hunks.flatMap((h) => h.rows), [props.hunks]);
   const text = useMemo(() => flat.map((r) => r.text).join("\n"), [flat]);
   const tokens = useTokens(text, props.lang);
@@ -89,7 +92,7 @@ export function DiffTable(props: { hunks: DiffHunk[]; lang: string }) {
           <Fragment key={hi}>
             {(h.skippedBefore > 0 || (hi > 0 && !numbered)) && (
               <tr className="diff-skip">
-                <td colSpan={3}>{h.skippedBefore > 0 ? `⋯ ${h.skippedBefore} dòng không đổi` : "⋯"}</td>
+                <td colSpan={3}>{h.skippedBefore > 0 ? `⋯ ${tr("code.unchanged", { n: h.skippedBefore })}` : "⋯"}</td>
               </tr>
             )}
             {h.rows.map((r) => {
@@ -98,7 +101,7 @@ export function DiffTable(props: { hunks: DiffHunk[]; lang: string }) {
                 <tr
                   key={i}
                   className={`diff-row ${r.kind}`}
-                  aria-label={r.kind === "add" ? "thêm" : r.kind === "del" ? "xoá" : undefined}
+                  aria-label={r.kind === "add" ? tr("code.added") : r.kind === "del" ? tr("code.removed") : undefined}
                 >
                   <td className="mk" aria-hidden />
                   {numbered && <td className="ln">{r.kind === "del" ? r.oldNo : r.newNo}</td>}
@@ -149,6 +152,7 @@ export function DiffBlock(props: {
   openPath?: string | null;
   onOpenFile?: (path: string) => void;
 }) {
+  const tr = useT();
   const { parsed } = props;
   const lang = languageFor(parsed.path ?? (props.fenceLang !== "diff" ? props.fenceLang : undefined));
   const path = parsed.path ?? "diff";
@@ -170,7 +174,7 @@ export function DiffBlock(props: {
           <button
             type="button"
             className="code-path-btn"
-            title={`Mở ${props.openPath}`}
+            title={tr("md.open", { path: props.openPath ?? "" })}
             onClick={() => props.onOpenFile!(props.openPath!)}
           >
             {label}
@@ -182,7 +186,7 @@ export function DiffBlock(props: {
           <span className="add">+{parsed.added}</span>
           <span className="del">−{parsed.removed}</span>
         </span>
-        <CopyButton text={props.text.replace(/\n$/, "")} label="Chép diff" />
+        <CopyButton text={props.text.replace(/\n$/, "")} label={tr("code.copyDiff")} />
       </div>
       <div className="code-card-body">
         <DiffTable hunks={parsed.hunks} lang={lang} />

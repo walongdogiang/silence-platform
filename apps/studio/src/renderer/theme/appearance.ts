@@ -1,3 +1,4 @@
+import { DEFAULT_LANG, isLang, type Lang } from "../i18n";
 export type ThemeMode = "dark" | "light" | "auto";
 export type PaletteId = "espresso" | "graphite" | "forest" | "ocean" | "plum";
 export type AccentId = "copper" | "blue" | "teal" | "green" | "violet" | "rose";
@@ -13,6 +14,8 @@ export type Appearance = {
   wallpaper: WallpaperId;
   blur: boolean;
   reduceMotion: boolean;
+  /** UI language (`i18n.ts`). */
+  lang: Lang;
 };
 
 export const DEFAULT_APPEARANCE: Appearance = {
@@ -24,6 +27,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   wallpaper: "mountains",
   blur: false,
   reduceMotion: false,
+  lang: DEFAULT_LANG,
 };
 
 const KEY = "silence.appearance.v2";
@@ -47,7 +51,8 @@ export function loadAppearance(): Appearance {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_APPEARANCE };
     const parsed = JSON.parse(raw) as Partial<Appearance>;
-    return { ...DEFAULT_APPEARANCE, ...parsed, version: 1 };
+    const merged = { ...DEFAULT_APPEARANCE, ...parsed, version: 1 as const };
+    return isLang(merged.lang) ? merged : { ...merged, lang: DEFAULT_LANG };
   } catch {
     return { ...DEFAULT_APPEARANCE };
   }
@@ -66,6 +71,7 @@ export function applyAppearance(a: Appearance) {
   root.dataset.wallpaper = a.wallpaper;
   root.dataset.blur = a.blur ? "on" : "off";
   root.dataset.motion = a.reduceMotion ? "reduce" : "full";
+  root.lang = a.lang;
   const acc = ACCENTS[a.accent];
   root.style.setProperty("--accent", acc.accent);
   root.style.setProperty("--accent-hover", acc.hover);

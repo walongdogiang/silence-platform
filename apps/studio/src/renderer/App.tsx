@@ -20,6 +20,22 @@ import { Composer } from "./components/Composer";
 import { ImageLightbox, type LightboxState } from "./components/ImageLightbox";
 import { isImagePath, readWorkspaceImage } from "./workspaceImages";
 import { routeText, type SessionMode } from "./modes";
+import { LangContext, translator } from "./i18n";
+import {
+  addSpend,
+  autoFor,
+  autoModelLabel,
+  engineConfig,
+  EMPTY_SPEND,
+  fmtUsd,
+  isSideRoute,
+  loadAuto,
+  loadSpend,
+  saveAuto,
+  saveSpend,
+  type AutoConfig,
+  type SlotSpend,
+} from "./autoConfig";
 import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImages";
 import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
 import { DiffPane } from "./components/DiffPane";
@@ -213,6 +229,8 @@ function sealThoughtMs(lines: ChatLine[], startedAt: number): ChatLine[] {
 
 export function App() {
   const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
+  /** UI strings in the chosen language (App sits above `LangContext`, so no `useT` here). */
+  const t = translator(appearance.lang);
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
   const [showNetwork, setShowNetwork] = useState(false);
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
@@ -230,6 +248,18 @@ export function App() {
   /** Model source the picker shows (provider id); also the provider Auto prefers. */
   const [source, setSource] = useState(() => loadPreferredProvider());
   const [models, setModels] = useState<ModelInfo[]>([]);
+  /** Auto settings per source (`silence.auto.v1`), pushed to the Engine with `auto.set_config`. */
+  const [autoCfgs, setAutoCfgs] = useState<Record<string, AutoConfig>>(() => loadAuto());
+  /** Model Auto used last in a main turn ("Sonnet"), shown on the picker as "Auto · Sonnet". */
+  const [autoModel, setAutoModel] = useState("");
+  /** Spend per chat thread split by Auto slot (`cost` events); survives Engine restarts. */
+  const [spendByThread, setSpendByThread] = useState<Record<string, SlotSpend>>(() => loadSpend());
+  const activeThreadRef = useRef("");
+  /** The turn stopped at the Auto spend cap (`done` with stop `budget`). */
+  const [budgetHit, setBudgetHit] = useState(false);
+  /** Settings → Models → scroll to Auto (`NetworkPanel.focusAuto`). */
+  const [focusAuto, setFocusAuto] = useState(0);
+  const modelsRef = useRef<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
   const [mode, setMode] = useState<SessionMode>("agent");
   const [tree, setTree] = useState<string[]>([]);
@@ -275,6 +305,8 @@ export function App() {
   const missedImagesRef = useRef(new Set<string>());
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => loadOpenTabs());
   const [activeThreadId, setActiveThreadId] = useState("");
+  activeThreadRef.current = activeThreadId;
+  const spend = spendByThread[activeThreadId] ?? EMPTY_SPEND;
   /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
 
@@ -407,7 +439,7 @@ export function App() {
 
   useEffect(() => {
     if (!window.silence) {
-      setLines([{ kind: "sys", text: "Preload không gắn được. Chạy lại npm run desktop." }]);
+      setLines([{ kind: "sys", text: t("app.noPreload") }]);
       return;
     }
     return window.silence.onEvent((payload) => {
@@ -464,7 +496,21 @@ export function App() {
       } else if (ev.type === "tool_end") {
         setLines((xs) => [...xs, { kind: "tool", name: ev.name, output: ev.output }]);
       } else if (ev.type === "route") {
-        setLines((xs) => [...xs, { kind: "route", text: routeText(turnModeRef.current, ev.task_class, ev.model_id) }]);
+        const auto = Boolean(ev.slot);
+        const label = auto ? autoModelLabel(ev.model_id, modelsRef.current) : ev.model_id;
+        if (auto && !isSideRoute(ev.task_class)) setAutoModel(label);
+        setLines((xs) => [
+          ...xs,
+          {
+            kind: "route",
+            text: routeText(turnModeRef.current, ev.task_class, ev.model_id),
+            model: label,
+            slot: ev.slot || undefined,
+            escalated: ev.escalated || undefined,
+            reason: ev.reason,
+            purpose: ev.task_class,
+          },
+        ]);
       } else if (ev.type === "mode_suggestion") {
         const prompt = lastPromptRef.current;
         setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode, reason: ev.reason, prompt }]);
@@ -516,6 +562,12 @@ export function App() {
         const last = lastPromptRef.current;
         setPrompt((p) => (p.trim() ? p : last));
       } else if (ev.type === "done") {
+        if (ev.stop === "budget") {
+          setBudgetHit(true);
+          // The Engine dropped the unanswered prompt: give it back to the composer.
+          const last = lastPromptRef.current;
+          setPrompt((p) => (p.trim() ? p : last));
+        }
         const files = turnFilesRef.current;
         turnFilesRef.current = [];
         const thoughtStart = thoughtStartedAtRef.current;
@@ -531,6 +583,8 @@ export function App() {
         void refreshCost();
       } else if (ev.type === "cost") {
         setRun((m) => addCost(m, ev));
+        const tid = activeThreadRef.current;
+        if (tid) setSpendByThread((all) => ({ ...all, [tid]: addSpend(all[tid] ?? EMPTY_SPEND, ev) }));
         setCost((c) => ({
           ...c,
           usd: c.usd + ev.usd,
@@ -549,10 +603,62 @@ export function App() {
       .catch((err: Error) => setLines((xs) => [...xs, { kind: "sys", text: String(err.message ?? err) }]));
   }
 
+  modelsRef.current = models;
+  useEffect(() => {
+    setBudgetHit(false);
+    setAutoModel("");
+  }, [activeThreadId]);
+  useEffect(() => {
+    saveSpend(spendByThread, [...threads].sort((a, b) => b.updatedAt - a.updatedAt).map((t) => t.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spendByThread]);
+
+  /** Send one source's Auto config (models switched off in Settings left out of the pool). */
+  function pushAuto(provider: string, cfg: AutoConfig) {
+    const config = engineConfig(cfg, provider, visibleModels(modelsRef.current, modelPrefs), modelsRef.current);
+    return window.silence?.rpc("auto.set_config", { provider, config });
+  }
+  // The Engine keeps Auto settings in memory only: push every source's once the catalog is in,
+  // and again when models are switched on/off.
+  useEffect(() => {
+    for (const s of modelSources(models)) void pushAuto(s.id, autoFor(autoCfgs, s.id))?.catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models, modelPrefs]);
+
+  function changeAuto(next: AutoConfig) {
+    const all = { ...autoCfgs, [source]: next };
+    setAutoCfgs(all);
+    saveAuto(all);
+    void pushAuto(source, next)?.catch((err: Error) =>
+      setLines((xs) => [...xs, { kind: "sys", text: String(err.message ?? err) }]),
+    );
+  }
+
+  /** Settings → Models edits the Auto config of any source, not only the active one. */
+  function changeAutoFor(provider: string, next: AutoConfig) {
+    const all = { ...autoCfgs, [provider]: next };
+    setAutoCfgs(all);
+    saveAuto(all);
+    void pushAuto(provider, next)?.catch(() => undefined);
+  }
+
+  /** "Tiếp tục 1 lượt" on the spend-cap banner: one turn past the cap, then resend. */
+  async function continuePastCap() {
+    setBudgetHit(false);
+    if (!sessionId) return;
+    await window.silence.rpc("session.budget_continue", { session_id: sessionId }).catch(() => undefined);
+    const text = prompt.trim() || lastPromptRef.current;
+    if (text) {
+      setPrompt("");
+      void send(text);
+    }
+  }
+
   /** Catalog + models added in Settings, minus the ones switched off there. */
   const allModels = useMemo(() => visibleModels(models, modelPrefs), [models, modelPrefs]);
   const sources = useMemo(() => modelSources(models), [models]);
-  /** Auto routes inside the picked source; the Claude CLI has no Auto, so the Engine gets "". */
+  /** Tier lookups prefer the picked source; the CLI is refused there (Auto on the CLI comes
+   * from the session's `source`, sent with `session.set_model`), so the Engine gets "". */
   const preferredFor = (src: string) =>
     sources.find((s) => s.id === src)?.kind === "claude_cli" ? "" : src;
 
@@ -700,7 +806,7 @@ export function App() {
       created = await create(permMode);
     } catch (e) {
       if (!/unknown variant/i.test(e instanceof Error ? e.message : String(e))) throw e;
-      setOutputLog((xs) => [...xs.slice(-199), "[warn] Engine cũ chưa hỗ trợ chế độ Cân bằng; dùng chế độ hỏi. Chạy lại `npm run studio` để build Engine mới."]);
+      setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.oldEngineBalanced")}`]);
       created = await create("ask");
     }
     await window.silence.rpc("terminal.start", { session_id: created.session_id, cols: 100, rows: 16 });
@@ -718,7 +824,7 @@ export function App() {
     opts?: { forkedFromId?: string; title?: string; titleSource?: ChatThread["titleSource"] },
   ) {
     const id = crypto.randomUUID();
-    const baseTitle = opts?.title?.trim() || titleFrom(initial);
+    const baseTitle = opts?.title?.trim() || titleFrom(initial, t("history.newChat"));
     const thread: ChatThread = {
       id,
       sessionId: liveSessionId,
@@ -761,7 +867,7 @@ export function App() {
     const parentLocked = parent?.titleSource === "ai" || parent?.titleSource === "user";
     beginThread(workspace, liveId, sliced, {
       forkedFromId: parentId,
-      title: parentLocked && parent ? parent.title : titleFrom(sliced, parent?.title ?? "Đoạn chat"),
+      title: parentLocked && parent ? parent.title : titleFrom(sliced, parent?.title ?? t("history.newChat")),
       titleSource: parentLocked ? "ai" : "auto",
     });
     await refreshCost();
@@ -797,7 +903,7 @@ export function App() {
       void refreshCost();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setOutputLog((xs) => [...xs.slice(-199), `[warn] không sinh được tiêu đề chat: ${message}`]);
+      setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.titleFailed", { message })}`]);
     }
   }
 
@@ -925,7 +1031,7 @@ export function App() {
         setLightbox({ images: [img.data_url], index: 0 });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        setOutputLog((xs) => [...xs.slice(-199), `[error] không mở được ảnh ${rel}: ${message}`]);
+        setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.openImageFailed", { path: rel, message })}`]);
       }
       return;
     }
@@ -938,7 +1044,7 @@ export function App() {
       setFileText(r.text);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setOutputLog((xs) => [...xs.slice(-199), `[error] không mở được ${rel}: ${message}`]);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.openFailed", { path: rel, message })}`]);
     }
   }
 
@@ -976,18 +1082,25 @@ export function App() {
     try {
       let sid = sessionId;
       try {
-        await window.silence.rpc("session.set_model", { session_id: sid, model });
+        await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       } catch (e) {
         // Engine đã restart nên session cũ (lưu trong lịch sử) không còn: tạo session mới, giữ lịch sử hiển thị.
         if (!/unknown session/i.test(e instanceof Error ? e.message : String(e)) || !workspace) throw e;
         sid = await createLiveSession(workspace);
         setSessionId(sid);
-        await window.silence.rpc("session.set_model", { session_id: sid, model });
+        await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       }
       // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
       await window.silence.rpc("session.set_mode", { session_id: sid, mode: turnMode });
       // Engine cũ (protocol < 0.1.11) chưa có set_effort: bỏ qua, lượt vẫn chạy với mặc định model.
       await window.silence.rpc("session.set_effort", { session_id: sid, effort }).catch(() => undefined);
+      // Engine restart (watch mode) loses Auto settings: re-send the active source's with the turn.
+      await pushAuto(source, autoFor(autoCfgs, source))?.catch(() => undefined);
+      // A new live session for this thread (Engine restart, reopened app) starts at $0: carry the
+      // thread's spend so the Auto cap still holds. The Engine keeps the larger of the two.
+      if (spend.usd > 0) {
+        await window.silence.rpc("session.carry_spend", { session_id: sid, usd: spend.usd }).catch(() => undefined);
+      }
       // Engine restart (watch mode) loses the Auto preference: re-send it with the turn.
       await window.silence.rpc("providers.set_preferred", { provider: preferredFor(source) }).catch(() => undefined);
       // Session cũ (resume) giữ chế độ quyền lúc tạo: đồng bộ lại theo Settings trước mỗi lượt.
@@ -996,9 +1109,7 @@ export function App() {
         // Engine build cũ (vd. chỉ UI được hot-reload) bỏ qua `images` im lặng: model không thấy ảnh.
         const pong = (await window.silence.rpc("ping", {})) as { protocol?: unknown } | null;
         if (!supportsImages(pong?.protocol)) {
-          throw new Error(
-            `Engine đang chạy (protocol ${String(pong?.protocol ?? "?")}) chưa nhận ảnh. Tắt Studio rồi chạy lại \`npm run studio\` để build lại Engine.`,
-          );
+          throw new Error(t("app.engineNoImages", { protocol: String(pong?.protocol ?? "?") }));
         }
       }
       // Debug: gửi kèm phần cuối tab Output (Engine lọc secret trước khi đưa cho model).
@@ -1033,7 +1144,7 @@ export function App() {
       await window.silence.rpc("session.abort", { session_id: sessionId });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setOutputLog((xs) => [...xs.slice(-199), `[error] không dừng được lượt: ${message}`]);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.stopFailed", { message })}`]);
     }
   }
 
@@ -1059,7 +1170,7 @@ export function App() {
     } catch {
       setOutputLog((xs) => [
         ...xs.slice(-199),
-        "Không áp dụng được thay đổi. Thử Apply lại hoặc Reject rồi để agent đề xuất lại.",
+        t("app.applyFailed"),
       ]);
     }
   }
@@ -1074,7 +1185,7 @@ export function App() {
         setDiff(null);
         if (file === diff.path) setFileText(diff.before);
       } catch {
-        setOutputLog((xs) => [...xs.slice(-199), `Không hoàn tác được ${diff.path}. Thử lại hoặc Restore checkpoint.`]);
+        setOutputLog((xs) => [...xs.slice(-199), t("app.undoFailed", { path: diff.path })]);
       }
       return;
     }
@@ -1087,7 +1198,7 @@ export function App() {
     } catch {
       setOutputLog((xs) => [
         ...xs.slice(-199),
-        "Không hủy được thay đổi. Thử Reject lại.",
+        t("app.rejectFailed"),
       ]);
     }
   }
@@ -1099,9 +1210,7 @@ export function App() {
     );
     const target = checkpoints.find((c) => c.id === id);
     if (!target) return;
-    const ok = window.confirm(
-      "Khôi phục checkpoint này? Hội thoại sau điểm này sẽ bị cắt; file đã đổi ở các lượt sau sẽ được ghi lại nội dung trước đó.",
-    );
+    const ok = window.confirm(t("app.restoreConfirm"));
     if (!ok) return;
 
     const toWrite = filesToRestore(checkpoints, id);
@@ -1115,7 +1224,7 @@ export function App() {
         });
         if (file === f.path) setFileText(f.before);
       } catch {
-        setOutputLog((xs) => [...xs.slice(-199), `Restore failed: ${f.path}`]);
+        setOutputLog((xs) => [...xs.slice(-199), t("app.restoreFailed", { path: f.path })]);
       }
     }
 
@@ -1145,7 +1254,7 @@ export function App() {
     if (chip === "ReviewChanges") {
       // Nút Review ở hàng Files: chuyển sang Review và điền sẵn yêu cầu nếu ô nhập đang trống.
       setMode("review");
-      setPrompt((p) => (p.trim() ? p : "Review các thay đổi chưa commit"));
+      setPrompt((p) => (p.trim() ? p : t("app.reviewPrompt")));
       focusComposer();
     } else if (byChip[chip]) setMode(byChip[chip]);
     else if (chip === "More") setAppearOpen(true);
@@ -1185,7 +1294,7 @@ export function App() {
     const step = planningStep();
     setLines((xs) => [
       ...xs,
-      { kind: "user", text: "Duyệt plan — implement." },
+      { kind: "user", text: t("app.approvePlanMsg") },
       { kind: "narrate", verb: step.verb, detail: step.detail },
     ]);
     setBusy(true);
@@ -1205,15 +1314,15 @@ export function App() {
   function revisePlan() {
     // Giữ mode Plan; góp ý gõ vào ô nhập sẽ được model dùng để sửa và nộp lại plan.
     setMode("plan");
-    setPrompt((p) => (p.trim() ? p : "Sửa plan: "));
+    setPrompt((p) => (p.trim() ? p : t("app.revisePlanPrompt")));
     focusComposer();
   }
 
   async function attachEdited(png: Blob, text: string): Promise<string | null> {
     // "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn yêu cầu; user tự gửi.
     const file = new File([png], "anh-danh-dau.png", { type: "image/png" });
-    const r = await imagesFromFiles([file], images.length);
-    if (!r.images.length) return r.error ?? "Không đính được ảnh.";
+    const r = await imagesFromFiles([file], images.length, t);
+    if (!r.images.length) return r.error ?? t("app.attachFailed");
     setImages((xs) => [...xs, ...r.images]);
     // Ô nhập đang có chữ thì giữ lại, đặt sau yêu cầu sửa.
     setPrompt((p) => (p.trim() ? `${text.endsWith("\n") ? text : `${text}\n`}${p}` : text));
@@ -1302,8 +1411,49 @@ export function App() {
         setShowNetwork(true);
         setShellView("chat");
       }}
+      autoConfig={autoFor(autoCfgs, source)}
+      onAutoConfig={changeAuto}
+      autoModel={model === "auto" ? autoModel : undefined}
+      spend={spend}
+      onAutoMore={() => {
+        setFocusAuto(Date.now());
+        setShowNetwork(true);
+        setShellView("chat");
+      }}
     />
   );
+
+  const capUsd = autoFor(autoCfgs, source).budget_usd;
+  const budgetBanner =
+    budgetHit && model === "auto" ? (
+      <div className="budget-banner" role="alert">
+        <span>
+          {t("budget.hit", { cap: capUsd ? ` ${fmtUsd(capUsd)}` : "", used: fmtUsd(spend.usd) })}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            const cfg = autoFor(autoCfgs, source);
+            const base = Math.max(cfg.budget_usd ?? 0, spend.usd);
+            changeAuto({ ...cfg, budget_usd: Math.ceil(base * 1.5 * 100) / 100 || 1 });
+            setBudgetHit(false);
+          }}
+        >
+          {t("budget.raise")}
+        </button>
+        <button type="button" onClick={() => void continuePastCap()}>
+          {t("budget.once")}
+        </button>
+        <button
+          type="button"
+          className="budget-banner-close"
+          title={t("budget.close")}
+          onClick={() => setBudgetHit(false)}
+        >
+          ×
+        </button>
+      </div>
+    ) : null;
 
   const chatMain = (
     <div className={showReview ? "chat-split" : "chat-col-fill"}>
@@ -1346,6 +1496,7 @@ export function App() {
           onRetry={() => void send(lastPromptRef.current)}
           onAttachEdited={attachEdited}
         />
+        {activeThreadId ? budgetBanner : null}
         {activeThreadId ? composerEl : null}
       </div>
       {showReview ? (
@@ -1383,6 +1534,7 @@ export function App() {
   }
 
   return (
+    <LangContext.Provider value={appearance.lang}>
     <div
       className={`app view-${shellView}${!chatHidden && historyHidden ? " no-history" : ""}`}
       data-wp={appearance.wallpaper}
@@ -1444,6 +1596,11 @@ export function App() {
                     activeModel={model}
                     onSourcesChanged={loadModels}
                     focus={focusModel}
+                    autoConfigs={autoCfgs}
+                    onAutoConfig={changeAutoFor}
+                    activeSource={source}
+                    spentUsd={spend.usd}
+                    focusAuto={focusAuto}
                   />
                 )
                 : chatMain}
@@ -1490,5 +1647,6 @@ export function App() {
         }}
       />
     </div>
+    </LangContext.Provider>
   );
 }

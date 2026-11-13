@@ -1,5 +1,7 @@
 import { MessageSquare, PanelRight, Plus, X } from "lucide-react";
+import { useT } from "../i18n";
 import type { ChatThread } from "../models";
+import { shownTitle } from "./ChatHistoryPanel";
 
 export function ChatTabBar(props: {
   tabs: ChatThread[];
@@ -11,8 +13,9 @@ export function ChatTabBar(props: {
   historyHidden?: boolean;
   onToggleHistory?: () => void;
 }) {
+  const tr = useT();
   return (
-    <div className="chat-tabs" aria-label="Tab hội thoại">
+    <div className="chat-tabs" aria-label={tr("tabs.label")}>
       <div className="chat-tab-list" role="tablist">
         {props.tabs.map((t) => (
           <div
@@ -24,17 +27,17 @@ export function ChatTabBar(props: {
             <button
               type="button"
               className="chat-tab-open"
-              title={t.title}
+              title={shownTitle(t.title, tr)}
               onClick={() => props.onSelect(t.id)}
             >
               <MessageSquare size={14} strokeWidth={1.75} />
-              <span>{t.title}</span>
+              <span>{shownTitle(t.title, tr)}</span>
             </button>
             <button
               type="button"
               className="chat-tab-close"
-              title="Đóng tab"
-              aria-label={`Đóng ${t.title}`}
+              title={tr("tabs.close")}
+              aria-label={tr("tabs.closeNamed", { title: shownTitle(t.title, tr) })}
               onClick={(e) => {
                 e.stopPropagation();
                 props.onClose(t.id);
@@ -49,7 +52,7 @@ export function ChatTabBar(props: {
         type="button"
         className="chat-tab-new"
         disabled={!props.canNew}
-        title="New Agent"
+        title={tr("history.newAgent")}
         onClick={props.onNew}
       >
         <Plus size={15} strokeWidth={1.75} />
@@ -58,8 +61,8 @@ export function ChatTabBar(props: {
         <button
           type="button"
           className="chat-tab-new"
-          title="Toggle Agents Side Bar (Ctrl+Alt+U)"
-          aria-label="Hiện thanh Agents"
+          title={tr("shell.toggleAgents")}
+          aria-label={tr("shell.showAgents")}
           onClick={props.onToggleHistory}
         >
           <PanelRight size={15} strokeWidth={1.75} />
