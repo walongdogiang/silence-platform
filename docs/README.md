@@ -71,6 +71,7 @@ Mục lục chi tiết UI: [frontend/README.md](frontend/README.md).
 | [frontend/composer.md](frontend/composer.md) | Ô nhập, mode, Auto, tools | Sửa Composer |
 | [frontend/status.md](frontend/status.md) | Chỉ báo phiên (elapsed, token, chờ duyệt, gộp Read, duyệt plan 4 nút, description lệnh, rail, todo, background) | Sửa run pulse / bước narrate / duyệt plan / session rail / task list |
 | [frontend/tokens.md](frontend/tokens.md) | Token màu, appearance | Sửa theme / appearance |
+| [frontend/i18n.md](frontend/i18n.md) | Ngôn ngữ giao diện VI/EN, từ điển `i18n.ts`, thuật ngữ không dịch, chuỗi còn từ Engine | Thêm hoặc sửa chữ hiển thị trên UI |
 | [frontend/chat-markdown-roadmap.md](frontend/chat-markdown-roadmap.md) | Việc Markdown chat cố ý chưa làm | Tránh làm sớm / mở lại backlog Markdown |
 
 Đổi UI: đọc spec tương ứng rồi `.cursor/rules/frontend-*.mdc`.
@@ -89,7 +90,7 @@ Plan: `/gsd-plan-phase --prd docs/PRD.md`. Không `/gsd-new-project` đè PRD. G
 | File | Mục đích | Khi nào đọc |
 | --- | --- | --- |
 | [../config/models.yaml](../config/models.yaml) | Cấu hình model / route | Đổi Auto-model hoặc danh sách model |
-| [../evals/v0/manifest.yaml](../evals/v0/manifest.yaml) | Danh sách eval harness | Đổi vòng agent / thêm eval |
+| [../evals/README.md](../evals/README.md) | Eval: cách chạy, ghim model, lịch sử, ngân sách; task ở `evals/*/manifest.yaml` | Đổi vòng agent / thêm eval / chạy eval |
 
 ## Kit agent trong app (không phải playbook Cursor)
 

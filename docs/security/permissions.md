@@ -140,6 +140,13 @@ B3 đã có: tiêu đề theo lý do chính, **lệnh thật** nguyên văn, dan
 - **Thông báo desktop** (`silence-notify-permission`): chỉ hiện khi cửa sổ không ở phía trước (ẩn, thu nhỏ, mất focus). Nội dung chỉ gồm **lý do** (tiêu đề tầng), không bao giờ có lệnh hay đường dẫn, vì thông báo xuất hiện cả trên màn hình khoá. Bấm vào thì đưa cửa sổ lên.
 - Tầng 3 không hiện card hỏi. Engine gửi `trace{event:"policy.blocked", detail:{code,title,detail,tool}}`; chat biến bước `Running …` thành `Blocked <lý do tiếng Việt>`. Model nhận `hint` tiếng Anh để chọn cách khác.
 
+## MCP server (Settings → Công cụ)
+
+- Cấu hình theo workspace ở `.silence/mcp.json` (`crates/runtime/src/mcp_config.rs`). Server là một lệnh Engine chạy, và file có thể đến từ repo clone về, nên server **chỉ chạy khi user trên máy này đã cho phép đúng lệnh đó**: dấu vân tay (workspace, tên, lệnh, args, tên biến env) lưu ở `<data_dir>/mcp-approved.json`. Đổi lệnh/args trong file = cần cho phép lại.
+- Thêm từ Studio: hiện nguyên dòng lệnh và hỏi xác nhận trước khi lưu và chạy. Bật lại server từ file = cho phép.
+- `mcp.list` không bao giờ trả giá trị env (chỉ tên biến). Giá trị `${VAR}` lấy từ môi trường của Engine lúc khởi động server, để secret không nằm trong file.
+- Mỗi lần gọi tool MCP vẫn qua Risk Engine (`MCP_CALL` / `MCP_READ`) và gây taint như trước.
+
 ## Chọn chế độ (Settings)
 
 Settings → **Chế độ quyền**: **Cân bằng** (mặc định) hoặc **Thận trọng**. **Tự chủ** hiển thị nhưng tắt, vì cần sandbox chặn mạng (xem [backlog.md](backlog.md)). Lựa chọn lưu ở `localStorage` (`silence.permission.mode`), gửi lúc `session.create` và đồng bộ lại trước mỗi lượt bằng `session.set_permission` (RPC này từ chối `yolo`). Đổi trong lúc có phiên mở thì áp dụng ngay cho phiên đó.

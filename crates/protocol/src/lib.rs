@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.11";
+pub const PROTOCOL_VERSION: &str = "0.1.13";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -86,7 +86,13 @@ pub struct SessionCreateParams {
     /// `auto` (default) = let the model pick; otherwise one of [`EFFORT_LEVELS`].
     #[serde(default)]
     pub effort: Option<String>,
+    /// Answer style: `default` (or absent) adds nothing; see [`RESPONSE_STYLES`].
+    #[serde(default)]
+    pub style: Option<String>,
 }
+
+/// Answer styles the UI can pick (Settings → Chat). `default` = the plain system prompt.
+pub const RESPONSE_STYLES: [&str; 3] = ["default", "concise", "explanatory"];
 
 /// Effort levels the UI can pick, weakest first. `auto` (not listed) = send nothing.
 pub const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
@@ -160,11 +166,95 @@ pub struct SetPreferredParams {
     pub provider: String,
 }
 
+/// Slot of the Auto model. Auto never reads the prompt: it picks a slot from the phase (mode)
+/// and the purpose of the call, then escalates on trouble. Ordered weakest first.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Slot {
+    Small,
+    #[default]
+    Strong,
+    Frontier,
+}
+
+impl Slot {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Strong => "strong",
+            Self::Frontier => "frontier",
+        }
+    }
+}
+
+/// Model ids the `custom` preset pins per slot. Empty = the `balanced` default for that slot.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct AutoSlots {
+    #[serde(default)]
+    pub frontier: String,
+    #[serde(default)]
+    pub strong: String,
+    #[serde(default)]
+    pub small: String,
+}
+
+/// Auto settings of one source (provider). Studio keeps one per source and sends it with
+/// `auto.set_config`; the Engine keeps it in memory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoConfig {
+    /// `balanced` (default) | `economy` | `max` | `custom`.
+    #[serde(default = "default_preset")]
+    pub preset: String,
+    /// Only read when `preset` is `custom`.
+    #[serde(default)]
+    pub slots: AutoSlots,
+    /// Model ids Auto may use on this source. Empty = every non-opt-in model of the source.
+    #[serde(default)]
+    pub pool: Vec<String>,
+    /// Spend cap per session in USD. `None` = no cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_usd: Option<f64>,
+    /// Slot of the main turn per mode (`plan`, `agent`, `ask`, `debug`, `review`, `multitask`).
+    /// Missing mode = its default (Plan/Review → Frontier, the rest → Strong).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mode_slots: std::collections::BTreeMap<String, Slot>,
+}
+
+fn default_preset() -> String {
+    "balanced".into()
+}
+
+impl Default for AutoConfig {
+    fn default() -> Self {
+        Self {
+            preset: default_preset(),
+            slots: AutoSlots::default(),
+            pool: Vec::new(),
+            budget_usd: None,
+            mode_slots: Default::default(),
+        }
+    }
+}
+
+/// Params of `auto.set_config`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetAutoConfigParams {
+    pub provider: String,
+    pub config: AutoConfig,
+}
+
 /// Params of `session.set_effort`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetEffortParams {
     pub session_id: String,
     pub effort: String,
+}
+
+/// `session.set_style`: one of [`RESPONSE_STYLES`]; applies from the next turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetStyleParams {
+    pub session_id: String,
+    pub style: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -175,9 +265,9 @@ pub enum SessionMode {
     Plan,
     /// Read-only Q&A: read/search tools only, no edits, no plan submission.
     Ask,
-    /// Agent tools + evidence-first debugging workflow, strong tier on Auto.
+    /// Agent tools + evidence-first debugging workflow.
     Debug,
-    /// Read-only code review of the working tree / named files, strong tier on Auto.
+    /// Read-only code review of the working tree / named files.
     Review,
     /// Agent that splits work into independent sub-tasks and delegates them to sub-agents.
     Multitask,
@@ -339,14 +429,27 @@ pub enum SessionEvent {
         detail: Value,
     },
     Route {
+        /// Purpose of the call (`agent`, `plan`, `title`, `subagent:explore`, `cli`, …).
         task_class: String,
         model_id: String,
         reason: String,
+        /// Auto slot (`frontier|strong|small`); empty for an explicit model pick.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        slot: String,
+        /// Auto moved up (effort or slot) because the turn ran into trouble.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        escalated: bool,
     },
     Cost {
         input_tokens: u32,
         output_tokens: u32,
         usd: f64,
+        /// Auto slot that spent it; empty for an explicit model pick.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        slot: String,
+        /// Same tokens priced on the source's strongest model (the "all Opus" baseline).
+        #[serde(default)]
+        baseline_usd: f64,
     },
     Terminal {
         data: String,
@@ -418,6 +521,21 @@ pub struct SessionSummary {
     pub updated_at: String,
     /// Number of user messages.
     pub turns: u32,
+}
+
+/// Params of `session.prune`: delete session logs whose last event is older than
+/// `older_than_days` (≥ 1). `keep` = ids never deleted (pinned chats). Result: `{deleted}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionPruneParams {
+    pub older_than_days: u32,
+    #[serde(default)]
+    pub keep: Vec<String>,
+}
+
+/// Params of `session.delete`. The audit log is kept. Result: `{deleted}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDeleteParams {
+    pub session_ids: Vec<String>,
 }
 
 /// Params of `session.resume`. Result: [`SessionResumeResult`].
@@ -592,12 +710,12 @@ pub struct ModelInfo {
     /// Level the UI marks "Recommended"; empty when `efforts` is empty.
     #[serde(default)]
     pub default_effort: String,
-    /// Provider id (`company-gateway`, `anthropic`, `claude-cli`, …) the picker groups by.
+    /// Provider id (`company-gateway`, `claude-api`, `claude-cli`, …) the picker groups by.
     #[serde(default)]
     pub provider: String,
     #[serde(default)]
     pub provider_label: String,
-    /// `openai_compat` | `anthropic` | `claude_cli`.
+    /// `openai_compat` | `claude_api` | `claude_cli`.
     #[serde(default)]
     pub provider_kind: String,
     /// False when the source cannot run now (no key, CLI missing); see `unavailable_reason`.
@@ -618,6 +736,16 @@ fn default_true() -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn new_settings_params_default_cleanly() {
+        let p: SessionCreateParams = serde_json::from_value(json!({"workspace": "w"})).unwrap();
+        assert!(p.style.is_none());
+        let p: SessionCreateParams = serde_json::from_value(json!({"workspace": "w", "style": "concise"})).unwrap();
+        assert_eq!(p.style.as_deref(), Some("concise"));
+        let p: SessionPruneParams = serde_json::from_value(json!({"older_than_days": 30})).unwrap();
+        assert!(p.keep.is_empty());
+    }
 
     #[test]
     fn error_event_without_info_is_backward_compatible() {

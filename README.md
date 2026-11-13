@@ -9,8 +9,9 @@ Studio Electron + React/TypeScript (`apps/studio`). Lõi harness Rust (`silence-
 - Windows 10+, Node 20+, Rust stable (MSVC), Python 3.11 (fixture evals)
 - Ít nhất một nguồn model (nhập key ở Settings → Model sources, lưu mã hoá trên máy; chọn nguồn đang dùng ở dòng Source trong menu model):
   - **OpenRouter** / endpoint OpenAI-compatible: `SILENCE_API_BASE`, `SILENCE_API_KEY`
-  - **Anthropic API** trực tiếp: `ANTHROPIC_API_KEY` (tuỳ chọn `ANTHROPIC_BASE_URL`)
-  - **Claude CLI** (thử nghiệm, chỉ dùng cá nhân / nội bộ): lệnh `claude` đã đăng nhập; đổi đường dẫn bằng `SILENCE_CLAUDE_CLI`. Model `@cli` chỉ chạy khi chọn tường minh; tool vẫn chạy trong Engine qua MCP bridge.
+  - **Claude API** trực tiếp: `ANTHROPIC_API_KEY` (tuỳ chọn `ANTHROPIC_BASE_URL`)
+  - **Claude CLI** (thử nghiệm, chỉ dùng cá nhân / nội bộ; **nguồn mặc định** của Studio và evals): lệnh `claude` đã đăng nhập; đổi đường dẫn bằng `SILENCE_CLAUDE_CLI`. Auto ở nguồn này chọn trong các model `@cli`; tool vẫn chạy trong Engine qua MCP bridge.
+- Nguồn mặc định của Studio đặt ở Settings → Model sources → **Nguồn mặc định**. Studio không tự đổi sang nguồn khác khi nguồn mặc định không dùng được. Dòng Source trong menu model chỉ đổi cho lần chạy hiện tại.
 - Effort (Low → Max) chọn trong menu model của Composer; Chưa chọn mức nào thì Engine gửi mức Recommended của model (Medium cho mọi model Claude).
 
 ## Chạy
@@ -49,8 +50,9 @@ Sidecar TCP `127.0.0.1:0` khi Electron spawn; CLI:
 
 ```powershell
 cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420
-cargo run -p silence-engine -- evals --dir evals/v0 --repo-root .
 ```
+
+Eval chạy thủ công ở local: `npm run evals` (mặc định qua Claude CLI; `npm run evals -- --help`, chi tiết ở `evals/README.md`).
 
 Copy `templates/silence` thành `.silence/` trong repo làm việc để bật skills/hooks.
 

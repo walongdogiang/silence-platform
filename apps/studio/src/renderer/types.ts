@@ -29,8 +29,10 @@ export type SessionEvent =
   /** `applied`: already written (Balanced) — UI offers Undo instead of Apply/Reject. */
   | { type: "diff"; path: string; before: string; after: string; applied?: boolean }
   | { type: "trace"; event: string; detail: unknown }
-  | { type: "route"; task_class: string; model_id: string; reason: string }
-  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number }
+  /** `slot` on Auto (`frontier|strong|small`); `escalated` when Auto moved up on trouble. */
+  | { type: "route"; task_class: string; model_id: string; reason: string; slot?: string; escalated?: boolean }
+  /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
+  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: string; baseline_usd?: number }
   | { type: "terminal"; data: string }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };
@@ -87,7 +89,7 @@ export type ModelInfo = {
   /** Provider id the picker groups by. */
   provider?: string;
   provider_label?: string;
-  provider_kind?: "openai_compat" | "anthropic" | "claude_cli";
+  provider_kind?: "openai_compat" | "claude_api" | "claude_cli";
   available?: boolean;
   unavailable_reason?: string;
   /** Hidden from the picker until switched on in Settings. */
@@ -116,10 +118,23 @@ export type CliInfo = {
 };
 
 /** Row of `providers.status`. Keys are never returned, only `has_key`. */
+/** Copy of `McpServerView` in packages/protocol (Studio does not import it yet). */
+export type McpServerView = {
+  name: string;
+  command: string;
+  args: string[];
+  env_keys: string[];
+  enabled: boolean;
+  approved: boolean;
+  status: "running" | "error" | "off" | "needs_approval" | "stopped";
+  error: string | null;
+  tools: { name: string; description: string; read_only: boolean }[];
+};
+
 export type ProviderStatus = {
   id: string;
   label: string;
-  kind: "openai_compat" | "anthropic" | "claude_cli";
+  kind: "openai_compat" | "claude_api" | "claude_cli";
   has_key: boolean;
   needs_key: boolean;
   cli_version?: string;

@@ -134,7 +134,8 @@ impl McpClient {
 }
 
 pub struct McpHost {
-    servers: Mutex<HashMap<String, Arc<McpClient>>>,
+    /// Running servers by name, with the tool list read when they started.
+    servers: Mutex<HashMap<String, (Arc<McpClient>, Vec<McpTool>)>>,
 }
 
 impl McpHost {
@@ -144,16 +145,18 @@ impl McpHost {
         }
     }
 
+    /// Start (or restart) a server and remember its tools.
     pub async fn add(&self, cfg: McpServerConfig) -> Result<Vec<McpTool>> {
         let client = McpClient::start(&cfg).await?;
         let tools = client.list_tools().await?;
         self.servers
             .lock()
             .await
-            .insert(cfg.name.clone(), Arc::new(client));
+            .insert(cfg.name.clone(), (Arc::new(client), tools.clone()));
         Ok(tools)
     }
 
+    /// Stop a server (dropping the client kills the child process).
     pub async fn remove(&self, name: &str) {
         self.servers.lock().await.remove(name);
     }
@@ -162,13 +165,22 @@ impl McpHost {
         self.servers.lock().await.keys().cloned().collect()
     }
 
+    pub async fn is_running(&self, name: &str) -> bool {
+        self.servers.lock().await.contains_key(name)
+    }
+
+    /// Tools a running server listed when it started; `None` when it is not running.
+    pub async fn tools(&self, name: &str) -> Option<Vec<McpTool>> {
+        self.servers.lock().await.get(name).map(|(_, t)| t.clone())
+    }
+
     pub async fn call(&self, server: &str, tool: &str, args: Value) -> Result<String> {
         let client = self
             .servers
             .lock()
             .await
             .get(server)
-            .cloned()
+            .map(|(c, _)| c.clone())
             .ok_or_else(|| anyhow!("mcp server not connected: {server}"))?;
         client.call_tool(tool, args).await
     }
@@ -179,7 +191,7 @@ impl McpHost {
             .lock()
             .await
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(k, (c, _))| (k.clone(), c.clone()))
             .collect();
         let mut out = Vec::new();
         for (name, client) in snapshot {

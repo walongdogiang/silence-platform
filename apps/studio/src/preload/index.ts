@@ -5,7 +5,13 @@ contextBridge.exposeInMainWorld("silence", {
   pickFolder: () => ipcRenderer.invoke("silence-pick-folder") as Promise<string | null>,
   openExternal: (url: string) => ipcRenderer.invoke("silence-open-external", url) as Promise<boolean>,
   copyImage: (png: Uint8Array) => ipcRenderer.invoke("silence-copy-image", png) as Promise<boolean>,
-  notifyPermission: (reason: string) => ipcRenderer.invoke("silence-notify-permission", reason) as Promise<boolean>,
+  notifyPermission: (reason: string, opts?: { notify: boolean; flash: boolean }) =>
+    ipcRenderer.invoke("silence-notify-permission", reason, opts) as Promise<boolean>,
+  notifyDone: (title: string, opts?: { notify: boolean; flash: boolean }) =>
+    ipcRenderer.invoke("silence-notify-done", title, opts) as Promise<boolean>,
+  notifyTest: (title: string, body: string) => ipcRenderer.invoke("silence-notify-test", title, body) as Promise<boolean>,
+  keepAwake: (on: boolean) => ipcRenderer.invoke("silence-keep-awake", on) as Promise<boolean>,
+  openDataDir: () => ipcRenderer.invoke("silence-open-data-dir") as Promise<boolean>,
   credentials: {
     status: () => ipcRenderer.invoke("silence-credentials-status"),
     /** `key: ""` clears. Resolves to the new status (never the key). */

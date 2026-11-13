@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { errorCopy, errorDetail } from "./errorCopy";
+import { translator } from "./i18n";
+
+const vi = translator("vi");
+const en = translator("en");
 
 describe("errorCopy", () => {
   it("hết credit → tiếng Việt, không có nút thử lại", () => {
-    const c = errorCopy({ code: "PROVIDER_CREDITS", status: 402, retryable: false, detail: "Insufficient credits" });
+    const c = errorCopy({ code: "PROVIDER_CREDITS", status: 402, retryable: false, detail: "Insufficient credits" }, vi);
     expect(c.title).toBe("Hết credit hoặc hạn mức");
     expect(c.canRetry).toBe(false);
   });
 
   it("key sai → không retry", () => {
-    const c = errorCopy({ code: "PROVIDER_AUTH", status: 401, retryable: false, detail: "" });
+    const c = errorCopy({ code: "PROVIDER_AUTH", status: 401, retryable: false, detail: "" }, vi);
     expect(c.title).toBe("API key không hợp lệ");
     expect(c.canRetry).toBe(false);
   });
@@ -20,15 +24,19 @@ describe("errorCopy", () => {
     ["NETWORK", "Mất kết nối mạng"],
     ["TIMEOUT", "Model phản hồi quá lâu"],
   ])("%s → retry khi Engine báo retryable", (code, title) => {
-    const c = errorCopy({ code, retryable: true, detail: "" });
+    const c = errorCopy({ code, retryable: true, detail: "" }, vi);
     expect(c.title).toBe(title);
     expect(c.canRetry).toBe(true);
   });
 
   it("thiếu info hoặc mã lạ → thông báo chung, không retry", () => {
-    expect(errorCopy(undefined).title).toBe("Không chạy được lượt này");
-    expect(errorCopy(undefined).canRetry).toBe(false);
-    expect(errorCopy({ code: "WHATEVER", retryable: false, detail: "" }).title).toBe("Không chạy được lượt này");
+    expect(errorCopy(undefined, vi).title).toBe("Không chạy được lượt này");
+    expect(errorCopy(undefined, vi).canRetry).toBe(false);
+    expect(errorCopy({ code: "WHATEVER", retryable: false, detail: "" }, vi).title).toBe("Không chạy được lượt này");
+  });
+
+  it("follows the UI language", () => {
+    expect(errorCopy({ code: "NETWORK", retryable: true, detail: "" }, en).title).toBe("Network connection lost");
   });
 
   it("chi tiết kỹ thuật gồm mã + HTTP + detail, không JSON", () => {

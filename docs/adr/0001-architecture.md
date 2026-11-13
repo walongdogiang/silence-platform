@@ -24,7 +24,7 @@ Cần AI Engineer OS nội bộ trên Windows: agent loop, MCP, sub-agent, auto-
 3. **JSON-RPC 2.0** qua **named pipe** Windows (`\\.\pipe\silence-<pid>`). Dev/non-Windows: TCP `127.0.0.1` loopback.
 4. **Không napi-rs** làm đường chính — crash native không được kéo theo cả Electron.
 5. **Editor = Monaco**, không fork VS Code / Code-OSS năm 1.
-6. **Model gateway** OpenAI-compatible (`/v1/chat/completions`) + adapter Anthropic Messages. Provider khai báo trong `config/models.yaml` (`base_url`, `api_key_env`): cloud (OpenRouter, …) hoặc local (Ollama, LM Studio, server nội bộ); provider local không cần key.
+6. **Model gateway** OpenAI-compatible (`/v1/chat/completions`) + adapter Claude API (Messages API). Provider khai báo trong `config/models.yaml` (`base_url`, `api_key_env`): cloud (OpenRouter, …) hoặc local (Ollama, LM Studio, server nội bộ); provider local không cần key.
 7. **Protocol** một nguồn sự thật: `packages/protocol` (JSON Schema + TS) và `crates/protocol` (serde).
 
 ## Consequences

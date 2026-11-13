@@ -1,24 +1,80 @@
 name: nightly-evals
 
+# Lịch và ngân sách: evals/README.md → Lịch chạy và ngân sách.
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "nightly = task ghim Haiku; weekly = đủ bộ + mở PR lịch sử"
+        type: choice
+        options: [nightly, weekly]
+        default: nightly
   schedule:
-    - cron: "0 17 * * *"
+    - cron: "0 17 * * 0-5" # Đêm: 0h giờ VN, trừ đêm có lượt Tuần
+    - cron: "0 17 * * 6" # Tuần: 0h Chủ nhật giờ VN
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   evals:
     runs-on: windows-latest
+    env:
+      SILENCE_API_KEY: ${{ secrets.SILENCE_API_KEY }}
+      SILENCE_API_BASE: ${{ secrets.SILENCE_API_BASE }}
+      # Mặc định evals chạy qua Claude CLI; runner CI không có CLI đăng nhập nên dùng OpenRouter.
+      SILENCE_EVAL_SOURCE: company-gateway
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Pick profile
+        id: p
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then p="${{ inputs.profile }}"
+          elif [ "${{ github.event.schedule }}" = "0 17 * * 6" ]; then p=weekly
+          else p=nightly; fi
+          echo "profile=$p" >> "$GITHUB_OUTPUT"
       - name: Build engine
         run: cargo build -p silence-engine
-      - name: Run evals
-        env:
-          SILENCE_API_KEY: ${{ secrets.SILENCE_API_KEY }}
-          SILENCE_API_BASE: ${{ secrets.SILENCE_API_BASE }}
-        run: cargo run -p silence-engine -- evals --dir evals/v0 --repo-root .
+
+      - name: Nightly (tasks pinned to Haiku)
+        if: steps.p.outputs.profile == 'nightly'
+        run: cargo run -p silence-engine -- evals --dir evals/v0 --repo-root . --pinned claude-haiku --retry-failed --max-cost 0.3 --profile nightly
         continue-on-error: true
+
+      - name: Weekly v0 (full suite, pinned models)
+        if: steps.p.outputs.profile == 'weekly'
+        run: cargo run -p silence-engine -- evals --dir evals/v0 --repo-root . --max-cost 1.2 --history --profile weekly
+        continue-on-error: true
+      - name: Weekly modes
+        if: steps.p.outputs.profile == 'weekly'
+        run: cargo run -p silence-engine -- evals --dir evals/modes --repo-root . --only M01-ask-no-edit,M02-review-finds-bugs,M03-debug-fixes-with-evidence,M04-plan-no-edit,M05-multitask-two-fixes --max-cost 0.3 --history --profile weekly
+        continue-on-error: true
+      # Model Auto (A0x) có trần riêng: A01 chạy Opus, A03 có thể leo lên Opus, không được ăn
+      # vào trần của các task mode. Thử lại một lần vì A03 phụ thuộc model sửa đúng ngay hay không.
+      - name: Weekly Auto model
+        if: steps.p.outputs.profile == 'weekly'
+        run: cargo run -p silence-engine -- evals --dir evals/modes --repo-root . --only A01-auto-plan-frontier,A02-auto-ask-strong,A03-auto-agent-bugfix --retry-failed --max-cost 0.5 --history --profile weekly
+        continue-on-error: true
+      # Không push thẳng main: mở PR chứa lịch sử, squash merge như PR thường.
+      # Cần bật Settings → Actions → "Allow GitHub Actions to create and approve pull requests".
+      - name: Open history PR
+        if: always() && steps.p.outputs.profile == 'weekly'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/eval-history-${{ github.run_id }}
+          delete-branch: true
+          commit-message: "chore(evals): record weekly eval history"
+          title: "chore(evals): weekly eval history"
+          body: |
+            Lịch sử eval hằng tuần (run ${{ github.run_id }}). Chỉ đổi `evals/history/`.
+            Chi tiết từng task (workspace + audit): artifact `eval-results` của run này.
+          add-paths: |
+            evals/history/runs.jsonl
+            evals/history/SUMMARY.md
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4

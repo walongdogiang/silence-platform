@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import mountains from "./assets/wallpapers/mountains.png";
-import { AppearancePanel } from "./components/AppearancePanel";
 import { BottomPanel, type PanelTab } from "./components/BottomPanel";
 import {
   ChatHistoryPanel,
@@ -20,21 +19,37 @@ import { Composer } from "./components/Composer";
 import { ImageLightbox, type LightboxState } from "./components/ImageLightbox";
 import { isImagePath, readWorkspaceImage } from "./workspaceImages";
 import { routeText, type SessionMode } from "./modes";
+import { LangContext, translator } from "./i18n";
+import {
+  addSpend,
+  autoFor,
+  autoModelLabel,
+  engineConfig,
+  EMPTY_SPEND,
+  fmtUsd,
+  isSideRoute,
+  loadAuto,
+  loadSpend,
+  saveAuto,
+  saveSpend,
+  type AutoConfig,
+  type SlotSpend,
+} from "./autoConfig";
 import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImages";
 import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
 import { DiffPane } from "./components/DiffPane";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
 import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
-import { NetworkPanel } from "./components/NetworkPanel";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import {
+  loadDefaultSource,
   loadPick,
-  loadPreferredProvider,
   modelForSource,
   modelSources,
   normalizeEffort,
   resolveSource,
   savePick,
-  savePreferredProvider,
   type Effort,
 } from "./effort";
 import { TitleBar } from "./components/TitleBar";
@@ -61,6 +76,20 @@ import {
 } from "./theme/appearance";
 import { loadModelPrefs, lockedModels, saveModelPrefs, visibleModels } from "./theme/modelsPrefs";
 import type { CliInfo, ContextUsage, ModelInfo, SessionEvent } from "./types";
+import { loadPrefs, savePrefs, type Prefs } from "./prefs";
+import { pinnedSessionIds, pruneThreads } from "./retention";
+
+/** xterm colours from the theme tokens, so the light theme gets a light terminal. */
+function terminalTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    background: v("--workspace", "#191a1c"),
+    foreground: v("--text-primary", "#f0efec"),
+    cursor: v("--accent", "#e5a05b"),
+    selectionBackground: v("--surface-hover", "#303134"),
+  };
+}
 
 function loadShellView(): ShellView {
   const v = localStorage.getItem("silence.shell.view");
@@ -68,6 +97,7 @@ function loadShellView(): ShellView {
 }
 
 function loadOpenTabs(): string[] {
+  if (!loadPrefs().restoreSession) return [];
   try {
     const raw = localStorage.getItem("silence.shell.openTabs");
     if (!raw) return [];
@@ -213,23 +243,48 @@ function sealThoughtMs(lines: ChatLine[], startedAt: number): ChatLine[] {
 
 export function App() {
   const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
+  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
+  /** Latest prefs for the Engine event listener (registered once). */
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  /** UI strings in the chosen language (App sits above `LangContext`, so no `useT` here). */
+  const t = translator(appearance.lang);
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
-  const [showNetwork, setShowNetwork] = useState(false);
+  /** Settings dialog: open on `section`; `n` changes on every request so it can re-target. */
+  const [settings, setSettings] = useState<{ section: SettingsSection; n: number } | null>(null);
+  const openSettings = (section: SettingsSection = loadSettingsSection()) => setSettings({ section, n: Date.now() });
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
   const [focusModel, setFocusModel] = useState<{ id: string; n: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
   const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
   const [outputLog, setOutputLog] = useState<string[]>([]);
   const [historyHidden, setHistoryHidden] = useState(() => localStorage.getItem("silence.shell.history") === "1");
-  const [appearOpen, setAppearOpen] = useState(false);
 
   const [workspace, setWorkspace] = useState(() => localStorage.getItem("silence.shell.workspace") ?? "");
   const [sessionId, setSessionId] = useState("");
   const [model, setModel] = useState(() => loadPick().model);
   const [effort, setEffort] = useState<Effort>(() => loadPick().effort);
   /** Model source the picker shows (provider id); also the provider Auto prefers. */
-  const [source, setSource] = useState(() => loadPreferredProvider());
+  // Starts on the default from Settings → Model sources (the Claude CLI when unset); the
+  // composer's Source row switches for this run only.
+  const [source, setSource] = useState(() => loadDefaultSource());
   const [models, setModels] = useState<ModelInfo[]>([]);
+  /** Auto settings per source (`silence.auto.v1`), pushed to the Engine with `auto.set_config`. */
+  const [autoCfgs, setAutoCfgs] = useState<Record<string, AutoConfig>>(() => loadAuto());
+  /** Model Auto used last in a main turn ("Sonnet"), shown on the picker as "Auto · Sonnet". */
+  const [autoModel, setAutoModel] = useState("");
+  /** Spend per chat thread split by Auto slot (`cost` events); survives Engine restarts. */
+  const [spendByThread, setSpendByThread] = useState<Record<string, SlotSpend>>(() => loadSpend());
+  const activeThreadRef = useRef("");
+  /** The turn stopped at the Auto spend cap (`done` with stop `budget`). */
+  const [budgetHit, setBudgetHit] = useState(false);
+  /** Settings → Models → Auto tab (`NetworkPanel.focusAuto`). */
+  const [focusAuto, setFocusAuto] = useState(0);
+  /** Picker → Add models → Settings → Model → Models tab with the add form open. */
+  const [focusAdd, setFocusAdd] = useState(0);
+  /** Picker → Source → Set up → Settings → Model → Sources tab. */
+  const [focusSources, setFocusSources] = useState(0);
+  const modelsRef = useRef<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
   const [mode, setMode] = useState<SessionMode>("agent");
   const [tree, setTree] = useState<string[]>([]);
@@ -275,6 +330,11 @@ export function App() {
   const missedImagesRef = useRef(new Set<string>());
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => loadOpenTabs());
   const [activeThreadId, setActiveThreadId] = useState("");
+  activeThreadRef.current = activeThreadId;
+  /** Title of the open chat, for the "agent finished" notice. */
+  const threadTitleRef = useRef("");
+  threadTitleRef.current = threads.find((x) => x.id === activeThreadId)?.title ?? "";
+  const spend = spendByThread[activeThreadId] ?? EMPTY_SPEND;
   /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
 
@@ -308,6 +368,26 @@ export function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [appearance]);
+
+  useEffect(() => {
+    savePrefs(prefs);
+  }, [prefs]);
+
+  // Settings → Dữ liệu → Giữ lịch sử chat: dọn một lần khi mở Studio (chat đã ghim luôn giữ).
+  useEffect(() => {
+    const days = prefs.retentionDays;
+    if (!days) return;
+    const { removed } = pruneThreads(threads, days, Date.now());
+    if (removed.length) {
+      const gone = new Set(removed.map((t) => t.id));
+      setThreads((xs) => xs.filter((t) => !gone.has(t.id)));
+      setOpenTabIds((ids) => ids.filter((id) => !gone.has(id)));
+    }
+    void window.silence
+      ?.rpc("session.prune", { older_than_days: days, keep: pinnedSessionIds(threads) })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once at startup
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("silence.shell.panel", panelOpen ? "1" : "0");
@@ -384,7 +464,7 @@ export function App() {
 
   // Tiêu đề AI (như ChatGPT/Claude): một lần, sau khi lượt đầu có câu trả lời. Lỗi thì giữ tiêu đề tạm.
   useEffect(() => {
-    if (busy || !activeThreadId) return;
+    if (busy || !activeThreadId || !prefs.autoTitle) return;
     const t = threads.find((x) => x.id === activeThreadId);
     if (!t || t.titleSource === "ai" || t.titleSource === "user") return;
     if (titleRequestedRef.current.has(t.id)) return;
@@ -392,7 +472,7 @@ export function App() {
     if (!ex) return;
     titleRequestedRef.current.add(t.id);
     void requestTitle(t.id, sessionId, ex.user, ex.reply);
-  }, [busy, activeThreadId, lines, threads, sessionId]);
+  }, [busy, activeThreadId, lines, threads, sessionId, prefs.autoTitle]);
 
   useEffect(() => {
     if (activeThreadId) return;
@@ -407,7 +487,7 @@ export function App() {
 
   useEffect(() => {
     if (!window.silence) {
-      setLines([{ kind: "sys", text: "Preload không gắn được. Chạy lại npm run desktop." }]);
+      setLines([{ kind: "sys", text: t("app.noPreload") }]);
       return;
     }
     return window.silence.onEvent((payload) => {
@@ -464,7 +544,21 @@ export function App() {
       } else if (ev.type === "tool_end") {
         setLines((xs) => [...xs, { kind: "tool", name: ev.name, output: ev.output }]);
       } else if (ev.type === "route") {
-        setLines((xs) => [...xs, { kind: "route", text: routeText(turnModeRef.current, ev.task_class, ev.model_id) }]);
+        const auto = Boolean(ev.slot);
+        const label = auto ? autoModelLabel(ev.model_id, modelsRef.current) : ev.model_id;
+        if (auto && !isSideRoute(ev.task_class)) setAutoModel(label);
+        setLines((xs) => [
+          ...xs,
+          {
+            kind: "route",
+            text: routeText(turnModeRef.current, ev.task_class, ev.model_id),
+            model: label,
+            slot: ev.slot || undefined,
+            escalated: ev.escalated || undefined,
+            reason: ev.reason,
+            purpose: ev.task_class,
+          },
+        ]);
       } else if (ev.type === "mode_suggestion") {
         const prompt = lastPromptRef.current;
         setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode, reason: ev.reason, prompt }]);
@@ -479,7 +573,12 @@ export function App() {
         setPermError(false);
         setPerm({ request_id: ev.request_id, name: ev.name, input: ev.input, reason: ev.reason, risk: ev.risk });
         // Cửa sổ không ở phía trước thì báo ra desktop. Chỉ gửi lý do (không gửi lệnh).
-        void window.silence.notifyPermission?.(ev.risk?.reasons[0]?.title ?? ev.reason).catch(() => undefined);
+        const np = prefsRef.current;
+        if (np.notifyPermission || np.flashTaskbar) {
+          void window.silence
+            .notifyPermission?.(ev.risk?.reasons[0]?.title ?? ev.reason, { notify: np.notifyPermission, flash: np.flashTaskbar })
+            .catch(() => undefined);
+        }
       } else if (ev.type === "trace" && ev.event === "policy.blocked") {
         // Risk Engine chặn lệnh (tầng 3): biến bước "Running …" đang chạy thành "Blocked <lý do>".
         const step = blockedStep(ev.detail);
@@ -516,6 +615,12 @@ export function App() {
         const last = lastPromptRef.current;
         setPrompt((p) => (p.trim() ? p : last));
       } else if (ev.type === "done") {
+        if (ev.stop === "budget") {
+          setBudgetHit(true);
+          // The Engine dropped the unanswered prompt: give it back to the composer.
+          const last = lastPromptRef.current;
+          setPrompt((p) => (p.trim() ? p : last));
+        }
         const files = turnFilesRef.current;
         turnFilesRef.current = [];
         const thoughtStart = thoughtStartedAtRef.current;
@@ -529,8 +634,17 @@ export function App() {
         setBusy(false);
         setRun(null);
         void refreshCost();
+        // Chỉ gửi tên chat, không gửi nội dung trả lời (thông báo hiện cả trên màn hình khoá).
+        const np = prefsRef.current;
+        if (np.notifyDone || np.flashTaskbar) {
+          void window.silence
+            .notifyDone?.(threadTitleRef.current, { notify: np.notifyDone, flash: np.flashTaskbar })
+            .catch(() => undefined);
+        }
       } else if (ev.type === "cost") {
         setRun((m) => addCost(m, ev));
+        const tid = activeThreadRef.current;
+        if (tid) setSpendByThread((all) => ({ ...all, [tid]: addSpend(all[tid] ?? EMPTY_SPEND, ev) }));
         setCost((c) => ({
           ...c,
           usd: c.usd + ev.usd,
@@ -549,10 +663,62 @@ export function App() {
       .catch((err: Error) => setLines((xs) => [...xs, { kind: "sys", text: String(err.message ?? err) }]));
   }
 
+  modelsRef.current = models;
+  useEffect(() => {
+    setBudgetHit(false);
+    setAutoModel("");
+  }, [activeThreadId]);
+  useEffect(() => {
+    saveSpend(spendByThread, [...threads].sort((a, b) => b.updatedAt - a.updatedAt).map((t) => t.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spendByThread]);
+
+  /** Send one source's Auto config (models switched off in Settings left out of the pool). */
+  function pushAuto(provider: string, cfg: AutoConfig) {
+    const config = engineConfig(cfg, provider, visibleModels(modelsRef.current, modelPrefs), modelsRef.current);
+    return window.silence?.rpc("auto.set_config", { provider, config });
+  }
+  // The Engine keeps Auto settings in memory only: push every source's once the catalog is in,
+  // and again when models are switched on/off.
+  useEffect(() => {
+    for (const s of modelSources(models)) void pushAuto(s.id, autoFor(autoCfgs, s.id))?.catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models, modelPrefs]);
+
+  function changeAuto(next: AutoConfig) {
+    const all = { ...autoCfgs, [source]: next };
+    setAutoCfgs(all);
+    saveAuto(all);
+    void pushAuto(source, next)?.catch((err: Error) =>
+      setLines((xs) => [...xs, { kind: "sys", text: String(err.message ?? err) }]),
+    );
+  }
+
+  /** Settings → Models edits the Auto config of any source, not only the active one. */
+  function changeAutoFor(provider: string, next: AutoConfig) {
+    const all = { ...autoCfgs, [provider]: next };
+    setAutoCfgs(all);
+    saveAuto(all);
+    void pushAuto(provider, next)?.catch(() => undefined);
+  }
+
+  /** "Tiếp tục 1 lượt" on the spend-cap banner: one turn past the cap, then resend. */
+  async function continuePastCap() {
+    setBudgetHit(false);
+    if (!sessionId) return;
+    await window.silence.rpc("session.budget_continue", { session_id: sessionId }).catch(() => undefined);
+    const text = prompt.trim() || lastPromptRef.current;
+    if (text) {
+      setPrompt("");
+      void send(text);
+    }
+  }
+
   /** Catalog + models added in Settings, minus the ones switched off there. */
   const allModels = useMemo(() => visibleModels(models, modelPrefs), [models, modelPrefs]);
   const sources = useMemo(() => modelSources(models), [models]);
-  /** Auto routes inside the picked source; the Claude CLI has no Auto, so the Engine gets "". */
+  /** Tier lookups prefer the picked source; the CLI is refused there (Auto on the CLI comes
+   * from the session's `source`, sent with `session.set_model`), so the Engine gets "". */
   const preferredFor = (src: string) =>
     sources.find((s) => s.id === src)?.kind === "claude_cli" ? "" : src;
 
@@ -592,7 +758,6 @@ export function App() {
   /** Switch the picker's source: list only its models, keep or reset the model, tell the Engine. */
   function chooseSource(id: string) {
     setSource(id);
-    savePreferredProvider(id);
     setModel((cur) => modelForSource(cur, id, allModels));
     void window.silence
       ?.rpc("providers.set_preferred", { provider: preferredFor(id) })
@@ -607,11 +772,12 @@ export function App() {
   useEffect(() => {
     savePick({ model, effort });
   }, [model, effort]);
-  // Keep source + model consistent with the catalog: a gone source → the first usable one; a
-  // model that is gone or belongs to another source → Auto (or the CLI default model).
+  // Keep source + model consistent with the catalog: a gone source → the default (Claude CLI
+  // unless set in Settings), never switched just because it is unusable; a model that is gone
+  // or belongs to another source → Auto.
   useEffect(() => {
     if (models.length === 0) return;
-    const src = resolveSource(source, sources);
+    const src = resolveSource(source, sources, loadDefaultSource());
     if (src !== source) {
       chooseSource(src);
       return;
@@ -631,10 +797,11 @@ export function App() {
 
   useEffect(() => {
     if (!termEl) return;
+    const p = prefsRef.current;
     const t = new Terminal({
-      theme: { background: "#191A1C", foreground: "#F0EFEC", cursor: "#E5A05B" },
-      fontSize: 12,
-      fontFamily: "Cascadia Code, Consolas, monospace",
+      theme: terminalTheme(),
+      fontSize: p.codeFontSize,
+      fontFamily: p.codeFont,
     });
     const f = new FitAddon();
     t.loadAddon(f);
@@ -654,6 +821,21 @@ export function App() {
       fit.current = null;
     };
   }, [termEl]);
+
+  // Font, size and colours follow Settings without recreating the terminal (scrollback stays).
+  useEffect(() => {
+    const t = term.current;
+    if (!t) return;
+    t.options.fontFamily = prefs.codeFont;
+    t.options.fontSize = prefs.codeFontSize;
+    t.options.theme = terminalTheme();
+    fit.current?.fit();
+  }, [prefs.codeFont, prefs.codeFontSize, appearance]);
+
+  // Giữ máy thức khi agent đang chạy (nếu bật). Main giữ một blocker duy nhất.
+  useEffect(() => {
+    void window.silence?.keepAwake?.(busy && prefs.keepAwake).catch(() => undefined);
+  }, [busy, prefs.keepAwake]);
 
   useEffect(() => {
     if (panelOpen && panelTab === "terminal") fit.current?.fit();
@@ -700,7 +882,7 @@ export function App() {
       created = await create(permMode);
     } catch (e) {
       if (!/unknown variant/i.test(e instanceof Error ? e.message : String(e))) throw e;
-      setOutputLog((xs) => [...xs.slice(-199), "[warn] Engine cũ chưa hỗ trợ chế độ Cân bằng; dùng chế độ hỏi. Chạy lại `npm run studio` để build Engine mới."]);
+      setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.oldEngineBalanced")}`]);
       created = await create("ask");
     }
     await window.silence.rpc("terminal.start", { session_id: created.session_id, cols: 100, rows: 16 });
@@ -718,7 +900,7 @@ export function App() {
     opts?: { forkedFromId?: string; title?: string; titleSource?: ChatThread["titleSource"] },
   ) {
     const id = crypto.randomUUID();
-    const baseTitle = opts?.title?.trim() || titleFrom(initial);
+    const baseTitle = opts?.title?.trim() || titleFrom(initial, t("history.newChat"));
     const thread: ChatThread = {
       id,
       sessionId: liveSessionId,
@@ -740,7 +922,6 @@ export function App() {
     setImages([]);
     setBusy(false);
     setRun(null);
-    setShowNetwork(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
     setThreads((xs) => [thread, ...xs.filter((x) => x.lines.length > 0)]);
@@ -752,7 +933,20 @@ export function App() {
     const parentId = activeThreadId;
     if (!parentId) return;
     const cut = Math.max(0, Math.min(endLineInclusive, lines.length - 1));
-    const sliced = lines.slice(0, cut + 1).map((l) => ({ ...l }));
+    await forkLines(parentId, lines.slice(0, cut + 1));
+  }
+
+  /** Fork cả đoạn chat `id` (menu ⋯ ở lịch sử). */
+  async function forkThread(id: string) {
+    if (!workspace || busy) return;
+    const src = id === activeThreadId ? lines : threads.find((t) => t.id === id)?.lines;
+    if (!src) return;
+    await forkLines(id, src);
+  }
+
+  async function forkLines(parentId: string, src: ChatLine[]) {
+    if (!workspace) return;
+    const sliced = src.map((l) => ({ ...l }));
     if (sliced.length === 0) return;
     snapshotActive();
     const parent = threads.find((t) => t.id === parentId);
@@ -761,7 +955,7 @@ export function App() {
     const parentLocked = parent?.titleSource === "ai" || parent?.titleSource === "user";
     beginThread(workspace, liveId, sliced, {
       forkedFromId: parentId,
-      title: parentLocked && parent ? parent.title : titleFrom(sliced, parent?.title ?? "Đoạn chat"),
+      title: parentLocked && parent ? parent.title : titleFrom(sliced, parent?.title ?? t("history.newChat")),
       titleSource: parentLocked ? "ai" : "auto",
     });
     await refreshCost();
@@ -797,7 +991,7 @@ export function App() {
       void refreshCost();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setOutputLog((xs) => [...xs.slice(-199), `[warn] không sinh được tiêu đề chat: ${message}`]);
+      setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.titleFailed", { message })}`]);
     }
   }
 
@@ -805,6 +999,39 @@ export function App() {
     const t = title.trim().replace(/\s+/g, " ");
     if (!t) return;
     setThreads((xs) => xs.map((x) => (x.id === id ? { ...x, title: t, titleSource: "user" } : x)));
+  }
+
+  function patchThread(id: string, patch: Partial<Pick<ChatThread, "pinned" | "archived" | "unread">>) {
+    setThreads((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }
+
+  function archiveThread(id: string, archived: boolean) {
+    if (archived) {
+      // Lưu trữ thì rời khỏi tab (như đóng tab), thread vẫn còn trong lịch sử.
+      const wasActive = id === activeThreadId;
+      const otherTab = openTabIds.some(
+        (x) => x !== id && threads.some((t) => t.id === x && t.workspace === workspace),
+      );
+      if (openTabIds.includes(id)) closeTab(id);
+      patchThread(id, { archived: true, pinned: false });
+      // Như xoá: lưu trữ chat đang mở mà không còn tab nào thì mở chat mới, không rơi về màn hình chào.
+      if (wasActive && !otherTab) void newChat();
+    } else {
+      patchThread(id, { archived: false });
+    }
+  }
+
+  /** Thêm tab cho thread mà không đổi thread đang mở. */
+  function openInNewTab(id: string) {
+    const t = threads.find((x) => x.id === id);
+    if (!t) return;
+    if (t.archived) patchThread(id, { archived: false });
+    setShellView("chat");
+    setOpenTabIds((ids) => {
+      if (ids.includes(id)) return ids;
+      const at = ids.indexOf(activeThreadId);
+      return at < 0 ? [...ids, id] : [...ids.slice(0, at + 1), id, ...ids.slice(at + 1)];
+    });
   }
 
   async function newChat() {
@@ -848,8 +1075,8 @@ export function App() {
     const t = threads.find((x) => x.id === id);
     if (!t) return;
     setShellView("chat");
-    setShowNetwork(false);
     rememberThread(id);
+    if (t.unread || t.archived) patchThread(id, { unread: false, archived: false });
     if (id !== activeThreadId) {
       snapshotActive();
       setActiveThreadId(id);
@@ -894,6 +1121,22 @@ export function App() {
     setPerm(null);
   }
 
+  /** Settings → Dữ liệu → Xoá toàn bộ: mọi chat (kể cả đã ghim) và log của Engine. Audit giữ nguyên. */
+  async function clearHistory(): Promise<number> {
+    const listed = (await window.silence.rpc("session.list").catch(() => ({ sessions: [] }))) as {
+      sessions: { session_id: string }[];
+    };
+    const ids = new Set([...threads.map((t) => t.sessionId), ...listed.sessions.map((s) => s.session_id)]);
+    ids.delete("");
+    const r = (await window.silence.rpc("session.delete", { session_ids: [...ids] })) as { deleted: string[] };
+    setThreads([]);
+    setOpenTabIds([]);
+    setActiveThreadId("");
+    setLines([]);
+    void newChat();
+    return r.deleted.length;
+  }
+
   function deleteThread(id: string) {
     const rest = threads.filter((t) => t.id !== id);
     const nextOpenIds = openTabIds.filter((x) => x !== id);
@@ -925,7 +1168,7 @@ export function App() {
         setLightbox({ images: [img.data_url], index: 0 });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        setOutputLog((xs) => [...xs.slice(-199), `[error] không mở được ảnh ${rel}: ${message}`]);
+        setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.openImageFailed", { path: rel, message })}`]);
       }
       return;
     }
@@ -934,11 +1177,10 @@ export function App() {
       const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
       setFile(rel);
       setReviewOpen(true);
-      setShowNetwork(false);
       setFileText(r.text);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setOutputLog((xs) => [...xs.slice(-199), `[error] không mở được ${rel}: ${message}`]);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.openFailed", { path: rel, message })}`]);
     }
   }
 
@@ -976,18 +1218,29 @@ export function App() {
     try {
       let sid = sessionId;
       try {
-        await window.silence.rpc("session.set_model", { session_id: sid, model });
+        await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       } catch (e) {
         // Engine đã restart nên session cũ (lưu trong lịch sử) không còn: tạo session mới, giữ lịch sử hiển thị.
         if (!/unknown session/i.test(e instanceof Error ? e.message : String(e)) || !workspace) throw e;
         sid = await createLiveSession(workspace);
         setSessionId(sid);
-        await window.silence.rpc("session.set_model", { session_id: sid, model });
+        await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       }
       // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
       await window.silence.rpc("session.set_mode", { session_id: sid, mode: turnMode });
       // Engine cũ (protocol < 0.1.11) chưa có set_effort: bỏ qua, lượt vẫn chạy với mặc định model.
       await window.silence.rpc("session.set_effort", { session_id: sid, effort }).catch(() => undefined);
+      // Settings → Trò chuyện → Phong cách trả lời: áp từ lượt này (Engine cũ không biết method thì bỏ qua).
+      await window.silence
+        .rpc("session.set_style", { session_id: sid, style: prefsRef.current.responseStyle })
+        .catch(() => undefined);
+      // Engine restart (watch mode) loses Auto settings: re-send the active source's with the turn.
+      await pushAuto(source, autoFor(autoCfgs, source))?.catch(() => undefined);
+      // A new live session for this thread (Engine restart, reopened app) starts at $0: carry the
+      // thread's spend so the Auto cap still holds. The Engine keeps the larger of the two.
+      if (spend.usd > 0) {
+        await window.silence.rpc("session.carry_spend", { session_id: sid, usd: spend.usd }).catch(() => undefined);
+      }
       // Engine restart (watch mode) loses the Auto preference: re-send it with the turn.
       await window.silence.rpc("providers.set_preferred", { provider: preferredFor(source) }).catch(() => undefined);
       // Session cũ (resume) giữ chế độ quyền lúc tạo: đồng bộ lại theo Settings trước mỗi lượt.
@@ -996,9 +1249,7 @@ export function App() {
         // Engine build cũ (vd. chỉ UI được hot-reload) bỏ qua `images` im lặng: model không thấy ảnh.
         const pong = (await window.silence.rpc("ping", {})) as { protocol?: unknown } | null;
         if (!supportsImages(pong?.protocol)) {
-          throw new Error(
-            `Engine đang chạy (protocol ${String(pong?.protocol ?? "?")}) chưa nhận ảnh. Tắt Studio rồi chạy lại \`npm run studio\` để build lại Engine.`,
-          );
+          throw new Error(t("app.engineNoImages", { protocol: String(pong?.protocol ?? "?") }));
         }
       }
       // Debug: gửi kèm phần cuối tab Output (Engine lọc secret trước khi đưa cho model).
@@ -1033,7 +1284,7 @@ export function App() {
       await window.silence.rpc("session.abort", { session_id: sessionId });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setOutputLog((xs) => [...xs.slice(-199), `[error] không dừng được lượt: ${message}`]);
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.stopFailed", { message })}`]);
     }
   }
 
@@ -1059,7 +1310,7 @@ export function App() {
     } catch {
       setOutputLog((xs) => [
         ...xs.slice(-199),
-        "Không áp dụng được thay đổi. Thử Apply lại hoặc Reject rồi để agent đề xuất lại.",
+        t("app.applyFailed"),
       ]);
     }
   }
@@ -1074,7 +1325,7 @@ export function App() {
         setDiff(null);
         if (file === diff.path) setFileText(diff.before);
       } catch {
-        setOutputLog((xs) => [...xs.slice(-199), `Không hoàn tác được ${diff.path}. Thử lại hoặc Restore checkpoint.`]);
+        setOutputLog((xs) => [...xs.slice(-199), t("app.undoFailed", { path: diff.path })]);
       }
       return;
     }
@@ -1087,7 +1338,7 @@ export function App() {
     } catch {
       setOutputLog((xs) => [
         ...xs.slice(-199),
-        "Không hủy được thay đổi. Thử Reject lại.",
+        t("app.rejectFailed"),
       ]);
     }
   }
@@ -1099,9 +1350,7 @@ export function App() {
     );
     const target = checkpoints.find((c) => c.id === id);
     if (!target) return;
-    const ok = window.confirm(
-      "Khôi phục checkpoint này? Hội thoại sau điểm này sẽ bị cắt; file đã đổi ở các lượt sau sẽ được ghi lại nội dung trước đó.",
-    );
+    const ok = window.confirm(t("app.restoreConfirm"));
     if (!ok) return;
 
     const toWrite = filesToRestore(checkpoints, id);
@@ -1115,7 +1364,7 @@ export function App() {
         });
         if (file === f.path) setFileText(f.before);
       } catch {
-        setOutputLog((xs) => [...xs.slice(-199), `Restore failed: ${f.path}`]);
+        setOutputLog((xs) => [...xs.slice(-199), t("app.restoreFailed", { path: f.path })]);
       }
     }
 
@@ -1145,10 +1394,10 @@ export function App() {
     if (chip === "ReviewChanges") {
       // Nút Review ở hàng Files: chuyển sang Review và điền sẵn yêu cầu nếu ô nhập đang trống.
       setMode("review");
-      setPrompt((p) => (p.trim() ? p : "Review các thay đổi chưa commit"));
+      setPrompt((p) => (p.trim() ? p : t("app.reviewPrompt")));
       focusComposer();
     } else if (byChip[chip]) setMode(byChip[chip]);
-    else if (chip === "More") setAppearOpen(true);
+    else if (chip === "More") openSettings();
   }
 
   async function answerPerm(allow: boolean, scope: PermScope) {
@@ -1185,7 +1434,7 @@ export function App() {
     const step = planningStep();
     setLines((xs) => [
       ...xs,
-      { kind: "user", text: "Duyệt plan — implement." },
+      { kind: "user", text: t("app.approvePlanMsg") },
       { kind: "narrate", verb: step.verb, detail: step.detail },
     ]);
     setBusy(true);
@@ -1205,15 +1454,15 @@ export function App() {
   function revisePlan() {
     // Giữ mode Plan; góp ý gõ vào ô nhập sẽ được model dùng để sửa và nộp lại plan.
     setMode("plan");
-    setPrompt((p) => (p.trim() ? p : "Sửa plan: "));
+    setPrompt((p) => (p.trim() ? p : t("app.revisePlanPrompt")));
     focusComposer();
   }
 
   async function attachEdited(png: Blob, text: string): Promise<string | null> {
     // "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn yêu cầu; user tự gửi.
     const file = new File([png], "anh-danh-dau.png", { type: "image/png" });
-    const r = await imagesFromFiles([file], images.length);
-    if (!r.images.length) return r.error ?? "Không đính được ảnh.";
+    const r = await imagesFromFiles([file], images.length, t);
+    if (!r.images.length) return r.error ?? t("app.attachFailed");
     setImages((xs) => [...xs, ...r.images]);
     // Ô nhập đang có chữ thì giữ lại, đặt sau yêu cầu sửa.
     setPrompt((p) => (p.trim() ? `${text.endsWith("\n") ? text : `${text}\n`}${p}` : text));
@@ -1283,8 +1532,8 @@ export function App() {
       onSource={chooseSource}
       sourceAccounts={cliEmail ? { "claude_cli": cliEmail } : undefined}
       onSetupSources={() => {
-        setShowNetwork(true);
-        setShellView("chat");
+        setFocusSources(Date.now());
+        openSettings("models");
       }}
       busy={busy}
       onStop={() => void stop()}
@@ -1293,22 +1542,62 @@ export function App() {
       context={contextUsage}
       onOpenFile={(p) => void openFile(p)}
       onAddModels={() => {
-        setShowNetwork(true);
-        setShellView("chat");
+        setFocusAdd(Date.now());
+        openSettings("models");
       }}
       lockedIds={locked.map((m) => m.id)}
       onEnableModel={(id) => {
         setFocusModel({ id, n: Date.now() });
-        setShowNetwork(true);
-        setShellView("chat");
+        openSettings("models");
+      }}
+      autoConfig={autoFor(autoCfgs, source)}
+      onAutoConfig={changeAuto}
+      autoModel={model === "auto" ? autoModel : undefined}
+      spend={spend}
+      onAutoMore={() => {
+        setFocusAuto(Date.now());
+        openSettings("models");
       }}
     />
   );
+
+  const capUsd = autoFor(autoCfgs, source).budget_usd;
+  const budgetBanner =
+    budgetHit && model === "auto" ? (
+      <div className="budget-banner" role="alert">
+        <span>
+          {t("budget.hit", { cap: capUsd ? ` ${fmtUsd(capUsd)}` : "", used: fmtUsd(spend.usd) })}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            const cfg = autoFor(autoCfgs, source);
+            const base = Math.max(cfg.budget_usd ?? 0, spend.usd);
+            changeAuto({ ...cfg, budget_usd: Math.ceil(base * 1.5 * 100) / 100 || 1 });
+            setBudgetHit(false);
+          }}
+        >
+          {t("budget.raise")}
+        </button>
+        <button type="button" onClick={() => void continuePastCap()}>
+          {t("budget.once")}
+        </button>
+        <button
+          type="button"
+          className="budget-banner-close"
+          title={t("budget.close")}
+          onClick={() => setBudgetHit(false)}
+        >
+          ×
+        </button>
+      </div>
+    ) : null;
 
   const chatMain = (
     <div className={showReview ? "chat-split" : "chat-col-fill"}>
       <div className="chat-col">
         <ChatPane
+          transcript={prefs.transcript}
           lines={lines}
           plan={plan}
           perm={perm}
@@ -1346,6 +1635,7 @@ export function App() {
           onRetry={() => void send(lastPromptRef.current)}
           onAttachEdited={attachEdited}
         />
+        {activeThreadId ? budgetBanner : null}
         {activeThreadId ? composerEl : null}
       </div>
       {showReview ? (
@@ -1365,6 +1655,7 @@ export function App() {
           }}
           onReviewTab={setReviewSub}
           showChangesSignal={showChangesSignal}
+          code={{ font: prefs.codeFont, size: prefs.codeFontSize, minimap: prefs.minimap }}
         />
       ) : null}
     </div>
@@ -1383,6 +1674,7 @@ export function App() {
   }
 
   return (
+    <LangContext.Provider value={appearance.lang}>
     <div
       className={`app view-${shellView}${!chatHidden && historyHidden ? " no-history" : ""}`}
       data-wp={appearance.wallpaper}
@@ -1414,7 +1706,7 @@ export function App() {
         }}
         onToggleChatWorkspace={() => setShellView((v) => (v === "chat" ? "hidden" : "chat"))}
         onToggleHistory={toggleHistory}
-        onSettings={() => setAppearOpen(true)}
+        onSettings={() => openSettings()}
         onOpenWorkspace={() => void openWorkspace()}
         onQuit={() => void window.silence?.window.close()}
       />
@@ -1433,20 +1725,7 @@ export function App() {
             />
           ) : null}
           <div className="work-body">
-            {chatHidden
-              ? null
-              : showNetwork
-                ? (
-                  <NetworkPanel
-                    catalog={models}
-                    prefs={modelPrefs}
-                    onPrefs={setModelPrefs}
-                    activeModel={model}
-                    onSourcesChanged={loadModels}
-                    focus={focusModel}
-                  />
-                )
-                : chatMain}
+            {chatHidden ? null : chatMain}
           </div>
           <BottomPanel
             open={panelOpen}
@@ -1468,27 +1747,55 @@ export function App() {
             onSelect={selectThread}
             onDelete={deleteThread}
             onRename={renameThread}
-            onCustomize={() => setAppearOpen(true)}
+            onPin={(id, pinned) => patchThread(id, { pinned })}
+            onMarkUnread={(id, unread) => patchThread(id, { unread })}
+            onArchive={archiveThread}
+            onOpenInTab={openInNewTab}
+            onFork={(id) => void forkThread(id)}
+            forkDisabled={busy}
+            onCustomize={() => openSettings()}
             onToggle={toggleHistory}
           />
         ) : null}
       </div>
-      <AppearancePanel
-        open={appearOpen}
-        value={appearance}
-        onChange={setAppearance}
-        onClose={() => setAppearOpen(false)}
-        workspace={workspace}
-        permMode={permMode}
-        onPermMode={(m) => {
-          setPermMode(m);
-          savePermMode(m);
-          // Áp dụng ngay cho phiên đang mở (các phiên khác đồng bộ ở lượt gửi kế tiếp).
-          if (sessionId) {
-            void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: m }).catch(() => undefined);
-          }
-        }}
-      />
+      {settings ? (
+        <SettingsDialog
+          open={settings}
+          onClose={() => setSettings(null)}
+          appearance={appearance}
+          onAppearance={setAppearance}
+          prefs={prefs}
+          onPrefs={setPrefs}
+          chatCount={threads.length}
+          onClearHistory={clearHistory}
+          workspace={workspace}
+          permMode={permMode}
+          onPermMode={(m) => {
+            setPermMode(m);
+            savePermMode(m);
+            // Áp dụng ngay cho phiên đang mở (các phiên khác đồng bộ ở lượt gửi kế tiếp).
+            if (sessionId) {
+              void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: m }).catch(() => undefined);
+            }
+          }}
+          models={{
+            catalog: models,
+            prefs: modelPrefs,
+            onPrefs: setModelPrefs,
+            activeModel: model,
+            onSourcesChanged: loadModels,
+            focus: focusModel,
+            autoConfigs: autoCfgs,
+            onAutoConfig: changeAutoFor,
+            activeSource: source,
+            spentUsd: spend.usd,
+            focusAuto,
+            focusAdd,
+            focusSources,
+          }}
+        />
+      ) : null}
     </div>
+    </LangContext.Provider>
   );
 }

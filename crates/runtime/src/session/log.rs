@@ -1,9 +1,9 @@
 use crate::redact::redact;
 use anyhow::{anyhow, Result};
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 use silence_protocol::{LogBody, LogRecord, SessionEvent, SessionSummary, EVENT_LOG_VERSION};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -123,6 +123,36 @@ impl SessionStore {
         }
         out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(out)
+    }
+
+    /// Delete one session's log folder. The audit log is not touched. `false` = nothing there.
+    pub async fn delete(&self, session_id: &str) -> Result<bool> {
+        check_id(session_id)?;
+        let dir = self.dir.join(session_id);
+        self.seq.lock().await.remove(session_id);
+        if !dir.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_dir_all(&dir)?;
+        Ok(true)
+    }
+
+    /// Delete sessions whose last event is older than `cutoff`, except ids in `keep`.
+    /// A log without a readable timestamp is kept. Returns the deleted ids.
+    pub async fn prune(&self, cutoff: DateTime<Utc>, keep: &HashSet<String>) -> Result<Vec<String>> {
+        let mut deleted = Vec::new();
+        for s in self.list()? {
+            if keep.contains(&s.session_id) {
+                continue;
+            }
+            let Ok(updated) = DateTime::parse_from_rfc3339(&s.updated_at) else {
+                continue;
+            };
+            if updated.with_timezone(&Utc) < cutoff && self.delete(&s.session_id).await? {
+                deleted.push(s.session_id);
+            }
+        }
+        Ok(deleted)
     }
 }
 
@@ -355,4 +385,30 @@ mod tests {
         }));
         assert!(persisted_event(&SessionEvent::Done { stop: "stop".into() }));
     }
+
+    #[tokio::test]
+    async fn delete_and_prune_keep_what_they_should() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(dir.path().to_path_buf());
+        let (a, b, c) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        for id in [&a, &b, &c] {
+            store.append(id, start()).await.unwrap();
+        }
+        // Everything is "now": a cutoff in the past deletes nothing.
+        let past = Utc::now() - chrono::Duration::days(1);
+        assert!(store.prune(past, &HashSet::new()).await.unwrap().is_empty());
+        // A cutoff in the future deletes all but the kept id.
+        let keep: HashSet<String> = [b.clone()].into();
+        let future = Utc::now() + chrono::Duration::days(1);
+        let mut gone = store.prune(future, &keep).await.unwrap();
+        gone.sort();
+        let mut want = vec![a.clone(), c.clone()];
+        want.sort();
+        assert_eq!(gone, want);
+        assert_eq!(store.list().unwrap().len(), 1);
+        assert!(store.delete(&b).await.unwrap());
+        assert!(!store.delete(&b).await.unwrap());
+        assert!(store.delete("../etc").await.is_err());
+    }
+
 }

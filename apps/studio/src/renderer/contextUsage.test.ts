@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { contextLevel, contextPct, contextTip, fmtTok, usageRows } from "./contextUsage";
 import type { ContextUsage } from "./types";
+import { translator } from "./i18n";
+
+const vi = translator("vi");
+const en = translator("en");
 
 const usage = (used: number, window: number, measured = true): ContextUsage => ({
   used,
@@ -26,13 +30,15 @@ describe("context usage", () => {
   it("formats tokens incl. 1M windows and marks estimates", () => {
     expect(fmtTok(1_000_000)).toBe("1M");
     expect(fmtTok(6_200)).toBe("6.2K");
-    expect(contextTip(usage(6_200, 1_000_000, false))).toBe("Context · ~6.2K / 1M (1%)");
-    expect(contextTip(usage(6_200, 1_000_000))).toBe("Context · 6.2K / 1M (1%)");
+    expect(contextTip(usage(6_200, 1_000_000, false), en)).toBe("Context · ~6.2K / 1M (1%)");
+    expect(contextTip(usage(6_200, 1_000_000), en)).toBe("Context · 6.2K / 1M (1%)");
+    expect(contextTip(null, vi)).toBe("Xem mức dùng context");
   });
 
   it("rows come from engine parts", () => {
-    const rows = usageRows(usage(7_000, 1_000_000));
+    const rows = usageRows(usage(7_000, 1_000_000), en);
     expect(rows.find((r) => r.label === "Tool definitions")?.n).toBe(4000);
     expect(rows.find((r) => r.label === "Conversation")?.n).toBe(2000);
+    expect(usageRows(null, vi).find((r) => r.id === "conversation")?.label).toBe("Hội thoại");
   });
 });

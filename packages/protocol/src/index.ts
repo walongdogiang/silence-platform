@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.11";
+export const PROTOCOL_VERSION = "0.1.13";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -47,6 +47,50 @@ export type ContextUsage = {
     conversation: number;
   };
 };
+/** Answer style appended to the system prompt; `default` (or absent) adds nothing. */
+export type ResponseStyle = "default" | "concise" | "explanatory";
+/** Params of `session.create`. */
+export type SessionCreateParams = {
+  workspace: string;
+  model?: string;
+  mode?: SessionMode;
+  permission?: PermissionMode;
+  /** `auto` (default) or one of low | medium | high | xhigh | max. */
+  effort?: string;
+  style?: ResponseStyle;
+};
+/** Params of `session.prune`: delete chats whose last event is older than `older_than_days`. `keep` = ids never deleted (pinned). */
+export type SessionPruneParams = { older_than_days: number; keep?: string[] };
+/** Params of `session.delete`. Audit log is kept. */
+export type SessionDeleteParams = { session_ids: string[] };
+export type SessionPruneResult = { deleted: string[] };
+
+/** One MCP server in `.silence/mcp.json`. `env` values may use `${VAR}` (read from the Engine's environment). */
+export type McpServerConfig = {
+  name: string;
+  command: string;
+  args?: string[];
+  env?: [string, string][];
+  enabled?: boolean;
+};
+/**
+ * A server as `mcp.list` shows it. Env values never leave the Engine (`env_keys` only).
+ * `needs_approval`: from the workspace file, not yet allowed on this machine.
+ */
+export type McpServerView = {
+  name: string;
+  command: string;
+  args: string[];
+  env_keys: string[];
+  enabled: boolean;
+  approved: boolean;
+  status: "running" | "error" | "off" | "needs_approval" | "stopped";
+  error: string | null;
+  tools: { name: string; description: string; read_only: boolean }[];
+};
+/** `mcp.list {workspace}` → `{servers}`; `mcp.add {workspace, server}` / `mcp.set_enabled {workspace, name, enabled}` → `{server}`; `mcp.remove {workspace, name}`. */
+export type McpListResult = { servers: McpServerView[] };
+
 /** `balanced` is the default; `yolo` is refused over RPC (evals only). docs/security/permissions.md */
 export type PermissionMode = "ask" | "allowlist" | "yolo" | "balanced" | "autonomous";
 
@@ -93,8 +137,10 @@ export type SessionEvent =
   /** `applied`: already written (Balanced/Autonomous) — UI offers Undo instead of Apply/Reject. */
   | { type: "diff"; path: string; before: string; after: string; applied?: boolean }
   | { type: "trace"; event: string; detail: unknown }
-  | { type: "route"; task_class: string; model_id: string; reason: string }
-  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number }
+  /** `slot` is set on Auto (`frontier|strong|small`); `escalated` when Auto moved up on trouble. */
+  | { type: "route"; task_class: string; model_id: string; reason: string; slot?: AutoSlot | ""; escalated?: boolean }
+  /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
+  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: AutoSlot | ""; baseline_usd?: number }
   | { type: "terminal"; data: string }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };
@@ -164,6 +210,8 @@ export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 export type Effort = "auto" | EffortLevel;
 /** `session.create` also takes `effort?: Effort`. */
 export type SetEffortParams = { session_id: string; effort: Effort };
+/** `session.set_style`: applies from the next turn. */
+export type SetStyleParams = { session_id: string; style: ResponseStyle };
 
 export type ModelInfo = {
   id: string;
@@ -177,7 +225,7 @@ export type ModelInfo = {
   efforts?: EffortLevel[];
   /** Level marked "Recommended"; "" when `efforts` is empty. */
   default_effort?: EffortLevel | "";
-  /** Provider id the picker groups by (`company-gateway`, `anthropic`, `claude-cli`). */
+  /** Provider id the picker groups by (`company-gateway`, `claude-api`, `claude-cli`). */
   provider?: string;
   provider_label?: string;
   provider_kind?: ProviderKind;
@@ -188,7 +236,7 @@ export type ModelInfo = {
   opt_in?: boolean;
 };
 
-export type ProviderKind = "openai_compat" | "anthropic" | "claude_cli";
+export type ProviderKind = "openai_compat" | "claude_api" | "claude_cli";
 /** Row of `providers.status` (`{ providers: ProviderStatus[], preferred: string }`). */
 export type ProviderStatus = {
   id: string;
@@ -231,5 +279,27 @@ export type CliAccount = {
 export type CliUsage = { turns_today: number; usd_today: number; turns_total: number; usd_total: number };
 /** `providers.set_credential` — sent by the main process only, never by the renderer. */
 export type SetCredentialParams = { provider: string; key: string };
+/** Auto slot, weakest first. Auto picks it from the mode and the purpose of the call. */
+export type AutoSlot = "small" | "strong" | "frontier";
+export type AutoPreset = "balanced" | "economy" | "max" | "custom";
+/** Auto settings of one source. `slots` is read only for `custom`; empty id = balanced default. */
+export type AutoConfig = {
+  preset: AutoPreset;
+  slots?: { frontier?: string; strong?: string; small?: string };
+  /** Model ids Auto may use; empty = every non-opt-in model of the source. */
+  pool?: string[];
+  /** Spend cap per session (USD). */
+  budget_usd?: number;
+  /** Main-turn slot per mode; missing = default (Plan/Review → frontier, the rest → strong). */
+  mode_slots?: Partial<Record<SessionMode, AutoSlot>>;
+};
+/** `auto.set_config`. */
+export type SetAutoConfigParams = { provider: string; config: AutoConfig };
+/** `session.carry_spend {session_id, usd}` raises the session's spend to the chat's (never lowers it).
+ * `session.budget_continue {session_id}` lets the next turn run past the Auto spend cap once.
+ * `session.spend {session_id}` returns this. A turn stopped by the cap ends with `done{stop:"budget"}`. */
+export type SessionSpendResult = { spent_usd: number; budget_usd: number | null };
+/** `session.set_model` — `source`: provider Auto routes within (needed for the Claude CLI). */
+export type SetModelParams = { session_id: string; model: string; source?: string };
 /** `providers.set_preferred` — `""` = catalog order. CLI providers are refused. */
 export type SetPreferredParams = { provider: string };

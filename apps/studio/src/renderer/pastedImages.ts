@@ -1,3 +1,4 @@
+import type { T } from "./i18n";
 import type { ChatThread } from "./models";
 
 /** Giới hạn khớp Engine (`crates/runtime/src/images.rs`). */
@@ -79,23 +80,23 @@ export async function prepareImage(file: File): Promise<Blob> {
 
 /**
  * Ảnh (dán / kéo-thả / chọn file) → data URL: thu nhỏ ảnh lớn, bỏ ảnh sai loại / vẫn quá lớn /
- * vượt số lượng. `have` = số ảnh đang đính kèm. Trả `error` (tiếng Việt) nếu có ảnh bị bỏ.
+ * vượt số lượng. `have` = số ảnh đang đính kèm. Trả `error` (ngôn ngữ UI, qua `t`) nếu có ảnh bị bỏ.
  */
-export async function imagesFromFiles(files: File[], have: number): Promise<PasteResult> {
+export async function imagesFromFiles(files: File[], have: number, t: T): Promise<PasteResult> {
   const images: string[] = [];
   let error: string | undefined;
   for (const f of files) {
     if (!IMAGE_TYPES.includes(f.type)) {
-      error = `Không hỗ trợ ảnh ${f.type || "này"} (chỉ PNG, JPEG, GIF, WebP).`;
+      error = f.type ? t("img.badType", { type: f.type }) : t("img.badTypeUnknown");
       continue;
     }
     if (have + images.length >= MAX_IMAGES) {
-      error = `Tối đa ${MAX_IMAGES} ảnh mỗi tin.`;
+      error = t("img.tooMany", { n: MAX_IMAGES });
       break;
     }
     const blob = await prepareImage(f);
     if (blob.size > MAX_IMAGE_BYTES) {
-      error = `Ảnh lớn hơn ${MAX_IMAGE_BYTES / 1024 / 1024} MB${f.type === "image/gif" ? " (GIF không tự thu nhỏ)" : ""}.`;
+      error = t(f.type === "image/gif" ? "img.tooBigGif" : "img.tooBig", { mb: MAX_IMAGE_BYTES / 1024 / 1024 });
       continue;
     }
     images.push(await readAsDataUrl(blob.type ? blob : new Blob([blob], { type: f.type })));

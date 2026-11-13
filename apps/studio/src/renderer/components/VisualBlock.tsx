@@ -5,6 +5,7 @@ import { CodeBlock } from "./CodeView";
 import { svgViewBox } from "../pastedImages";
 import type { EditTarget } from "../imageActions";
 import { ImageFrame } from "./ImageFrame";
+import { useT } from "../i18n";
 
 /** Chiều cao tối đa của hình trong chat (px); xem đầy đủ thì phóng to. Khớp `.visual-*` trong CSS. */
 export const VISUAL_MAX_H = 400;
@@ -82,6 +83,7 @@ export function VisualBlock(props: {
   onOpenImage?: (images: string[], index: number) => void;
   onEdit?: (target: EditTarget) => void;
 }) {
+  const t = useT();
   const text = props.text.replace(/\n$/, "");
   const complete = isCompleteSvg(text);
   const [view, setView] = useState<"image" | "code">("image");
@@ -97,7 +99,7 @@ export function VisualBlock(props: {
         <div className="visual-card visual-pending" role="status" aria-live="polite">
           <div className="code-card-head">
             <ImageIcon size={13} className="visual-icon" />
-            <span className="visual-label">Đang vẽ…</span>
+            <span className="visual-label">{t("visual.drawing")}</span>
             <span className="visual-size">{formatSize(text.length)}</span>
           </div>
           <div className="visual-body">
@@ -109,17 +111,17 @@ export function VisualBlock(props: {
     return <CodeBlock lang="svg" text={text} />;
   }
   const title = svgTitle(text);
-  const label = title ?? "Hình minh hoạ";
+  const label = title ?? t("visual.untitled");
   if (view === "code" || broken) {
     return (
       <div className="visual-card">
         <div className="visual-switch">
           {broken ? (
-            <span className="visual-note">SVG không vẽ được, hiện mã.</span>
+            <span className="visual-note">{t("visual.broken")}</span>
           ) : (
-            <button type="button" className="code-copy" onClick={() => setView("image")} title="Xem hình">
+            <button type="button" className="code-copy" onClick={() => setView("image")} title={t("visual.showImageTip")}>
               <ImageIcon size={13} />
-              <span>Hình</span>
+              <span>{t("visual.image")}</span>
             </button>
           )}
         </div>
@@ -141,17 +143,17 @@ export function VisualBlock(props: {
         <span className="visual-label" title={label}>
           {label}
         </span>
-        <button type="button" className="code-copy" onClick={() => setView("code")} title="Xem mã SVG">
+        <button type="button" className="code-copy" onClick={() => setView("code")} title={t("visual.showCodeTip")}>
           <Code2 size={13} />
-          <span>Mã</span>
+          <span>{t("diff.code")}</span>
         </button>
         {props.onOpenImage ? (
           <button
             type="button"
             className="code-copy"
             onClick={() => props.onOpenImage?.([url], 0)}
-            title="Phóng to, copy, lưu PNG/SVG"
-            aria-label="Phóng to"
+            title={t("visual.zoomTip")}
+            aria-label={t("img.zoom")}
           >
             <Maximize2 size={13} />
           </button>
@@ -162,7 +164,7 @@ export function VisualBlock(props: {
           src={url}
           alt={label}
           name={title ?? undefined}
-          title="Bấm để phóng to"
+          title={t("img.clickToZoom")}
           imgStyle={imgStyle}
           onOpen={() => props.onOpenImage?.([url], 0)}
           onEdit={props.onEdit ? () => props.onEdit?.({ src: url, title: title ?? undefined }) : undefined}

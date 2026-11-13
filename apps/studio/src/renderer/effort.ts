@@ -145,42 +145,51 @@ export function sourceOf(m: ModelInfo, sources: ModelSource[]): string {
   return m.provider || sources[0]?.id || "";
 }
 
-/** The saved source if it still exists, else the first usable one, else the first one. */
-export function resolveSource(saved: string, sources: ModelSource[]): string {
-  if (sources.some((s) => s.id === saved)) return saved;
-  return (sources.find((s) => s.available) ?? sources[0])?.id ?? "";
+/** Source kind the app starts on when the user set no default: the signed-in Claude CLI. */
+export const DEFAULT_SOURCE_KIND = "claude_cli";
+
+/**
+ * The source to use: `current` if the catalog has it, else the user's default (Settings → Model
+ * sources), else the Claude CLI, else the first source. Availability is not checked: an unusable
+ * source stays picked (its error shows) until the user changes it.
+ */
+export function resolveSource(current: string, sources: ModelSource[], fallback = ""): string {
+  if (sources.some((s) => s.id === current)) return current;
+  if (sources.some((s) => s.id === fallback)) return fallback;
+  return (sources.find((s) => s.kind === DEFAULT_SOURCE_KIND) ?? sources[0])?.id ?? "";
 }
 
 /**
- * The model to use after switching to `source`: keep the current one if it belongs there;
- * otherwise Auto, except on the Claude CLI (Auto never routes there), where the mid model
- * (or the first one) is picked.
+ * The model to use after switching to `source`: keep the current one if it belongs there,
+ * otherwise Auto (available on every source, the Claude CLI included).
  */
 export function modelForSource(current: string, source: string, models: ModelInfo[]): string {
+  if (current === "auto") return "auto";
   const sources = modelSources(models);
   const inSource = models.filter((m) => sourceOf(m, sources) === source);
-  if (inSource.some((m) => m.id === current)) return current;
-  const kind = sources.find((s) => s.id === source)?.kind;
-  if (kind !== "claude_cli") return "auto";
-  return (inSource.find((m) => m.tier === "mid") ?? inSource[0])?.id ?? "auto";
+  return inSource.some((m) => m.id === current) ? current : "auto";
 }
 
-const PREFERRED_KEY = "silence.models.preferredProvider";
+const DEFAULT_SOURCE_KEY = "silence.models.defaultSource";
 
-/** The source the picker shows (also the provider Auto prefers). Not a secret. */
-export function loadPreferredProvider(): string {
+/**
+ * The source Studio starts on, set in Settings → Model sources ("" = the Claude CLI). The
+ * composer's Source row switches for this run only. Not a secret.
+ */
+export function loadDefaultSource(): string {
   try {
-    return localStorage.getItem(PREFERRED_KEY) ?? "";
+    return localStorage.getItem(DEFAULT_SOURCE_KEY) ?? "";
   } catch {
     return "";
   }
 }
 
-export function savePreferredProvider(provider: string) {
+export function saveDefaultSource(provider: string) {
   try {
-    localStorage.setItem(PREFERRED_KEY, provider);
+    if (provider) localStorage.setItem(DEFAULT_SOURCE_KEY, provider);
+    else localStorage.removeItem(DEFAULT_SOURCE_KEY);
   } catch {
-    /* ignore */
+    /* storage blocked: the default resets to the Claude CLI */
   }
 }
 

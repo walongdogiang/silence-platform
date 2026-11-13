@@ -57,7 +57,7 @@ describe("effort", () => {
     });
     const cat = [
       src("or-sonnet", "or", "openai_compat", "mid"),
-      src("api-sonnet", "api", "anthropic", "mid", false),
+      src("api-sonnet", "api", "claude_api", "mid", false),
       src("cli-haiku", "cli", "claude_cli", "fast"),
       src("cli-sonnet", "cli", "claude_cli", "mid"),
     ];
@@ -72,16 +72,26 @@ describe("effort", () => {
       expect(s[1].reason).toBe("No key");
     });
 
-    it("falls back to a usable source when the saved one is gone", () => {
+    it("keeps the current source, else the user's default, else the Claude CLI", () => {
       const s = modelSources(cat);
-      expect(resolveSource("cli", s)).toBe("cli");
-      expect(resolveSource("gone", s)).toBe("or");
+      expect(resolveSource("or", s)).toBe("or");
+      expect(resolveSource("", s)).toBe("cli");
+      expect(resolveSource("gone", s)).toBe("cli");
+      expect(resolveSource("", s, "api")).toBe("api");
+      expect(resolveSource("", s, "gone")).toBe("cli");
     });
 
-    it("keeps, resets to Auto, or picks the CLI mid model on switch", () => {
+    it("never switches away from an unusable source", () => {
+      const s = modelSources(cat).map((x) => (x.id === "cli" ? { ...x, available: false } : x));
+      expect(resolveSource("", s)).toBe("cli");
+      expect(resolveSource("api", s)).toBe("api");
+    });
+
+    it("keeps the model or resets to Auto on switch, the CLI included", () => {
       expect(modelForSource("or-sonnet", "or", cat)).toBe("or-sonnet");
       expect(modelForSource("or-sonnet", "api", cat)).toBe("auto");
-      expect(modelForSource("auto", "cli", cat)).toBe("cli-sonnet");
+      expect(modelForSource("auto", "cli", cat)).toBe("auto");
+      expect(modelForSource("or-sonnet", "cli", cat)).toBe("auto");
       expect(modelForSource("cli-haiku", "cli", cat)).toBe("cli-haiku");
     });
   });

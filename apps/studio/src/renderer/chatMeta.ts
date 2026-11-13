@@ -1,5 +1,7 @@
 /** Helpers meta lượt chat kiểu Cursor — narration, thought brief, checkpoint. */
 
+import type { MsgKey, T } from "./i18n";
+
 export type CheckpointFile = { path: string; before: string; after: string };
 
 /** Khoảng dòng 1-based, `end = null` = tới hết file (chỉ có `offset`). */
@@ -249,6 +251,30 @@ export function briefFromNarrations(steps: NarrateStep[]): string {
     if (uniq.length >= 4) break;
   }
   return uniq.join(" · ");
+}
+
+/** Known step verbs (stored in English in chat history), shown in the UI language. */
+const VERBS = new Set([
+  "Reading", "Read", "Searching", "Searched", "Editing", "Edited", "Running", "Ran", "Testing", "Tested",
+  "Exploring", "Explored", "Writing plan", "Wrote plan", "Using tool", "Used tool", "Blocked", "Thinking",
+  "Thought", "Planning next moves",
+]);
+
+/** Step verb in the UI language; unknown verbs pass through. */
+export function verbText(verb: string, t: T): string {
+  return VERBS.has(verb) ? t(`verb.${verb}` as MsgKey) : verb;
+}
+
+/** Step detail in the UI language: only the fixed words this file writes (`file`, `in`…). */
+export function detailText(detail: string, t: T): string {
+  if (detail === "file" || detail === "codebase" || detail === "command") return t(`narr.${detail}`);
+  const m = /^(`.*`) in (.+)$/.exec(detail);
+  return m ? t("narr.in", { q: m[1], file: m[2] }) : detail;
+}
+
+/** `Read App.tsx (1–40)` in the UI language. */
+export function stepText(step: NarrateStep, t: T): string {
+  return step.detail ? `${verbText(step.verb, t)} ${detailText(step.detail, t)}` : verbText(step.verb, t);
 }
 
 export function formatNarrateLine(step: NarrateStep): string {

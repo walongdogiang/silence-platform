@@ -1,18 +1,19 @@
 import { ArrowLeft, ArrowRight, MessageSquare, Minus, PanelBottom, Settings, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import logo from "../assets/logo.png";
+import { useT, type MsgKey } from "../i18n";
 
 type MenuId = "file" | "edit" | "selection" | "view" | "go" | "run" | "terminal" | "help";
 
-const MENU_LABELS: { id: MenuId; label: string }[] = [
-  { id: "file", label: "File" },
-  { id: "edit", label: "Edit" },
-  { id: "selection", label: "Selection" },
-  { id: "view", label: "View" },
-  { id: "go", label: "Go" },
-  { id: "run", label: "Run" },
-  { id: "terminal", label: "Terminal" },
-  { id: "help", label: "Help" },
+const MENU_LABELS: { id: MenuId; label: MsgKey }[] = [
+  { id: "file", label: "menu.file" },
+  { id: "edit", label: "menu.edit" },
+  { id: "selection", label: "menu.selection" },
+  { id: "view", label: "menu.view" },
+  { id: "go", label: "menu.go" },
+  { id: "run", label: "menu.run" },
+  { id: "terminal", label: "menu.terminal" },
+  { id: "help", label: "menu.help" },
 ];
 
 export function TitleBar(props: {
@@ -32,6 +33,7 @@ export function TitleBar(props: {
   onOpenWorkspace: () => void;
   onQuit: () => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState<MenuId | null>(null);
   const chat = !props.chatHidden;
 
@@ -45,24 +47,24 @@ export function TitleBar(props: {
   function items(id: MenuId): { label: string; run?: () => void; off?: boolean }[] {
     if (id === "file") {
       return [
-        { label: "Mở workspace", run: props.onOpenWorkspace },
-        { label: "Thoát", run: props.onQuit },
+        { label: t("common.openWorkspace"), run: props.onOpenWorkspace },
+        { label: t("menu.quit"), run: props.onQuit },
       ];
     }
     if (id === "view") {
       return [
         { label: "Chat Workspace", run: props.onToggleChatWorkspace },
-        { label: props.historyHidden ? "Hiện thanh Agents" : "Ẩn thanh Agents", run: props.onToggleHistory, off: !chat },
-        { label: "Toggle Panel", run: props.onTogglePanel },
+        { label: props.historyHidden ? t("shell.showAgents") : t("shell.hideAgents"), run: props.onToggleHistory, off: !chat },
+        { label: t("shell.togglePanel"), run: props.onTogglePanel },
       ];
     }
     if (id === "terminal") {
       return [
-        { label: "Terminal", run: props.onOpenTerminal },
-        { label: "Toggle Panel", run: props.onTogglePanel },
+        { label: t("menu.terminal"), run: props.onOpenTerminal },
+        { label: t("shell.togglePanel"), run: props.onTogglePanel },
       ];
     }
-    return [{ label: "Chưa gắn", off: true }];
+    return [{ label: t("common.notWiredCap"), off: true }];
   }
 
   return (
@@ -79,7 +81,7 @@ export function TitleBar(props: {
                 className={open === m.id ? "on" : ""}
                 onClick={() => setOpen((v) => (v === m.id ? null : m.id))}
               >
-                {m.label}
+                {t(m.label)}
               </button>
               {open === m.id && (
                 <div className="chrome-drop">
@@ -105,7 +107,7 @@ export function TitleBar(props: {
           <button
             type="button"
             className="chrome-icon"
-            title="Back"
+            title={t("shell.back")}
             disabled={!props.canBack}
             onClick={props.onBack}
           >
@@ -114,7 +116,7 @@ export function TitleBar(props: {
           <button
             type="button"
             className="chrome-icon"
-            title="Forward"
+            title={t("shell.forward")}
             disabled={!props.canForward}
             onClick={props.onForward}
           >
@@ -130,7 +132,7 @@ export function TitleBar(props: {
           type="button"
           className={`chrome-icon ${props.panelOpen ? "on" : ""}`}
           aria-pressed={props.panelOpen}
-          title="Toggle Panel (Ctrl+J)"
+          title={t("shell.togglePanelKey")}
           onClick={props.onTogglePanel}
         >
           <PanelBottom size={15} />
@@ -139,22 +141,22 @@ export function TitleBar(props: {
           type="button"
           className={`chrome-icon ${chat ? "on" : ""}`}
           aria-pressed={chat}
-          title={chat ? "Ẩn Chat Workspace" : "Hiện Chat Workspace"}
+          title={chat ? t("shell.hideChat") : t("shell.showChat")}
           onClick={props.onToggleChatWorkspace}
         >
           <MessageSquare size={15} />
         </button>
-        <button type="button" className="chrome-icon" title="Settings" onClick={props.onSettings}>
+        <button type="button" className="chrome-icon" title={t("shell.settings")} onClick={props.onSettings}>
           <Settings size={15} />
         </button>
         <div className="win-btns">
-          <button type="button" onClick={() => void window.silence?.window.minimize()} aria-label="Thu nhỏ">
+          <button type="button" onClick={() => void window.silence?.window.minimize()} aria-label={t("shell.minimize")}>
             <Minus size={16} strokeWidth={2.4} aria-hidden />
           </button>
-          <button type="button" onClick={() => void window.silence?.window.maximize()} aria-label="Phóng to">
+          <button type="button" onClick={() => void window.silence?.window.maximize()} aria-label={t("shell.maximize")}>
             <Square size={11} strokeWidth={1.75} aria-hidden />
           </button>
-          <button type="button" className="x" onClick={props.onQuit} aria-label="Đóng">
+          <button type="button" className="x" onClick={props.onQuit} aria-label={t("common.close")}>
             <X size={12} strokeWidth={1.75} aria-hidden />
           </button>
         </div>

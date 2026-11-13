@@ -83,8 +83,8 @@ Quy tắc:
 
 - Elapsed tính từ lúc gửi (`turnStartedAtRef`). Đồng hồ tick 1s **chỉ khi lượt live**, dùng `font-variant-numeric: tabular-nums` để chữ không nhảy ngang.
 - Token = **output** của lượt, format bằng `fmtTok`. Chưa có `cost` thì không hiện phần token.
-- Tooltip: `Lượt này: 12K input · 800 output · $0.0042`. Input cộng qua nhiều call nên lớn hơn kích thước context; đó là số đã tính phí, không phải context.
-- Nhãn pulse là tiếng Anh, cùng giọng với "Worked for" và "Thought". Tooltip và thông báo lỗi là tiếng Việt.
+- Tooltip: `This turn: 12K input · 800 output · $0.0042` (VI: `Lượt này: …`). Input cộng qua nhiều call nên lớn hơn kích thước context; đó là số đã tính phí, không phải context.
+- Mọi nhãn (pulse, tooltip, thông báo lỗi) theo ngôn ngữ UI ([i18n.md](i18n.md)); ví dụ trong file này ghi bản tiếng Anh. Động từ bước lưu trong lịch sử bằng tiếng Anh (`Read`, `Searched`…) và chỉ dịch lúc hiển thị (`stepText` trong `chatMeta.ts`).
 - Lịch sử (`ChatHistoryPanel`): chấm của thread đang mở nhấp nháy khi chạy, đổi sang màu accent khi chờ duyệt. Tôn trọng `prefers-reduced-motion`. Engine chỉ đẩy event của session đang mở, nên chấm chỉ áp dụng cho thread đó.
 - Không toast, không âm thanh, không đếm ngược giả.
 

@@ -15,7 +15,7 @@ pub enum ErrorCode {
     ProviderUnavailable,
     Network,
     Timeout,
-    /// The model declined (Anthropic `stop_reason: "refusal"`).
+    /// The model declined (Claude API `stop_reason: "refusal"`).
     ProviderRefusal,
     /// `claude` CLI not installed / not on PATH.
     CliNotFound,
@@ -126,7 +126,7 @@ pub fn classify_http(status: u16, body: &str) -> ErrorCode {
                 ErrorCode::Unknown
             }
         }
-        // Anthropic reports an empty balance as 400 "Your credit balance is too low…".
+        // The Claude API reports an empty balance as 400 "Your credit balance is too low…".
         400 if body.to_lowercase().contains("credit balance") => ErrorCode::ProviderCredits,
         401 | 403 => ErrorCode::ProviderAuth,
         408 => ErrorCode::Timeout,
@@ -246,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_error_body() {
+    fn claude_api_error_body() {
         let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#;
         let e = ProviderError::from_http(400, body, "");
         assert_eq!(e.code, ErrorCode::ProviderCredits);

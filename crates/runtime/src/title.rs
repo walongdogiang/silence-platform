@@ -1,4 +1,4 @@
-//! Tiêu đề chat do AI sinh (`chat.title`): một lượt ngắn với model tier `fast`, không tools.
+//! Tiêu đề chat do AI sinh (`chat.title`): một lượt ngắn với slot Small của Auto, không tools.
 
 use crate::agent::AppCtx;
 use crate::audit::now_event;
@@ -33,7 +33,8 @@ pub async fn generate_title(
             redact(&reply)
         ));
     }
-    let model = ctx.catalog.by_tier("fast")?.id.clone();
+    let pick = crate::agent::title_pick(ctx, session_id).await?;
+    let model = pick.model_id.clone();
     let msgs = vec![
         json!({"role": "system", "content": TITLE_SYSTEM}),
         json!({"role": "user", "content": content}),
@@ -44,6 +45,7 @@ pub async fn generate_title(
         .model(&model)
         .map(|m| gateway::chat_cost_usd(m, &result))
         .unwrap_or(0.0);
+    crate::agent::record_aux_cost(ctx, session_id, &pick, &result, usd).await;
     let _ = ctx
         .audit
         .append(now_event(

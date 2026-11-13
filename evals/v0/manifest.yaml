@@ -1,6 +1,6 @@
-# Eval v0 — 27 task trên fixture sample-app (thay bằng repo nội bộ khi có).
+# Eval v0 — 30 task trên fixture sample-app (thay bằng repo nội bộ khi có).
 # kinds: edit | bugfix | explore | plan
-# Runner: silence-engine evals --dir evals/v0
+# Hướng dẫn chạy, ghim model, lịch sử: evals/README.md
 
 workspace: fixtures/sample-app
 setup: []
@@ -266,9 +266,9 @@ tasks:
         - join_workspace
         - Windows
 
-  # Nguồn model: cùng một vòng sửa + test chạy qua Anthropic API trực tiếp (effort high)
+  # Nguồn model: cùng một vòng sửa + test chạy qua Claude API trực tiếp (effort high)
   # và qua Claude CLI (tool qua MCP bridge của Engine). Bỏ qua khi thiếu key / CLI.
-  - id: S01-source-anthropic-api
+  - id: S01-source-claude-api
     kind: bugfix
     model: claude-sonnet@api
     effort: high

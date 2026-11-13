@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { addCost, formatDuration, markStopping, pulseLabel, pulseTip, runPhase, startRun } from "./runStatus";
+import { translator } from "./i18n";
+
+const vi = translator("vi");
+const en = translator("en");
 
 describe("run status pulse", () => {
   it("formats durations like the Worked-for line", () => {
@@ -22,26 +26,28 @@ describe("run status pulse", () => {
 
   it("shows elapsed and output tokens while working", () => {
     const m = addCost(startRun(0), { input_tokens: 10, output_tokens: 5900, usd: 0 });
-    expect(pulseLabel(m, 72_000, false)).toBe("Working · 1m 12s · 5.9K tokens");
-    expect(pulseLabel(startRun(0), 3_000, false)).toBe("Working · 3s");
+    expect(pulseLabel(m, 72_000, false, en)).toBe("Working · 1m 12s · 5.9K tokens");
+    expect(pulseLabel(startRun(0), 3_000, false, en)).toBe("Working · 3s");
+    expect(pulseLabel(m, 72_000, false, vi)).toBe("Đang làm · 1m 12s · 5.9K token");
   });
 
   it("stop beats a pending permission", () => {
     const m = startRun(0);
     expect(runPhase(m, true)).toBe("awaiting_permission");
-    expect(pulseLabel(m, 5_000, true)).toBe("Waiting for approval · 5s");
+    expect(pulseLabel(m, 5_000, true, en)).toBe("Waiting for approval · 5s");
     const s = markStopping(m);
     expect(runPhase(s, true)).toBe("stopping");
-    expect(pulseLabel(s, 5_000, true)).toBe("Stopping… · 5s");
+    expect(pulseLabel(s, 5_000, true, en)).toBe("Stopping… · 5s");
   });
 
   it("falls back when no meter exists", () => {
-    expect(pulseLabel(null, 0, false)).toBe("Working…");
-    expect(pulseTip(null)).toBe("");
+    expect(pulseLabel(null, 0, false, en)).toBe("Working…");
+    expect(pulseTip(null, vi)).toBe("");
   });
 
   it("tooltip lists input, output and cost", () => {
     const m = addCost(startRun(0), { input_tokens: 12_000, output_tokens: 800, usd: 0.0042 });
-    expect(pulseTip(m)).toBe("Lượt này: 12K input · 800 output · $0.0042");
+    expect(pulseTip(m, vi)).toBe("Lượt này: 12K input · 800 output · $0.0042");
+    expect(pulseTip(m, en)).toBe("This turn: 12K input · 800 output · $0.0042");
   });
 });

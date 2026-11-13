@@ -1,3 +1,4 @@
+import type { T } from "./i18n";
 import type { ContextUsage } from "./types";
 
 /** Engine tự tóm tắt lịch sử khi đạt 70% (`compact_if_needed`). */
@@ -23,22 +24,22 @@ export function contextLevel(pct: number): "ok" | "warn" | "full" {
 }
 
 /** `~` khi số là ước lượng (chưa có lượt nào provider báo số thật). */
-export function contextTip(u: ContextUsage | null | undefined): string {
-  if (!u) return "Show context usage";
+export function contextTip(u: ContextUsage | null | undefined, t: T): string {
+  if (!u) return t("ctx.show");
   const approx = u.measured ? "" : "~";
   return `Context · ${approx}${fmtTok(u.used)} / ${fmtTok(u.window)} (${contextPct(u)}%)`;
 }
 
-export type UsageRow = { label: string; color: string; n: number };
+export type UsageRow = { id: string; label: string; color: string; n: number };
 
-export function usageRows(u: ContextUsage | null | undefined): UsageRow[] {
+export function usageRows(u: ContextUsage | null | undefined, t: T): UsageRow[] {
   const p = u?.parts;
   return [
-    { label: "System prompt", color: "#9aa0a6", n: p?.system ?? 0 },
-    { label: "Rules", color: "#4ccb91", n: p?.rules ?? 0 },
-    { label: "Tool definitions", color: "#a78bfa", n: p?.tools ?? 0 },
-    { label: "MCP tools", color: "#c084fc", n: p?.mcp_tools ?? 0 },
-    { label: "Summarized conversation", color: "#e87979", n: p?.summarized ?? 0 },
-    { label: "Conversation", color: "#a67c7c", n: p?.conversation ?? 0 },
+    { id: "system", label: t("ctx.system"), color: "#9aa0a6", n: p?.system ?? 0 },
+    { id: "rules", label: t("ctx.rules"), color: "#4ccb91", n: p?.rules ?? 0 },
+    { id: "tools", label: t("ctx.tools"), color: "#a78bfa", n: p?.tools ?? 0 },
+    { id: "mcp_tools", label: t("ctx.mcpTools"), color: "#c084fc", n: p?.mcp_tools ?? 0 },
+    { id: "summarized", label: t("ctx.summarized"), color: "#e87979", n: p?.summarized ?? 0 },
+    { id: "conversation", label: t("ctx.conversation"), color: "#a67c7c", n: p?.conversation ?? 0 },
   ];
 }

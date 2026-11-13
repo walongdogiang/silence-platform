@@ -17,6 +17,7 @@ import {
   Paperclip,
   Plus,
   Search,
+  Sparkles,
   Square,
   TriangleAlert,
   Users,
@@ -37,9 +38,11 @@ import type { ContextUsage, ModelInfo } from "../types";
 import { contextLevel, contextPct, contextTip, fmtTok, usageRows as contextRows } from "../contextUsage";
 import { IMAGE_TYPES, dragHasImage, imageFilesFrom, imagesFromFiles } from "../pastedImages";
 import { ImageLightbox, type LightboxState } from "./ImageLightbox";
+import { AutoQuickMenu, autoTip } from "./AutoSettings";
+import { AUTO_SLOTS, autoSummaryShort, fmtUsd, type AutoConfig, type SlotSpend } from "../autoConfig";
+import { useT, type T } from "../i18n";
 import { shortEmail } from "../cliInfo";
 import {
-  EFFORT_LABEL,
   effortOptions,
   placeSubmenu,
   recommendedEffort,
@@ -51,12 +54,12 @@ import {
 export type { SessionMode };
 
 const MODES = [
-  { id: "Plan", title: "Plan", mode: "plan", desc: "Chỉ đọc, lập kế hoạch để bạn duyệt rồi mới sửa", Icon: List },
-  { id: "Agent", title: "Agent", mode: "agent", desc: "Đọc, sửa file, chạy lệnh (hỏi quyền, có diff)", Icon: InfinityIcon },
-  { id: "Debug", title: "Debug", mode: "debug", desc: "Tái hiện, tìm nguyên nhân, sửa nhỏ nhất, chạy lại; gửi kèm log Output", Icon: Bug },
-  { id: "MultiTask", title: "MultiTask", mode: "multitask", desc: "Tách việc độc lập, giao cho sub-agent, tổng hợp kết quả", Icon: Users },
-  { id: "Review", title: "Review", mode: "review", desc: "Chỉ đọc, review thay đổi chưa commit, báo lỗi theo mức độ", Icon: GitCompare },
-  { id: "Ask", title: "Ask", mode: "ask", desc: "Chỉ đọc, hỏi đáp về code, không sửa", Icon: MessageCircle },
+  { id: "Plan", title: "Plan", mode: "plan", desc: "mode.planDesc", Icon: List },
+  { id: "Agent", title: "Agent", mode: "agent", desc: "mode.agentDesc", Icon: InfinityIcon },
+  { id: "Debug", title: "Debug", mode: "debug", desc: "mode.debugDesc", Icon: Bug },
+  { id: "MultiTask", title: "MultiTask", mode: "multitask", desc: "mode.multitaskDesc", Icon: Users },
+  { id: "Review", title: "Review", mode: "review", desc: "mode.reviewDesc", Icon: GitCompare },
+  { id: "Ask", title: "Ask", mode: "ask", desc: "mode.askDesc", Icon: MessageCircle },
 ] as const;
 
 /** "Claude Opus 5.5" → "Opus 5.5" for the compact trigger; other names unchanged. */
@@ -66,19 +69,15 @@ export function shortModelName(name: string) {
 
 const modeLabel = (mode: SessionMode) => MODES.find((m) => m.mode === mode)?.id ?? "Agent";
 
-function modelTip(id: string, models: ModelInfo[]) {
+function modelTip(id: string, models: ModelInfo[], autoLine: string, t: T) {
   if (id === "auto") {
-    return {
-      body: "Balanced quality and speed, recommended for most tasks.",
-      kicker: "Model",
-      name: "Auto",
-    };
+    return { body: autoTip(autoLine, t), kicker: "Model", name: "Auto" };
   }
   const m = models.find((x) => x.id === id);
   if (!m) return null;
-  const bits = [`${fmtTok(m.context_window)} context`];
-  if (m.tools) bits.push("tools");
-  if (m.vision) bits.push("vision");
+  const bits = [t("model.tipContext", { n: fmtTok(m.context_window) })];
+  if (m.tools) bits.push(t("model.tipTools"));
+  if (m.vision) bits.push(t("model.tipVision"));
   return { body: bits.join(" · "), kicker: m.provider_label || "Model", name: modelTitle(m) };
 }
 
@@ -145,15 +144,26 @@ export function Composer(props: {
   lockedIds?: string[];
   /** Enable button on a locked row: open Settings → Models at that model. */
   onEnableModel?: (id: string) => void;
+  /** Auto settings of the active source. Không truyền `onAutoConfig` thì ẩn mục Tuỳ chỉnh Auto. */
+  autoConfig?: AutoConfig;
+  onAutoConfig?: (next: AutoConfig) => void;
+  /** Short name of the model Auto used last in this session ("Sonnet"), shown as "Auto · Sonnet". */
+  autoModel?: string;
+  /** Spend of the current session split by Auto slot (shown in the context report). */
+  spend?: SlotSpend;
+  /** "More settings…" in the Auto submenu: open Settings → Models → Auto. */
+  onAutoMore?: () => void;
 }) {
+  const t = useT();
   const [modeOpen, setModeOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [modelQ, setModelQ] = useState("");
   /** Open submenu of the model menu (Source or Effort); one at a time. */
-  const [sub, setSub] = useState<null | "effort" | "source">(null);
+  const [sub, setSub] = useState<null | "effort" | "source" | "auto">(null);
   const [subPos, setSubPos] = useState<ReturnType<typeof placeSubmenu> | null>(null);
   const effortRowRef = useRef<HTMLButtonElement>(null);
   const sourceRowRef = useRef<HTMLButtonElement>(null);
+  const autoRowRef = useRef<HTMLButtonElement>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
 
   // Submenus: `position: fixed` (escapes the chat pane's overflow clip), placed on the side of
@@ -164,7 +174,7 @@ export function Composer(props: {
       return;
     }
     const place = () => {
-      const row = (sub === "effort" ? effortRowRef : sourceRowRef).current;
+      const row = (sub === "effort" ? effortRowRef : sub === "auto" ? autoRowRef : sourceRowRef).current;
       const panel = subMenuRef.current;
       const menu = row?.closest(".model-menu");
       if (!row || !panel || !menu) return;
@@ -211,12 +221,10 @@ export function Composer(props: {
       : props.models;
     const { rows: usable, dupes } = pickerRows(inSource, props.model);
     const rows = usable.filter((m) => hit(`${modelTitle(m)} ${m.id}`));
-    // Auto never routes to the Claude CLI: no Auto row there.
-    const autoOk = activeSource?.kind !== "claude_cli";
-    return { showAuto: autoOk && hit("auto"), rows, dupes };
+    // Auto is always the first row, on every source (the Claude CLI included).
+    return { showAuto: hit("auto"), rows, dupes };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelQ, props.models, props.model, props.source, props.sources]);
-  const hoverTip = hoverModel && !sub ? modelTip(hoverModel, props.models) : null;
   const effort = props.effort ?? "auto";
   const effortLevels = effortOptions(props.model, props.models);
   const effortRec = recommendedEffort(props.model, props.models);
@@ -224,6 +232,12 @@ export function Composer(props: {
   const effortShown: Effort | null = effort === "auto" ? effortRec : effort;
   const showEffort = Boolean(props.onEffort) && effortLevels.length > 0;
   const showSource = Boolean(props.onSource) && sources.length > 1;
+  const showAutoCfg = Boolean(props.onAutoConfig) && Boolean(props.source);
+  const autoCfg = props.autoConfig ?? { preset: "balanced" as const };
+  const unlocked = props.models.filter((m) => !props.lockedIds?.includes(m.id));
+  const autoLine = props.source ? autoSummaryShort(autoCfg, props.source, unlocked) : "";
+  const presetLabel = t(`preset.${autoCfg.preset}`);
+  const hoverTip = hoverModel && !sub ? modelTip(hoverModel, props.models, autoLine, t) : null;
 
   useEffect(() => {
     setPicked(modeLabel(props.mode));
@@ -280,7 +294,7 @@ export function Composer(props: {
   /** Thêm ảnh từ dán / kéo-thả / chọn file: thu nhỏ, kiểm giới hạn, cộng vào danh sách. */
   function addFiles(files: File[]) {
     if (!props.onImages || files.length === 0) return;
-    void imagesFromFiles(files, imagesRef.current.length).then((r) => {
+    void imagesFromFiles(files, imagesRef.current.length, t).then((r) => {
       setPasteError(r.error ?? null);
       if (r.images.length) props.onImages?.([...imagesRef.current, ...r.images]);
     });
@@ -320,7 +334,7 @@ export function Composer(props: {
   const ctxPct = contextPct(ctx);
   const ctxLevel = contextLevel(ctxPct);
   const ctxWindow = ctx?.window ?? 0;
-  const usageRows = contextRows(ctx);
+  const usageRows = contextRows(ctx, t);
 
   function toggleFiles() {
     setFilesOpen((v) => !v);
@@ -346,9 +360,9 @@ export function Composer(props: {
         </button>
       ))}
       {files.length > listed.length ? (
-        <p className="files-empty">+{files.length - listed.length} tệp nữa</p>
+        <p className="files-empty">{t("files.more", { n: files.length - listed.length })}</p>
       ) : null}
-      {listed.length === 0 ? <p className="files-empty">Chưa có tệp trong ngữ cảnh.</p> : null}
+      {listed.length === 0 ? <p className="files-empty">{t("files.none")}</p> : null}
       {props.onImages ? (
         <button
           type="button"
@@ -360,7 +374,7 @@ export function Composer(props: {
           }}
         >
           <ImagePlus size={14} />
-          <span>Thêm ảnh…</span>
+          <span>{t("files.addImage")}</span>
         </button>
       ) : null}
       <button
@@ -372,7 +386,7 @@ export function Composer(props: {
           setFilesOpen(false);
         }}
       >
-        Show context usage
+        {t("ctx.show")}
       </button>
     </div>
   ) : null;
@@ -382,16 +396,18 @@ export function Composer(props: {
       {showUsage ? (
         <div className="ctx-report">
           <div className="ctx-report-head">
-            <b>Context Usage</b>
-            <span>View Report</span>
-            <button type="button" className="ctx-report-close" title="Đóng" onClick={() => setShowUsage(false)}>
+            <b>{t("ctx.title")}</b>
+            <span>{t("ctx.viewReport")}</span>
+            <button type="button" className="ctx-report-close" title={t("common.close")} onClick={() => setShowUsage(false)}>
               <Minus size={14} />
             </button>
           </div>
           <div className="ctx-report-meta">
-            <span>{ctxPct}% Full</span>
+            <span>{t("ctx.full", { pct: ctxPct })}</span>
             <span>
-              {ctx ? `${ctx.measured ? "" : "~"}${fmtTok(ctx.used)} / ${fmtTok(ctxWindow)} Tokens` : "Chưa có session"}
+              {ctx
+                ? t("ctx.tokens", { used: `${ctx.measured ? "" : "~"}${fmtTok(ctx.used)}`, window: fmtTok(ctxWindow) })
+                : t("ctx.noSession")}
             </span>
           </div>
           <i className="ctx-report-bar">
@@ -399,22 +415,42 @@ export function Composer(props: {
               ? usageRows
                   .filter((r) => r.n > 0)
                   .map((r) => (
-                    <b key={r.label} style={{ width: `${(r.n / ctxWindow) * 100}%`, background: r.color }} />
+                    <b key={r.id} style={{ width: `${(r.n / ctxWindow) * 100}%`, background: r.color }} />
                   ))
               : null}
           </i>
           <p className="ctx-report-note">
-            {ctx?.measured ? "Số đo từ lượt gần nhất" : "Ước lượng"} · tự tóm tắt khi đạt 70%
+            {ctx?.measured ? t("ctx.measured") : t("ctx.estimate")}
+            {t("ctx.compactNote")}
           </p>
           <ul className="ctx-report-list">
             {usageRows.filter((r) => r.n > 0).map((r) => (
-              <li key={r.label}>
+              <li key={r.id}>
                 <i style={{ background: r.color }} />
                 <span>{r.label}</span>
                 <em>{fmtTok(r.n)}</em>
               </li>
             ))}
           </ul>
+          {props.spend && props.spend.usd > 0 ? (
+            <div className="ctx-spend">
+              <p className="ctx-report-note">
+                {t("spend.chat", { usd: fmtUsd(props.spend.usd) })}
+                {props.spend.baseline > props.spend.usd * 1.01
+                  ? t("spend.saved", { usd: fmtUsd(props.spend.baseline - props.spend.usd) })
+                  : ""}
+              </p>
+              <ul className="ctx-report-list">
+                {AUTO_SLOTS.filter((sl) => props.spend!.bySlot[sl] > 0).map((sl) => (
+                  <li key={sl}>
+                    <i className={`slot-dot slot-${sl}`} />
+                    <span>{t(`slot.${sl}`)}</span>
+                    <em>{fmtUsd(props.spend!.bySlot[sl])}</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     <form
@@ -434,16 +470,14 @@ export function Composer(props: {
           <div className="mode-dd composer-files-dd" ref={filesRef}>
             <button type="button" className="composer-files" aria-expanded={filesOpen} onClick={toggleFiles}>
               <ChevronRight size={14} className={filesOpen ? "files-chev open" : "files-chev"} />
-              <span>
-                {files.length} File{files.length === 1 ? "" : "s"}
-              </span>
+              <span>{t(files.length === 1 ? "files.count1" : "files.count", { n: files.length })}</span>
             </button>
             {files.length > 0 ? filesMenu : null}
           </div>
           <button
             type="button"
             className="composer-review"
-            title="Review thay đổi chưa commit (chỉ đọc)"
+            title={t("composer.reviewTip")}
             onClick={() => props.onChip("ReviewChanges")}
           >
             Review
@@ -452,11 +486,9 @@ export function Composer(props: {
       ) : null}
       {props.onSendAs && (props.mode === "ask" || props.mode === "review") && !props.busy && !props.disabled && looksLikeEditRequest(props.prompt) ? (
         <div className="composer-hint" role="status">
-          <span>
-            Đang ở {MODE_LABEL[props.mode]} (chỉ đọc) nên sẽ không sửa file.
-          </span>
+          <span>{t("composer.readOnlyHint", { mode: MODE_LABEL[props.mode] })}</span>
           <button type="button" onClick={() => props.onSendAs?.("agent")}>
-            Gửi bằng Agent
+            {t("composer.sendAsAgent")}
           </button>
         </div>
       ) : null}
@@ -467,16 +499,16 @@ export function Composer(props: {
               <button
                 type="button"
                 className="img-zoom"
-                title="Phóng to"
+                title={t("img.zoom")}
                 onClick={() => setLightbox({ images, index: i })}
               >
-                <img src={src} alt={`Ảnh dán ${i + 1}`} />
+                <img src={src} alt={t("composer.pastedAlt", { n: i + 1 })} />
               </button>
               <button
                 type="button"
                 className="composer-image-remove"
-                title="Bỏ ảnh"
-                aria-label={`Bỏ ảnh ${i + 1}`}
+                title={t("composer.removeImage")}
+                aria-label={t("composer.removeImageN", { n: i + 1 })}
                 onClick={() => props.onImages?.(images.filter((_, j) => j !== i))}
               >
                 <X size={11} />
@@ -487,9 +519,9 @@ export function Composer(props: {
       ) : null}
       {noVision && selectedName ? (
         <div className="composer-hint" role="status">
-          <span>{selectedName} không đọc được ảnh.</span>
+          <span>{t("composer.noVision", { model: selectedName })}</span>
           <button type="button" onClick={() => props.onModel("auto")}>
-            Dùng Auto
+            {t("composer.useAuto")}
           </button>
         </div>
       ) : pasteError ? (
@@ -513,7 +545,7 @@ export function Composer(props: {
         value={props.prompt}
         onChange={(e) => props.onPrompt(e.target.value)}
         onPaste={onPaste}
-        placeholder="Plan, Build, / for skills, @ for context"
+        placeholder={t("composer.placeholder")}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -545,7 +577,7 @@ export function Composer(props: {
                   type="button"
                   role="menuitem"
                   className={`mode-item${picked === m.id ? " active" : ""}`}
-                  title={m.desc}
+                  title={t(m.desc)}
                   onClick={() => pick(m.id)}
                 >
                   <m.Icon size={14} />
@@ -569,10 +601,14 @@ export function Composer(props: {
           >
             {/* Short name (the vendor prefix is implied by the source) + the effort in use. */}
             <span className="model-trigger-name">
-              {props.model === "auto" ? "Auto" : shortModelName(selectedName ?? props.model)}
+              {props.model === "auto"
+                ? props.autoModel
+                  ? `Auto · ${props.autoModel}`
+                  : "Auto"
+                : shortModelName(selectedName ?? props.model)}
             </span>
             {showEffort && effortShown ? (
-              <span className="model-trigger-effort">{EFFORT_LABEL[effortShown]}</span>
+              <span className="model-trigger-effort">{t(`effort.${effortShown}`)}</span>
             ) : null}
             <ChevronDown size={12} className={modelOpen ? "mode-chev open" : "mode-chev"} />
           </button>
@@ -597,7 +633,7 @@ export function Composer(props: {
                   ref={modelSearchRef}
                   value={modelQ}
                   onChange={(e) => setModelQ(e.target.value)}
-                  placeholder="Search models"
+                  placeholder={t("model.search")}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") e.preventDefault();
                     e.stopPropagation();
@@ -609,7 +645,7 @@ export function Composer(props: {
                   <button
                     type="button"
                     role="menuitem"
-                    className={`mode-item model-row${props.model === "auto" ? " active" : ""}`}
+                    className={`mode-item model-row model-auto${props.model === "auto" ? " active" : ""}`}
                     onMouseEnter={(e) => {
                       setHoverModel("auto");
                       const menu = (e.currentTarget as HTMLElement).closest(".model-menu");
@@ -622,7 +658,12 @@ export function Composer(props: {
                       setModelOpen(false);
                     }}
                   >
-                    <span>Auto</span>
+                    <span className="model-auto-label">
+                      <span className="model-auto-name">
+                        <Sparkles size={13} className="model-auto-icon" aria-hidden="true" />
+                        Auto
+                      </span>
+                    </span>
                     {props.model === "auto" ? <Check size={14} className="mode-check" /> : <span />}
                   </button>
                 ) : null}
@@ -635,7 +676,7 @@ export function Composer(props: {
                         role="menuitem"
                         aria-disabled="true"
                         className="mode-item model-row model-locked"
-                        title="Uses many more tokens — enable it in Settings → Models"
+                        title={t("model.lockedTip")}
                         onMouseEnter={() => setHoverModel(null)}
                       >
                         <span>{shortModelName(modelName(m))}</span>
@@ -647,7 +688,7 @@ export function Composer(props: {
                             setModelOpen(false);
                           }}
                         >
-                          Enable
+                          {t("model.enable")}
                         </button>
                       </div>
                     );
@@ -683,10 +724,25 @@ export function Composer(props: {
                   );
                 })}
                 {!modelPicker.showAuto && modelPicker.rows.length === 0 ? (
-                  <p className="model-empty">Không có model khớp.</p>
+                  <p className="model-empty">{t("model.none")}</p>
                 ) : null}
               </div>
-              {showSource || showEffort ? <div className="model-sep" /> : null}
+              {showSource || showEffort || showAutoCfg ? <div className="model-sep" /> : null}
+              {showAutoCfg ? (
+                <button
+                  type="button"
+                  className={`mode-item model-row effort-row${sub === "auto" ? " open" : ""}`}
+                  aria-haspopup="menu"
+                  aria-expanded={sub === "auto"}
+                  ref={autoRowRef}
+                  onMouseEnter={() => setHoverModel(null)}
+                  onClick={() => setSub((s) => (s === "auto" ? null : "auto"))}
+                >
+                  <span>{t("model.autoSettings")}</span>
+                  <span className="effort-value">{presetLabel}</span>
+                  {sub === "auto" && subPos?.side === "left" ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+                </button>
+              ) : null}
               {showSource ? (
                 <button
                   type="button"
@@ -697,7 +753,7 @@ export function Composer(props: {
                   onMouseEnter={() => setHoverModel(null)}
                   onClick={() => setSub((s) => (s === "source" ? null : "source"))}
                 >
-                  <span>Source</span>
+                  <span>{t("model.source")}</span>
                   <span className="effort-value">{activeSource?.label ?? "—"}</span>
                   {sub === "source" && subPos?.side === "left" ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
                 </button>
@@ -712,30 +768,46 @@ export function Composer(props: {
                   onMouseEnter={() => setHoverModel(null)}
                   onClick={() => setSub((s) => (s === "effort" ? null : "effort"))}
                 >
-                  <span>Effort</span>
-                  <span className="effort-value">{EFFORT_LABEL[effortShown ?? "auto"]}</span>
+                  <span>{t("model.effort")}</span>
+                  <span className="effort-value">{t(`effort.${effortShown ?? "auto"}`)}</span>
                   {sub === "effort" && subPos?.side === "left" ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
                 </button>
               ) : null}
               {sub ? (
                 <div
                   ref={subMenuRef}
-                  className={`effort-menu${subPos ? ` side-${subPos.side}` : ""}`}
+                  className={`effort-menu${sub === "auto" ? " auto-menu" : ""}${subPos ? ` side-${subPos.side}` : ""}`}
                   role="menu"
-                  aria-label={sub === "effort" ? "Effort" : "Source"}
+                  aria-label={t(sub === "effort" ? "model.effort" : sub === "auto" ? "model.autoSettings" : "model.source")}
                   style={subPos ? { left: subPos.left, top: subPos.top } : { visibility: "hidden", left: 0, top: 0 }}
                   onKeyDown={(e) => {
                     if (e.key === "Escape") {
                       e.stopPropagation();
-                      const row = sub === "effort" ? effortRowRef : sourceRowRef;
+                      const row = sub === "effort" ? effortRowRef : sub === "auto" ? autoRowRef : sourceRowRef;
                       setSub(null);
                       row.current?.focus();
                     }
                   }}
                 >
-                  {sub === "source" ? (
+                  {sub === "auto" ? (
+                    <AutoQuickMenu
+                      config={autoCfg}
+                      onChange={(next) => props.onAutoConfig?.(next)}
+                      source={props.source ?? ""}
+                      models={unlocked}
+                      spentUsd={props.spend?.usd}
+                      onMore={
+                        props.onAutoMore
+                          ? () => {
+                              props.onAutoMore?.();
+                              setModelOpen(false);
+                            }
+                          : undefined
+                      }
+                    />
+                  ) : sub === "source" ? (
                     <>
-                      <p className="effort-hint">Choose where models come from. Only this source's models are listed.</p>
+                      <p className="effort-hint">{t("model.sourceHint")}</p>
                       {sources.map((s) => (
                         <button
                           key={s.id}
@@ -764,7 +836,7 @@ export function Composer(props: {
                                   : props.sourceAccounts[s.kind]}
                               </span>
                             ) : null}
-                            {!s.available ? <span className="source-setup">Set up</span> : null}
+                            {!s.available ? <span className="source-setup">{t("model.setUp")}</span> : null}
                           </span>
                           {props.source === s.id ? <Check size={16} className="effort-check" /> : <span />}
                         </button>
@@ -773,7 +845,7 @@ export function Composer(props: {
                   ) : (
                     <>
                       <p className="effort-hint">
-                        Higher effort means more thorough responses, but takes longer and uses more tokens.
+                        {t("model.effortHint")}
                       </p>
                       {effortLevels.map((e) => (
                         <button
@@ -789,12 +861,12 @@ export function Composer(props: {
                           }}
                         >
                           <span className="effort-label">
-                            {EFFORT_LABEL[e]}
-                            {e === effortRec ? <span className="effort-badge">Recommended</span> : null}
+                            {t(`effort.${e}`)}
+                            {e === effortRec ? <span className="effort-badge">{t("model.recommended")}</span> : null}
                             {e === "max" ? (
                               <span className="effort-warn">
                                 <TriangleAlert size={11} aria-hidden="true" />
-                                Highest usage
+                                {t("model.highestUsage")}
                               </span>
                             ) : null}
                           </span>
@@ -817,7 +889,7 @@ export function Composer(props: {
                     }}
                   >
                     <Plus size={14} />
-                    <span>Add models</span>
+                    <span>{t("model.add")}</span>
                   </button>
                 </>
               ) : null}
@@ -829,8 +901,8 @@ export function Composer(props: {
           <button
             type="button"
             className={`composer-tool composer-tip ctx-${ctxLevel}${showUsage ? " on" : ""}`}
-            data-tip={contextTip(ctx)}
-            aria-label="Show context usage"
+            data-tip={contextTip(ctx, t)}
+            aria-label={t("ctx.show")}
             aria-pressed={showUsage}
             onClick={() => {
               setShowUsage((v) => !v);
@@ -840,13 +912,13 @@ export function Composer(props: {
             <UsageRing pct={ctxPct} />
           </button>
           <div className="mode-dd" ref={files.length ? undefined : filesRef}>
-            <button type="button" className="composer-tool" title="Tệp" onClick={toggleFiles}>
+            <button type="button" className="composer-tool" title={t("composer.files")} onClick={toggleFiles}>
               <Paperclip size={15} />
             </button>
             {files.length === 0 ? filesMenu : null}
           </div>
           {props.busy && props.onStop ? null : hasInput ? null : (
-            <button type="button" className="composer-tool" title="Voice (chưa gắn)" disabled>
+            <button type="button" className="composer-tool" title={t("composer.voice")} disabled>
               <Mic size={15} />
             </button>
           )}
@@ -854,8 +926,8 @@ export function Composer(props: {
             <button
               type="button"
               className="send send-stop"
-              title="Dừng"
-              aria-label="Dừng"
+              title={t("composer.stop")}
+              aria-label={t("composer.stop")}
               onClick={props.onStop}
             >
               <Square size={13} fill="currentColor" />
@@ -865,7 +937,7 @@ export function Composer(props: {
               <ArrowUp size={16} />
             </button>
           ) : (
-            <button type="button" className="composer-tool send-idle" title="Voice (chưa gắn)" disabled>
+            <button type="button" className="composer-tool send-idle" title={t("composer.voice")} disabled>
               <AudioLines size={16} />
             </button>
           )}

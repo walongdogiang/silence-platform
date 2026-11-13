@@ -12,12 +12,15 @@ import {
   threadsForStorage,
   writePngToClipboard,
 } from "./pastedImages";
+import { translator } from "./i18n";
+
+const tVi = translator("vi");
 
 const png = (bytes = 8) => new File([new Uint8Array(bytes)], "a.png", { type: "image/png" });
 
 describe("imagesFromFiles", () => {
   it("đọc ảnh hợp lệ thành data URL", async () => {
-    const r = await imagesFromFiles([png()], 0);
+    const r = await imagesFromFiles([png()], 0, tVi);
     expect(r.error).toBeUndefined();
     expect(r.images).toHaveLength(1);
     expect(r.images[0]).toMatch(/^data:image\/png;base64,/);
@@ -25,9 +28,9 @@ describe("imagesFromFiles", () => {
 
   it("bỏ ảnh sai loại, quá lớn, vượt số lượng", async () => {
     const svg = new File(["<svg/>"], "a.svg", { type: "image/svg+xml" });
-    expect((await imagesFromFiles([svg], 0)).images).toHaveLength(0);
-    expect((await imagesFromFiles([png(MAX_IMAGE_BYTES + 1)], 0)).error).toMatch(/MB/);
-    const r = await imagesFromFiles([png(), png()], MAX_IMAGES - 1);
+    expect((await imagesFromFiles([svg], 0, tVi)).images).toHaveLength(0);
+    expect((await imagesFromFiles([png(MAX_IMAGE_BYTES + 1)], 0, tVi)).error).toMatch(/MB/);
+    const r = await imagesFromFiles([png(), png()], MAX_IMAGES - 1, tVi);
     expect(r.images).toHaveLength(1);
     expect(r.error).toMatch(/Tối đa/);
   });

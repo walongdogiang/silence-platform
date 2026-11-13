@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatRanges, mergeRanges, mergeReadSteps, narrateToPast, narrateToolLive, readRange } from "./chatMeta";
+import { formatRanges, mergeRanges, mergeReadSteps, narrateToPast, narrateToolLive, readRange, stepText } from "./chatMeta";
+import { translator } from "./i18n";
 
 const read = (path: string, extra: Record<string, number> = {}) => narrateToPast(narrateToolLive("read", { path, ...extra }));
 
@@ -59,5 +60,16 @@ describe("read step grouping", () => {
 
   it("collapses long range lists", () => {
     expect(formatRanges([[1, 2], [5, 6], [9, 10], [13, 14], [17, 18], [21, 22]])).toBe("1–2, 5–6, 9–10, 13–14, … +2");
+  });
+});
+
+describe("step text in the UI language", () => {
+  it("translates stored English verbs and fixed details, keeps unknown text", () => {
+    const vi = translator("vi");
+    expect(stepText({ verb: "Read", detail: "App.tsx (1–40)" }, vi)).toBe("Đã đọc App.tsx (1–40)");
+    expect(stepText(narrateToolLive("grep", { pattern: "foo", path: "src/a.ts" }), vi)).toBe("Đang tìm `foo` trong a.ts");
+    expect(stepText({ verb: "Running", detail: "command" }, vi)).toBe("Đang chạy lệnh");
+    expect(stepText({ verb: "Frobbing", detail: "x" }, vi)).toBe("Frobbing x");
+    expect(stepText({ verb: "Read", detail: "a.ts" }, translator("en"))).toBe("Read a.ts");
   });
 });

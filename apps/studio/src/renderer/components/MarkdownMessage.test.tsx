@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { LangContext } from "../i18n";
 import { MarkdownMessage, parsePathRef } from "./MarkdownMessage";
 
 const html = (text: string, onOpenFile?: (p: string) => void) =>
@@ -124,15 +125,26 @@ describe("MarkdownMessage render", () => {
     // Hover: Tải + Copy luôn có; Chỉnh sửa chỉ khi có onEditImage. Header không còn nút "Chỉnh".
     const edit = renderToStaticMarkup(<MarkdownMessage text={scene} onEditImage={() => {}} />);
     expect(edit).toContain('aria-label="Tải ảnh"');
-    expect(edit).toContain('aria-label="Copy as image"');
+    expect(edit).toContain('aria-label="Copy dạng ảnh"');
     // Nút Copy chỉ icon: hai icon (Copy, ✓) xếp chồng để chuyển mượt khi copy xong.
     expect(edit).toContain("img-frame-swap");
-    expect(edit).not.toContain("Copied</span>");
+    expect(edit).not.toContain("Đã copy</span>");
     expect(edit).toContain('aria-label="Chỉnh sửa hình ảnh"');
     expect(edit.split('class="code-card-head"')[1].split("visual-body")[0]).not.toContain("Chỉnh");
     const plain = html(scene);
     expect(plain).toContain('aria-label="Tải ảnh"');
     expect(plain).not.toContain("Chỉnh sửa");
+  });
+
+  it("follows the UI language from LangContext", () => {
+    const en = renderToStaticMarkup(
+      <LangContext.Provider value="en">
+        <MarkdownMessage text={"```py\nx = 1\n```\n\n![logo](https://x.test/a.png)"} onEditImage={() => {}} />
+      </LangContext.Provider>,
+    );
+    expect(en).toContain('aria-label="Copy code"');
+    expect(en).toContain("[image: logo]");
+    expect(en).not.toContain("Chép");
   });
 
   it("<title> của SVG làm alt và tiêu đề card", () => {

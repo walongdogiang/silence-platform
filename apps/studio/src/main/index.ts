@@ -1,5 +1,5 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, safeStorage, shell } from "electron";
-import { permissionNotice, shouldNotify } from "./notify";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, safeStorage, shell } from "electron";
+import { doneNotice, noticeOpts, permissionNotice, shouldNotify, type Notice } from "./notify";
 import { spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import { CredentialStore, MAIN_ONLY_RPC, cleanKey, isKeyedProvider } from "./credentials";
@@ -13,6 +13,23 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../");
 
 let win: BrowserWindow | null = null;
+let keepAwakeId: number | null = null;
+
+/** Báo khi người dùng không nhìn cửa sổ: thông báo desktop và/hoặc nháy taskbar. */
+function notifyAway(notice: Notice, opts: { notify: boolean; flash: boolean }): boolean {
+  if (!shouldNotify(win)) return false;
+  if (opts.flash) win?.flashFrame(true);
+  if (!opts.notify || !Notification.isSupported()) return opts.flash;
+  const n = new Notification(notice);
+  n.on("click", () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+  n.show();
+  return true;
+}
 let child: ChildProcess | null = null;
 let sock: net.Socket | null = null;
 let rpcBuf = "";
@@ -95,6 +112,8 @@ function createWindow() {
   win.on("closed", () => {
     win = null;
   });
+  // Người dùng quay lại cửa sổ thì thôi nháy taskbar.
+  win.on("focus", () => win?.flashFrame(false));
   // Link trong câu trả lời của model không được thay giao diện app hay mở cửa sổ mới:
   // chặn mọi điều hướng, chỉ http(s) mới ra trình duyệt ngoài.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -396,17 +415,34 @@ app.whenReady().then(async () => {
     return true;
   });
   // Thông báo "cần bạn duyệt" khi cửa sổ không ở phía trước. Chỉ nhận lý do (chuỗi ngắn), không nhận lệnh.
-  ipcMain.handle("silence-notify-permission", (_e, reason: unknown) => {
-    if (!Notification.isSupported() || !shouldNotify(win)) return false;
-    const n = new Notification(permissionNotice(reason));
-    n.on("click", () => {
-      if (!win) return;
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-    });
-    n.show();
+  ipcMain.handle("silence-notify-permission", (_e, reason: unknown, opts: unknown) =>
+    notifyAway(permissionNotice(reason), noticeOpts(opts)),
+  );
+  // "Agent xong": chỉ nhận tên chat.
+  ipcMain.handle("silence-notify-done", (_e, title: unknown, opts: unknown) => notifyAway(doneNotice(title), noticeOpts(opts)));
+  // Settings → Thông báo → Gửi thử: luôn hiện (kể cả khi cửa sổ đang mở) để biết Windows có chặn không.
+  ipcMain.handle("silence-notify-test", (_e, title: unknown, body: unknown) => {
+    if (!Notification.isSupported()) return false;
+    const text = (v: unknown) => (typeof v === "string" ? v.slice(0, 90) : "");
+    new Notification({ title: text(title) || "5ilence", body: text(body) }).show();
     return true;
+  });
+  // Settings → Dữ liệu → Mở thư mục: main hỏi Engine đường dẫn rồi mở Explorer. Renderer không
+  // truyền đường dẫn (openPath với file .exe sẽ chạy nó).
+  ipcMain.handle("silence-open-data-dir", async () => {
+    const r = (await rpc("engine.data_dir")) as { path?: unknown };
+    const dir = typeof r?.path === "string" ? r.path : "";
+    if (!dir || !existsSync(dir)) return false;
+    return (await shell.openPath(dir)) === "";
+  });
+  // Giữ máy thức trong lúc agent chạy (Settings → Thông báo). Một blocker duy nhất.
+  ipcMain.handle("silence-keep-awake", (_e, on: unknown) => {
+    if (on === true && keepAwakeId === null) keepAwakeId = powerSaveBlocker.start("prevent-app-suspension");
+    if (on !== true && keepAwakeId !== null) {
+      powerSaveBlocker.stop(keepAwakeId);
+      keepAwakeId = null;
+    }
+    return keepAwakeId !== null;
   });
   ipcMain.handle("silence-pick-folder", async () => {
     const res = await dialog.showOpenDialog({ properties: ["openDirectory"] });

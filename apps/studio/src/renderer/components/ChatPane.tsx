@@ -20,11 +20,15 @@ import {
   narrateFromLine,
   narrateToPast,
   parseNarrateLegacy,
+  stepText,
+  verbText,
+  detailText,
   type NarrateStep,
 } from "../chatMeta";
 import type { ChatLine, Diff, Perm } from "../models";
+import { escalationText, useT, type MsgKey, type T } from "../i18n";
 import { MODE_LABEL, type SessionMode } from "../modes";
-import { pulseLabel, pulseTip, runPhase, type RunMeter } from "../runStatus";
+import { formatDuration, pulseLabel, pulseTip, runPhase, type RunMeter } from "../runStatus";
 import { scopeLabels, tierBadge, type PermScope } from "../permissionUi";
 import { DiffCard } from "./DiffCard";
 import { ErrorCard } from "./ErrorCard";
@@ -35,18 +39,15 @@ import { ImageFrame } from "./ImageFrame";
 import type { EditTarget } from "../imageActions";
 import { ImageRefStrip } from "./WorkspaceImage";
 import { SoftScroll } from "./SoftScroll";
+import { transcriptOpen, type TranscriptView } from "../prefs";
 
 const MODES = [
-  { id: "Plan", title: "Plan", desc: "Lập kế hoạch trước khi sửa file", Icon: ListChecks },
-  { id: "Code", title: "Code", desc: "Agent implement khi đã rõ hướng", Icon: Code2 },
-  { id: "Review", title: "Review", desc: "Xem thay đổi và diff", Icon: GitCompare },
+  { id: "Plan", title: "Plan", desc: "hub.planDesc", Icon: ListChecks },
+  { id: "Code", title: "Code", desc: "hub.codeDesc", Icon: Code2 },
+  { id: "Review", title: "Review", desc: "hub.reviewDesc", Icon: GitCompare },
 ] as const;
 
-const PROMPTS = [
-  "Giải thích cấu trúc project này",
-  "Lập plan thêm test cho phần cốt lõi",
-  "Review các file vừa mở",
-];
+const PROMPTS: MsgKey[] = ["hub.prompt1", "hub.prompt2", "hub.prompt3"];
 
 type Turn = {
   user: string;
@@ -137,16 +138,13 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
   return out;
 }
 
-function formatWorked(ms: number | undefined): string {
-  if (ms == null) return "Worked for —";
-  const sec = Math.max(1, Math.round(ms / 1000));
-  if (sec < 60) return `Worked for ${sec}s`;
-  const min = Math.floor(sec / 60);
-  const rem = sec % 60;
-  if (min < 60) return rem ? `Worked for ${min}m ${rem}s` : `Worked for ${min}m`;
-  const hr = Math.floor(min / 60);
-  const m = min % 60;
-  return m ? `Worked for ${hr}h ${m}m` : `Worked for ${hr}h`;
+function formatWorked(ms: number | undefined, t: T): string {
+  if (ms == null) return t("meta.worked", { time: "—" });
+  return t("meta.worked", { time: formatDuration(Math.max(1000, ms + 500)) });
+}
+
+function countText(n: number, one: MsgKey, many: MsgKey, t: T): string {
+  return t(n === 1 ? one : many, { n });
 }
 
 function activityNarrations(narrations: NarrateStep[]): NarrateStep[] {
@@ -155,7 +153,7 @@ function activityNarrations(narrations: NarrateStep[]): NarrateStep[] {
   );
 }
 
-function exploreLabel(traces: ChatLine[], narrations: NarrateStep[]): { label: string; stub: boolean; show: boolean } {
+function exploreLabel(traces: ChatLine[], narrations: NarrateStep[], t: T): { label: string; stub: boolean; show: boolean } {
   const activity = activityNarrations(narrations);
   let files = 0;
   let searches = 0;
@@ -172,23 +170,27 @@ function exploreLabel(traces: ChatLine[], narrations: NarrateStep[]): { label: s
     searches = c.searches;
   }
   const hasActivity = activity.length > 0 || files > 0 || searches > 0;
-  if (!hasActivity) return { label: "Explored —", stub: true, show: false };
-  if (!files && !searches) return { label: "Explored —", stub: true, show: true };
+  const stub = t("meta.explored", { parts: "—" });
+  if (!hasActivity) return { label: stub, stub: true, show: false };
+  if (!files && !searches) return { label: stub, stub: true, show: true };
   const parts: string[] = [];
-  if (files) parts.push(`${files} file${files === 1 ? "" : "s"}`);
-  if (searches) parts.push(`${searches} search${searches === 1 ? "" : "es"}`);
-  return { label: `Explored ${parts.join(", ")}`, stub: false, show: true };
+  if (files) parts.push(countText(files, "meta.files1", "meta.files", t));
+  if (searches) parts.push(countText(searches, "meta.searches1", "meta.searches", t));
+  return { label: t("meta.explored", { parts: parts.join(", ") }), stub: false, show: true };
 }
 
-function thoughtLabel(turn: Turn): string {
+/** Thought label and whether the model is still thinking. */
+function thoughtLabel(turn: Turn, t: T): { label: string; live: boolean } {
   const thinkingLive = turn.live && turn.narrations.some((s) => /^Thinking$/i.test(s.verb));
-  if (thinkingLive || (turn.live && Boolean(turn.thought?.body) && !turn.worked)) return "Thinking";
+  if (thinkingLive || (turn.live && Boolean(turn.thought?.body) && !turn.worked)) {
+    return { label: t("verb.Thinking"), live: true };
+  }
   if (turn.thought?.ms != null && turn.thought.ms > 0) {
     const sec = Math.max(1, Math.round(turn.thought.ms / 1000));
-    return `Thought ${sec}s`;
+    return { label: t("meta.thoughtFor", { n: sec }), live: false };
   }
-  if (turn.thought?.body) return "Thought briefly";
-  return "";
+  if (turn.thought?.body) return { label: t("meta.thoughtBriefly"), live: false };
+  return { label: "", live: false };
 }
 
 function displaySteps(turn: Turn): { step: NarrateStep; active: boolean }[] {
@@ -211,9 +213,9 @@ function displaySteps(turn: Turn): { step: NarrateStep; active: boolean }[] {
   });
 }
 
-function formatAbsolute(at: number): string {
+function formatAbsolute(at: number, locale: string): string {
   try {
-    return new Date(at).toLocaleString(undefined, {
+    return new Date(at).toLocaleString(locale, {
       dateStyle: "medium",
       timeStyle: "short",
     });
@@ -242,9 +244,46 @@ function useNow(active: boolean): number {
   return now;
 }
 
-function summaryLabel(turn: Turn, run: RunMeter | null, now: number, awaitingPermission: boolean): string {
-  if (turn.live) return pulseLabel(run, now, awaitingPermission);
-  return formatWorked(turn.worked?.ms);
+type RouteLine = Extract<ChatLine, { kind: "route" }>;
+
+/** Why Auto escalated, from the Engine's reason ("… · escalated: tests failed after an edit"). */
+function escalationWhy(reason: string | undefined, t: T): string {
+  const m = /escalated: ([^·]+)/.exec(reason ?? "");
+  return m ? escalationText(m[1], t) : "";
+}
+
+/** One route line in the turn's details: "Auto → Sonnet 5.5 · Strong · agent" or the legacy text. */
+function routeLineText(l: RouteLine, t: T): string {
+  if (!l.slot) return l.text;
+  const why = l.escalated ? escalationWhy(l.reason, t) : "";
+  const slot = ["frontier", "strong", "small"].includes(l.slot) ? t(`slot.${l.slot as "frontier" | "strong" | "small"}`) : l.slot;
+  return `${t("chip.auto", { model: l.model ?? "?" })} · ${slot} · ${l.purpose ?? ""}${why ? ` · ${t("chip.escalated", { why })}` : ""}`;
+}
+
+/** Chip on the turn summary: the last main-turn Auto route ("Auto → Opus 5.5 · leo cấp: …"). */
+function autoChip(routes: ChatLine[], t: T): { text: string; tip: string; escalated: boolean } | null {
+  const main = routes.filter(
+    (l): l is RouteLine =>
+      l.kind === "route" && Boolean(l.slot) && !(l.purpose === "title" || l.purpose?.startsWith("subagent:")),
+  );
+  const last = main[main.length - 1];
+  if (!last) return null;
+  const why = last.escalated ? escalationWhy(last.reason, t) : "";
+  const models = [...new Set(main.map((l) => l.model))].join(" → ");
+  return {
+    text: `${t("chip.auto", { model: last.model ?? "?" })}${why ? ` · ${t("chip.escalated", { why })}` : ""}`,
+    tip: routes
+      .filter((l): l is RouteLine => l.kind === "route")
+      .map((l) => routeLineText(l, t))
+      .concat(main.length > 1 ? [t("chip.inTurn", { models })] : [])
+      .join("\n"),
+    escalated: Boolean(why),
+  };
+}
+
+function summaryLabel(turn: Turn, run: RunMeter | null, now: number, awaitingPermission: boolean, t: T): string {
+  if (turn.live) return pulseLabel(run, now, awaitingPermission, t);
+  return formatWorked(turn.worked?.ms, t);
 }
 
 /** Icon Fork Chat kiểu Cursor — thân dọc, tách hai nhánh chéo có mũi tên. */
@@ -281,6 +320,7 @@ function AiFooter(props: {
   onFork?: () => void;
   onCopied?: () => void;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | null>(null);
 
@@ -310,8 +350,8 @@ function AiFooter(props: {
       <button
         type="button"
         className={`msg-ai-action msg-ai-copy${copied ? " is-copied" : ""}`}
-        title="Copy Message"
-        aria-label={copied ? "Copied" : "Copy Message"}
+        title={t("chat.copyMessage")}
+        aria-label={copied ? t("common.copied") : t("chat.copyMessage")}
         onClick={() => void copy()}
       >
         <span className="msg-ai-ico msg-ai-ico-copy" aria-hidden>
@@ -325,8 +365,8 @@ function AiFooter(props: {
         <button
           type="button"
           className="msg-ai-action"
-          title="Fork Chat"
-          aria-label="Fork Chat"
+          title={t("chat.fork")}
+          aria-label={t("chat.fork")}
           disabled={props.forkDisabled}
           onClick={() => props.onFork?.()}
         >
@@ -339,28 +379,30 @@ function AiFooter(props: {
 
 function AgentMeta(props: {
   turn: Turn;
+  view: TranscriptView;
   run?: RunMeter | null;
   awaitingPermission?: boolean;
   onRestoreCheckpoint?: (id: string) => void;
 }) {
+  const t = useT();
   const run = props.turn.live ? (props.run ?? null) : null;
   const awaiting = Boolean(props.turn.live && props.awaitingPermission);
   const now = useNow(Boolean(props.turn.live));
   const phase = runPhase(run, awaiting);
-  const explored = exploreLabel(props.turn.traces, props.turn.narrations);
+  const explored = exploreLabel(props.turn.traces, props.turn.narrations, t);
   const steps = displaySteps(props.turn);
   const active = steps.find((s) => s.active);
-  const tLabel = thoughtLabel(props.turn);
-  const thinkingLive = /^Thinking$/i.test(tLabel);
+  const { label: tLabel, live: thinkingLive } = thoughtLabel(props.turn, t);
   const liveBrief = active
-    ? [active.step.verb, active.step.detail].filter(Boolean).join(" ")
+    ? stepText(active.step, t)
     : props.turn.narrations.some((s) => isPlanningVerb(s.verb))
-      ? "Planning next moves"
+      ? t("verb.Planning next moves")
       : thinkingLive
-        ? "Thinking"
-        : "Working…";
+        ? t("verb.Thinking")
+        : t("run.workingDots");
   const thoughtBody = props.turn.thought?.body?.trim() ?? "";
   const routes = props.turn.traces.filter((l) => l.kind === "route");
+  const chip = autoChip(routes, t);
   const tools = props.turn.traces.filter((l) => l.kind === "tool" || l.kind === "sys");
   const hasBody =
     props.turn.live ||
@@ -371,16 +413,29 @@ function AgentMeta(props: {
     routes.length > 0 ||
     tools.length > 0;
 
+  const opened = transcriptOpen(props.view, {
+    live: Boolean(props.turn.live),
+    thoughtHasBody: Boolean(thoughtBody),
+    thinkingLive,
+    hasSteps: steps.length > 0,
+    hasThought: Boolean(tLabel),
+  });
+
   return (
-    <details className={`msg-agent-meta${props.turn.live ? " live" : ""}`} open={props.turn.live || undefined}>
+    <details className={`msg-agent-meta${props.turn.live ? " live" : ""}`} open={(hasBody && opened.meta) || undefined}>
       <summary>
         <span
           className={props.turn.live ? `msg-pulse ${phase}` : undefined}
-          title={props.turn.live ? pulseTip(run) || undefined : undefined}
+          title={props.turn.live ? pulseTip(run, t) || undefined : undefined}
           aria-live={props.turn.live ? "off" : undefined}
         >
-          {summaryLabel(props.turn, run, now, awaiting)}
+          {summaryLabel(props.turn, run, now, awaiting, t)}
         </span>
+        {chip ? (
+          <span className={`route-chip${chip.escalated ? " escalated" : ""}`} title={chip.tip}>
+            {chip.text}
+          </span>
+        ) : null}
         <ChevronDown size={14} className="msg-agent-meta-chev" />
       </summary>
       {hasBody ? (
@@ -390,7 +445,7 @@ function AgentMeta(props: {
           {tLabel ? (
             <details
               className={`msg-thought-block${thinkingLive ? " live" : ""}`}
-              open={Boolean(thoughtBody) || thinkingLive || undefined}
+              open={opened.thought || undefined}
             >
               <summary>
                 <span className={`msg-thought-label${thinkingLive ? " active" : ""}`}>{tLabel}</span>
@@ -400,13 +455,13 @@ function AgentMeta(props: {
               </summary>
               {thoughtBody ? <pre className="msg-thought-body">{thoughtBody}</pre> : null}
               {!thoughtBody && thinkingLive ? (
-                <p className="msg-meta-line stub">Waiting for reasoning stream…</p>
+                <p className="msg-meta-line stub">{t("meta.waitingReasoning")}</p>
               ) : null}
             </details>
           ) : null}
 
           {explored.show ? (
-            <details className="msg-explored" open={props.turn.live && steps.length > 0 ? true : undefined}>
+            <details className="msg-explored" open={opened.explored || undefined}>
               <summary>
                 <span className={explored.stub ? "stub" : undefined}>{explored.label}</span>
                 {steps.length > 0 ? <ChevronDown size={13} className="msg-agent-meta-chev" /> : null}
@@ -415,8 +470,8 @@ function AgentMeta(props: {
                 <ul className="msg-step-list">
                   {steps.map(({ step, active }, j) => (
                     <li key={j} className={`msg-step${active ? " active" : ""}`}>
-                      <span className="msg-step-verb">{step.verb}</span>
-                      {step.detail ? <span className="msg-step-detail">{step.detail}</span> : null}
+                      <span className="msg-step-verb">{verbText(step.verb, t)}</span>
+                      {step.detail ? <span className="msg-step-detail">{detailText(step.detail, t)}</span> : null}
                     </li>
                   ))}
                 </ul>
@@ -426,37 +481,41 @@ function AgentMeta(props: {
 
           {routes.map((l, j) =>
             l.kind === "route" ? (
-              <div key={`route-${j}`} className="msg-meta-route">
-                {l.text}
+              <div
+                key={`route-${j}`}
+                className={`msg-meta-route${l.escalated ? " escalated" : ""}`}
+                title={l.reason || undefined}
+              >
+                {routeLineText(l, t)}
               </div>
             ) : null,
           )}
 
           {props.turn.checkpoint ? (
             <div className="msg-checkpoint">
-              <span className="msg-checkpoint-label" title={formatAbsolute(props.turn.checkpoint.at)}>
-                {props.turn.checkpoint.label}
+              <span className="msg-checkpoint-label" title={formatAbsolute(props.turn.checkpoint.at, t("locale"))}>
+                {props.turn.checkpoint.label === "Checkpoint" ? t("meta.checkpoint") : props.turn.checkpoint.label}
                 {props.turn.checkpoint.files.length
-                  ? ` · ${props.turn.checkpoint.files.length} file${props.turn.checkpoint.files.length === 1 ? "" : "s"}`
+                  ? ` · ${countText(props.turn.checkpoint.files.length, "meta.files1", "meta.files", t)}`
                   : ""}
               </span>
               {props.onRestoreCheckpoint ? (
                 <button
                   type="button"
                   className="msg-checkpoint-btn"
-                  title="Khôi phục hội thoại và file về checkpoint này"
+                  title={t("meta.restoreTip")}
                   onClick={() => props.onRestoreCheckpoint?.(props.turn.checkpoint!.id)}
                 >
                   <RotateCcw size={12} strokeWidth={1.75} />
-                  Restore
+                  {t("meta.restore")}
                 </button>
               ) : null}
             </div>
           ) : null}
 
           {tools.length > 0 ? (
-            <details className="msg-agent-meta-trace">
-              <summary>Tool details</summary>
+            <details className="msg-agent-meta-trace" open={opened.tools || undefined}>
+              <summary>{t("meta.toolDetails")}</summary>
               {tools.map((l, j) => (
                 <pre key={j}>
                   {l.kind === "tool" ? `${l.name}\n${l.output.slice(0, 1400)}` : "text" in l ? l.text : ""}
@@ -504,9 +563,12 @@ export function ChatPane(props: {
   onChip?: (chip: string) => void;
   onUsePrompt?: (text: string) => void;
   onRetry?: () => void;
+  /** Settings → Chat → default view: which blocks of a turn start open. */
+  transcript?: TranscriptView;
   /** "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn prompt. Trả lỗi nếu không đính được. */
   onAttachEdited?: (png: Blob, prompt: string) => Promise<string | null>;
 }) {
+  const t = useT();
   const steps = props.plan ? planSteps(props.plan) : [];
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
   const logRef = useRef<HTMLDivElement>(null);
@@ -518,7 +580,7 @@ export function ChatPane(props: {
   // endLine của các gợi ý đổi mode đã bị "Giữ …" (chỉ ẩn trong phiên UI này).
   const [dismissedSuggest, setDismissedSuggest] = useState<Set<number>>(new Set());
   // Nhớ quyền mở rộng độ tin cậy nên luôn là nút riêng (không tick sẵn); Engine quyết định có cho nhớ không.
-  const scopes = scopeLabels(props.perm);
+  const scopes = scopeLabels(props.perm, t);
   const permCommand = (props.perm?.input as { command?: unknown } | null | undefined)?.command;
   const copyToastTimer = useRef<number | null>(null);
 
@@ -574,7 +636,7 @@ export function ChatPane(props: {
       {copyToast ? (
         <div className="app-toast" role="status" aria-live="polite">
           <Info size={14} strokeWidth={2} className="app-toast-ico" aria-hidden />
-          <span>Message copied to clipboard</span>
+          <span>{t("chat.copiedToast")}</span>
         </div>
       ) : null}
       <SoftScroll viewportRef={logRef} deps={[props.lines, props.plan, turns.length, props.busy]}>
@@ -584,31 +646,33 @@ export function ChatPane(props: {
             <div className="empty-ico">{props.hasSession ? <Sparkles size={20} /> : <FolderOpen size={20} />}</div>
             {props.hasSession ? (
               <>
-                <h3>Bạn muốn bắt đầu thế nào?</h3>
+                <h3>{t("hub.title")}</h3>
                 <p>
-                  Workspace <b>{props.wsName || "hiện tại"}</b> đã sẵn sàng. Chọn chế độ hoặc dùng gợi ý bên dưới.
+                  {t("hub.readyBefore")}
+                  <b>{props.wsName || t("hub.current")}</b>
+                  {t("hub.readyAfter")}
                 </p>
               </>
             ) : (
               <>
-                <h3>Bắt đầu với workspace</h3>
-                <p>Mở folder dự án để chat với agent. Plan trước khi sửa file.</p>
+                <h3>{t("hub.noWsTitle")}</h3>
+                <p>{t("hub.noWsBody")}</p>
                 {props.onOpenWorkspace && (
                   <button type="button" className="run-btn" onClick={props.onOpenWorkspace}>
-                    Mở workspace
+                    {t("common.openWorkspace")}
                   </button>
                 )}
               </>
             )}
 
             <div className="hub-section">
-              <span className="hub-label">Chế độ</span>
+              <span className="hub-label">{t("hub.modes")}</span>
               <div className="hub-modes">
                 {MODES.map(({ id, title, desc, Icon }) => (
                   <button key={id} type="button" className="hub-mode" onClick={() => onMode(id)}>
                     <Icon size={16} />
                     <strong>{title}</strong>
-                    <span>{desc}</span>
+                    <span>{t(desc)}</span>
                   </button>
                 ))}
               </div>
@@ -616,11 +680,11 @@ export function ChatPane(props: {
 
             {props.hasSession && (
               <div className="hub-section">
-                <span className="hub-label">Gợi ý</span>
+                <span className="hub-label">{t("hub.prompts")}</span>
                 <div className="hub-prompts">
-                  {PROMPTS.map((text) => (
-                    <button key={text} type="button" className="hub-prompt" onClick={() => props.onUsePrompt?.(text)}>
-                      {text}
+                  {PROMPTS.map((key) => (
+                    <button key={key} type="button" className="hub-prompt" onClick={() => props.onUsePrompt?.(t(key))}>
+                      {t(key)}
                     </button>
                   ))}
                 </div>
@@ -629,92 +693,93 @@ export function ChatPane(props: {
           </div>
         )}
 
-        {turns.map((t, i) => {
+        {turns.map((turn, i) => {
           const showMeta = Boolean(
-            t.worked || t.ai || t.traces.length || t.narrations.length || t.thought || t.live || t.checkpoint,
+            turn.worked || turn.ai || turn.traces.length || turn.narrations.length || turn.thought || turn.live || turn.checkpoint,
           );
           return (
             <div key={i} className="msg-turn">
-              {t.user || t.userImages?.length || t.userImageCount ? (
+              {turn.user || turn.userImages?.length || turn.userImageCount ? (
                 <div className="msg-user">
                   <div className="msg-bubble">
-                    {t.userImages?.length ? (
+                    {turn.userImages?.length ? (
                       <div className="msg-images">
-                        {t.userImages.map((src, j) => (
+                        {turn.userImages.map((src, j) => (
                           <ImageFrame
                             key={j}
                             src={src}
-                            alt={`Ảnh ${j + 1}`}
-                            title="Phóng to"
-                            onOpen={() => setLightbox({ images: t.userImages ?? [], index: j })}
+                            alt={t("img.alt", { n: j + 1 })}
+                            title={t("img.zoom")}
+                            onOpen={() => setLightbox({ images: turn.userImages ?? [], index: j })}
                             onEdit={props.onAttachEdited ? () => setEditor({ src }) : undefined}
                           />
                         ))}
                       </div>
-                    ) : t.userImageCount ? (
-                      <span className="msg-images-note">{t.userImageCount} ảnh (không lưu trong lịch sử)</span>
+                    ) : turn.userImageCount ? (
+                      <span className="msg-images-note">{t("chat.imagesNotSaved", { n: turn.userImageCount })}</span>
                     ) : null}
-                    {t.user}
+                    {turn.user}
                   </div>
                 </div>
               ) : null}
               {showMeta ? (
                 <AgentMeta
-                  turn={t}
+                  turn={turn}
+                  view={props.transcript ?? "compact"}
                   run={props.run}
                   awaitingPermission={Boolean(props.perm)}
                   onRestoreCheckpoint={props.onRestoreCheckpoint}
                 />
               ) : null}
-              {t.ai ? (
+              {turn.ai ? (
                 <div className="msg-ai-wrap">
                   <MarkdownMessage
-                    text={t.ai.text}
+                    text={turn.ai.text}
                     onOpenFile={props.onOpenFile}
                     workspace={props.workspace}
                     onOpenImage={openImages}
-                    streaming={Boolean(t.live)}
-                    onEditImage={t.live ? undefined : editImage}
+                    streaming={Boolean(turn.live)}
+                    onEditImage={turn.live ? undefined : editImage}
                   />
-                  {t.live ? null : (
-                    <ImageRefStrip workspace={props.workspace} text={t.ai.text} onOpen={openImages} onEdit={editImage} />
+                  {turn.live ? null : (
+                    <ImageRefStrip workspace={props.workspace} text={turn.ai.text} onOpen={openImages} onEdit={editImage} />
                   )}
                   <AiFooter
-                    text={t.ai.text}
-                    canFork={Boolean(props.onForkChat) && !t.live}
+                    text={turn.ai.text}
+                    canFork={Boolean(props.onForkChat) && !turn.live}
                     forkDisabled={Boolean(props.busy)}
-                    onFork={() => props.onForkChat?.(t.endLine)}
+                    onFork={() => props.onForkChat?.(turn.endLine)}
                     onCopied={showCopyToast}
                   />
                 </div>
               ) : null}
-              {t.suggest &&
+              {turn.suggest &&
               props.onSwitchAndRun &&
               i === turns.length - 1 &&
               !props.busy &&
-              props.mode !== t.suggest.mode &&
-              !dismissedSuggest.has(t.endLine) ? (
-                <div className="mode-suggest" role="group" aria-label="Gợi ý chuyển mode">
-                  <p>{t.suggest.reason || `Chuyển sang ${MODE_LABEL[t.suggest.mode]} để áp dụng thay đổi này?`}</p>
+              props.mode !== turn.suggest.mode &&
+              !dismissedSuggest.has(turn.endLine) ? (
+                <div className="mode-suggest" role="group" aria-label={t("suggest.label")}>
+                  <p>{turn.suggest.reason || t("suggest.question", { mode: MODE_LABEL[turn.suggest.mode] })}</p>
                   <div className="row">
                     <button
                       type="button"
                       className="primary"
-                      onClick={() => props.onSwitchAndRun?.(t.suggest!.mode, t.suggest!.prompt)}
+                      onClick={() => props.onSwitchAndRun?.(turn.suggest!.mode, turn.suggest!.prompt)}
                     >
-                      Chuyển sang {MODE_LABEL[t.suggest.mode]} và thực hiện
+                      {t("suggest.switch", { mode: MODE_LABEL[turn.suggest.mode] })}
                     </button>
                     <button
                       type="button"
                       className="ghost"
-                      onClick={() => setDismissedSuggest((s) => new Set(s).add(t.endLine))}
+                      onClick={() => setDismissedSuggest((s) => new Set(s).add(turn.endLine))}
                     >
-                      Giữ {props.mode ? MODE_LABEL[props.mode] : "mode hiện tại"}
+                      {props.mode ? t("suggest.keep", { mode: MODE_LABEL[props.mode] }) : t("suggest.keepCurrent")}
                     </button>
                   </div>
                 </div>
               ) : null}
-              {t.errors.map((e, j) => (
+              {turn.errors.map((e, j) => (
                 <ErrorCard
                   key={`err-${j}`}
                   message={e.message}
@@ -731,14 +796,14 @@ export function ChatPane(props: {
           <div className="plan-card">
             <div className="plan-head">
               <ListChecks size={16} />
-              <b>Execution Plan</b>
-              <span>chờ duyệt</span>
+              <b>{t("plan.title")}</b>
+              <span>{t("plan.pending")}</span>
             </div>
             <div className="progress">
               <i style={{ width: "8%" }} />
             </div>
             <ol>
-              {(steps.length ? steps : ["Xem plan markdown bên dưới"]).map((s, i) => (
+              {(steps.length ? steps : [t("plan.seeBelow")]).map((s, i) => (
                 <li key={i}>
                   <span className="plan-n">{i + 1}.</span>
                   <Circle size={14} />
@@ -749,11 +814,11 @@ export function ChatPane(props: {
             <pre className="plan-md">{props.plan}</pre>
             <div className="row">
               <button type="button" className="primary" onClick={props.onApprovePlan}>
-                <CheckCircle2 size={14} /> Duyệt plan
+                <CheckCircle2 size={14} /> {t("plan.approve")}
               </button>
               {props.onRevisePlan ? (
                 <button type="button" className="ghost" onClick={props.onRevisePlan}>
-                  Góp ý / sửa
+                  {t("plan.revise")}
                 </button>
               ) : null}
             </div>
@@ -761,14 +826,14 @@ export function ChatPane(props: {
         )}
 
         {props.perm && (
-          <div className="banner warn perm-card" role="alertdialog" aria-label="Cần bạn duyệt">
+          <div className="banner warn perm-card" role="alertdialog" aria-label={t("perm.cardLabel")}>
             <h4>
-              <span className={`perm-tier ${tierBadge(props.perm.risk?.tier).cls}`}>
-                {tierBadge(props.perm.risk?.tier).label}
+              <span className={`perm-tier ${tierBadge(props.perm.risk?.tier, t).cls}`}>
+                {tierBadge(props.perm.risk?.tier, t).label}
               </span>
               {props.perm.risk?.reasons[0]?.title
-                ? `${props.perm.risk.reasons[0].title} · cho phép ${props.perm.name}?`
-                : `Cho phép ${props.perm.name}?`}
+                ? t("perm.askWithReason", { reason: props.perm.risk.reasons[0].title, tool: props.perm.name })
+                : t("perm.ask", { tool: props.perm.name })}
             </h4>
             {/* Lệnh thật luôn hiện nguyên văn: duyệt dựa trên lệnh, không dựa trên mô tả. */}
             <pre>{typeof permCommand === "string" ? permCommand : JSON.stringify(props.perm.input, null, 2)}</pre>
@@ -783,8 +848,7 @@ export function ChatPane(props: {
             ) : null}
             {props.permError && (
               <p className="perm-error" role="alert">
-                <strong>Không gửi được quyết định quyền.</strong> Cho phép hoặc Từ chối lại; nếu vẫn
-                lỗi, mở lại workspace.
+                <strong>{t("perm.sendFailed")}</strong> {t("perm.sendFailedHint")}
               </p>
             )}
             <div className="row perm-actions">
@@ -794,7 +858,7 @@ export function ChatPane(props: {
                 disabled={props.permBusy}
                 onClick={() => props.onAllow("once")}
               >
-                Cho phép một lần
+                {t("perm.allowOnce")}
               </button>
               {scopes ? (
                 <>
@@ -802,7 +866,7 @@ export function ChatPane(props: {
                     type="button"
                     className="ghost"
                     disabled={props.permBusy}
-                    title="Chỉ trong phiên này, không lưu vào workspace"
+                    title={t("perm.sessionTip")}
                     onClick={() => props.onAllow("session")}
                   >
                     {scopes.session}
@@ -811,7 +875,7 @@ export function ChatPane(props: {
                     type="button"
                     className="ghost"
                     disabled={props.permBusy}
-                    title="Lưu vào .silence/permissions.json; thu hồi trong Settings"
+                    title={t("perm.workspaceTip")}
                     onClick={() => props.onAllow("workspace")}
                   >
                     {scopes.workspace}
@@ -819,7 +883,7 @@ export function ChatPane(props: {
                 </>
               ) : null}
               <button type="button" className="ghost" disabled={props.permBusy} onClick={props.onDeny}>
-                Từ chối
+                {t("perm.deny")}
               </button>
             </div>
           </div>

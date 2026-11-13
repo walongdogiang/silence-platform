@@ -1,4 +1,5 @@
 import { fmtTok } from "./contextUsage";
+import type { MsgKey, T } from "./i18n";
 
 /**
  * Đồng hồ + bộ đếm của lượt đang chạy (run pulse). Thuần, không React — spec: `docs/frontend/status.md`.
@@ -55,24 +56,24 @@ export function formatDuration(ms: number): string {
   return m ? `${hr}h ${m}m` : `${hr}h`;
 }
 
-const PHASE_LABEL: Record<RunPhase, string> = {
-  working: "Working",
-  awaiting_permission: "Waiting for approval",
-  stopping: "Stopping…",
+const PHASE_LABEL: Record<RunPhase, MsgKey> = {
+  working: "run.working",
+  awaiting_permission: "run.waiting",
+  stopping: "run.stopping",
 };
 
 /** Dòng summary của lượt live: `Working · 1m 12s · 5.9K tokens`. Token = output (model sinh ra). */
-export function pulseLabel(m: RunMeter | null, now: number, awaitingPermission: boolean): string {
+export function pulseLabel(m: RunMeter | null, now: number, awaitingPermission: boolean, t: T): string {
   const phase = runPhase(m, awaitingPermission);
-  if (!m) return phase === "working" ? "Working…" : PHASE_LABEL[phase];
-  const parts = [PHASE_LABEL[phase], formatDuration(now - m.startedAt)];
-  if (m.outputTokens > 0) parts.push(`${fmtTok(m.outputTokens)} tokens`);
+  if (!m) return phase === "working" ? t("run.workingDots") : t(PHASE_LABEL[phase]);
+  const parts = [t(PHASE_LABEL[phase]), formatDuration(now - m.startedAt)];
+  if (m.outputTokens > 0) parts.push(t("run.tokens", { n: fmtTok(m.outputTokens) }));
   return parts.join(" · ");
 }
 
 /** Tooltip chi tiết: input/output/USD của lượt. */
-export function pulseTip(m: RunMeter | null): string {
+export function pulseTip(m: RunMeter | null, t: T): string {
   if (!m) return "";
   const usd = m.usd > 0 ? ` · $${m.usd.toFixed(m.usd < 0.01 ? 4 : 2)}` : "";
-  return `Lượt này: ${fmtTok(m.inputTokens)} input · ${fmtTok(m.outputTokens)} output${usd}`;
+  return t("run.tip", { input: fmtTok(m.inputTokens), output: fmtTok(m.outputTokens), usd });
 }

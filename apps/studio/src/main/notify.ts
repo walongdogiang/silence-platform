@@ -12,6 +12,19 @@ export function permissionNotice(reason: unknown): Notice {
   return { title: "5ilence cần bạn duyệt", body: body || "Agent đang chờ quyết định của bạn." };
 }
 
+/** "Agent xong": chỉ tên chat, không bao giờ nội dung trả lời (cùng lý do như trên). */
+export function doneNotice(title: unknown): Notice {
+  const text = typeof title === "string" ? title.replace(/\s+/g, " ").trim() : "";
+  const body = text.length > MAX_BODY ? `${text.slice(0, MAX_BODY - 1)}…` : text;
+  return { title: "5ilence đã xong", body: body || "Agent đã trả lời xong." };
+}
+
+/** Tuỳ chọn renderer gửi kèm (Settings → Thông báo). Thiếu hoặc sai kiểu = bật, như trước. */
+export function noticeOpts(v: unknown): { notify: boolean; flash: boolean } {
+  const o = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  return { notify: o.notify !== false, flash: o.flash !== false };
+}
+
 /** Chỉ báo khi người dùng không nhìn thấy cửa sổ (đang ở app khác, thu nhỏ hoặc ẩn). */
 export function shouldNotify(win: { isFocused(): boolean; isMinimized(): boolean; isVisible(): boolean } | null): boolean {
   if (!win) return false;

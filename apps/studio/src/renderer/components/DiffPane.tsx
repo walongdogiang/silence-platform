@@ -2,18 +2,23 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import { Check, FileCode2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { summarizeDiff } from "../diffSummary";
+import { useT, type MsgKey } from "../i18n";
 import { useMonacoTheme } from "../monaco";
 import type { Diff } from "../models";
 import { DiffStat, splitPath } from "./DiffCard";
 import { PlaceholderView } from "./PlaceholderView";
 
-const loadingEl = <div className="placeholder compact">Đang tải trình soạn thảo…</div>;
+const TAB_LABEL: Record<"changes" | "tests" | "logs" | "preview", MsgKey> = {
+  changes: "review.changes",
+  tests: "review.tests",
+  logs: "review.logs",
+  preview: "review.preview",
+};
+
+/** Font, size and minimap come from Settings → Appearance → Code & terminal. */
+export type CodeView = { font: string; size: number; minimap: boolean };
 
 const baseOptions = {
-  minimap: { enabled: false },
-  fontSize: 13,
-  lineHeight: 20,
-  fontFamily: "Cascadia Code, Consolas, monospace",
   scrollBeyondLastLine: false,
   automaticLayout: true,
   glyphMargin: false,
@@ -42,9 +47,23 @@ export function DiffPane(props: {
   onReviewTab?: (t: ReviewTab) => void;
   /** Đổi mỗi lần user bấm mở diff từ thẻ trong chat: đưa về tab Changes. */
   showChangesSignal?: number;
+  code: CodeView;
 }) {
+  const t = useT();
+  const { font, size, minimap } = props.code;
+  const options = useMemo(
+    () => ({
+      ...baseOptions,
+      fontFamily: font,
+      fontSize: size,
+      lineHeight: Math.round(size * 1.55),
+      minimap: { enabled: minimap },
+    }),
+    [font, size, minimap],
+  );
   const [sub, setSub] = useState<ReviewTab>("changes");
   const theme = useMonacoTheme();
+  const loadingEl = <div className="placeholder compact">{t("review.loadingEditor")}</div>;
   useEffect(() => {
     if (props.showChangesSignal) pick("changes");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,7 +87,7 @@ export function DiffPane(props: {
       <div className="diff-subtabs">
         {(["changes", "tests", "logs", "preview"] as const).map((id) => (
           <button key={id} type="button" className={sub === id ? "active" : ""} onClick={() => pick(id)}>
-            {id === "changes" ? "Changes" : id === "tests" ? "Tests" : id === "logs" ? "Logs" : "Preview"}
+            {t(TAB_LABEL[id])}
             {id === "changes" && props.diff ? <em> 1</em> : null}
           </button>
         ))}
@@ -77,8 +96,8 @@ export function DiffPane(props: {
             type="button"
             className="icon-btn diff-close"
             onClick={props.onClose}
-            title="Đóng panel"
-            aria-label="Đóng panel Changes"
+            title={t("panel.close")}
+            aria-label={t("review.closePanel")}
           >
             <X size={15} />
           </button>
@@ -109,7 +128,7 @@ export function DiffPane(props: {
                 </button>
               );
             })}
-            {props.tree.length === 0 && !props.diff && <p className="hint">Chưa có thay đổi</p>}
+            {props.tree.length === 0 && !props.diff && <p className="hint">{t("review.noChanges")}</p>}
           </div>
 
           <div className="diff-main">
@@ -125,13 +144,13 @@ export function DiffPane(props: {
                   <span className="diff-filehead-actions">
                     {props.onReject && (
                       <button type="button" className="ghost sm" onClick={props.onReject}>
-                        Reject
+                        {t("common.reject")}
                       </button>
                     )}
                     {props.onApply && (
                       <button type="button" className="primary sm" onClick={props.onApply}>
                         <Check size={14} aria-hidden />
-                        Apply
+                        {t("common.apply")}
                       </button>
                     )}
                   </span>
@@ -148,7 +167,7 @@ export function DiffPane(props: {
                   modified={props.diff.after}
                   loading={loadingEl}
                   options={{
-                    ...baseOptions,
+                    ...options,
                     readOnly: true,
                     originalEditable: false,
                     renderSideBySide: true,
@@ -167,10 +186,10 @@ export function DiffPane(props: {
                   value={props.fileText}
                   loading={loadingEl}
                   onChange={(v) => props.onChange(v ?? "")}
-                  options={baseOptions}
+                  options={options}
                 />
               ) : (
-                <div className="placeholder compact">Chọn file hoặc chờ agent tạo diff</div>
+                <div className="placeholder compact">{t("review.pickFile")}</div>
               )}
             </div>
           </div>
@@ -178,13 +197,13 @@ export function DiffPane(props: {
       )}
 
       {sub === "tests" && (
-        <PlaceholderView title="Tests" detail="Chưa kết nối backend — UI only. Không có kết quả test thật." />
+        <PlaceholderView title={t("review.tests")} detail={t("review.testsStub")} />
       )}
       {sub === "logs" && (
-        <PlaceholderView title="Logs" detail="Mở panel dưới (Ctrl+J) để xem Terminal và Output." />
+        <PlaceholderView title={t("review.logs")} detail={t("review.logsStub")} />
       )}
       {sub === "preview" && (
-        <PlaceholderView title="Preview" detail="Chưa kết nối backend — UI only. Không có preview thật." />
+        <PlaceholderView title={t("review.preview")} detail={t("review.previewStub")} />
       )}
     </div>
   );

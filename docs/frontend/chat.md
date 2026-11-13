@@ -16,6 +16,8 @@ code:
 
 Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked for** (Thought + **Explored** + bước) → chữ AI → chân tin nhắn.
 
+Nhãn trong file này ghi bản tiếng Anh; UI hiện theo ngôn ngữ đã chọn ([i18n.md](i18n.md)).
+
 ## Cấu trúc một lượt (Cursor-like)
 
 ```
@@ -89,6 +91,14 @@ Trung tâm là thảo luận user ↔ AI. Bám Cursor: bubble user → **Worked 
 - Xong: **Thought Ns** nếu có `ms`, không thì **Thought briefly**; body giữ nguyên, thu/mở được.
 - Brief một dòng = dòng đầu của body (không thay full thinking).
 - Không invent Thought nếu lượt không có body/`ms` đáng kể và không có hoạt động.
+
+**Chế độ xem mặc định** (Settings → Trò chuyện, `transcriptOpen` trong `prefs.ts`): khối nào của lượt mở sẵn. User vẫn gập/mở tay được.
+
+| Chế độ | Lượt (Worked for) | Thought | Explored | Tool details |
+| --- | --- | --- | --- | --- |
+| Gọn (mặc định) | mở khi live | mở khi có body | mở khi live | đóng |
+| Suy nghĩ | mở khi live hoặc có Thought | mở khi có body | mở khi live | đóng |
+| Chi tiết | luôn mở | mở | mở | mở |
 
 ## Bộ bước (live → past)
 

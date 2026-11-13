@@ -5,7 +5,7 @@
  */
 
 /** Providers whose key can be set from Settings (ids from `config/models.yaml`). */
-export const KEYED_PROVIDERS = ["company-gateway", "anthropic"] as const;
+export const KEYED_PROVIDERS = ["company-gateway", "claude-api"] as const;
 export type KeyedProvider = (typeof KEYED_PROVIDERS)[number];
 
 /** Engine RPC methods the renderer may not call directly (they carry secrets). */

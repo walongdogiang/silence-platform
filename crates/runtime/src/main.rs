@@ -26,11 +26,69 @@ enum Cmd {
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
+    /// Run an eval suite (evals/README.md).
     Evals {
         #[arg(long)]
         dir: PathBuf,
         #[arg(long)]
         config: Option<PathBuf>,
+        #[arg(long)]
+        repo_root: Option<PathBuf>,
+        /// Override the model of every task (catalog id).
+        #[arg(long)]
+        model: Option<String>,
+        /// Only these task ids (comma separated).
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// Only tasks whose resolved model is this one (nightly: claude-haiku).
+        #[arg(long)]
+        pinned: Option<String>,
+        /// Attempts per task; a task passes only if all pass.
+        #[arg(long, default_value_t = 1)]
+        repeat: u32,
+        /// Re-run a failed task once; a pass marks it flaky.
+        #[arg(long)]
+        retry_failed: bool,
+        /// Stop starting tasks after spending this many USD.
+        #[arg(long)]
+        max_cost: Option<f64>,
+        /// Append to evals/history/runs.jsonl and regenerate SUMMARY.md.
+        #[arg(long)]
+        history: bool,
+        /// Label stored in history (manual, nightly, weekly…).
+        #[arg(long, default_value = "manual")]
+        profile: String,
+        /// Provider to run on (default: SILENCE_EVAL_SOURCE, else claude-cli).
+        #[arg(long)]
+        source: Option<String>,
+    },
+    /// Pin the cheapest passing model per task in <suite>/models.yaml.
+    EvalsCalibrate {
+        #[arg(long)]
+        dir: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        repo_root: Option<PathBuf>,
+        /// Only these task ids (re-calibrates pinned ones too).
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// Re-calibrate every task.
+        #[arg(long)]
+        all: bool,
+        /// Passes in a row needed to pin a model.
+        #[arg(long, default_value_t = 2)]
+        repeat: u32,
+        #[arg(long, default_value_t = 5.0)]
+        max_cost: f64,
+        #[arg(long)]
+        history: bool,
+        /// Provider to run on (default: SILENCE_EVAL_SOURCE, else claude-cli).
+        #[arg(long)]
+        source: Option<String>,
+    },
+    /// Regenerate evals/history/SUMMARY.md from runs.jsonl (no API calls).
+    EvalsReport {
         #[arg(long)]
         repo_root: Option<PathBuf>,
     },
@@ -67,11 +125,61 @@ async fn main() -> Result<()> {
             dir,
             config,
             repo_root,
+            model,
+            only,
+            pinned,
+            repeat,
+            retry_failed,
+            max_cost,
+            history,
+            profile,
+            source,
         } => {
             let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
             let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
-            let code = silence_engine::eval_runner::run(&dir, &cfg, &repo).await?;
+            let opts = silence_engine::eval_runner::RunOptions {
+                model,
+                only,
+                pinned,
+                repeat,
+                retry_failed,
+                max_cost,
+                history,
+                profile,
+                source: silence_engine::eval_runner::source_or_default(source),
+            };
+            let code = silence_engine::eval_runner::run(&dir, &cfg, &repo, &opts).await?;
             std::process::exit(code);
+        }
+        Cmd::EvalsCalibrate {
+            dir,
+            config,
+            repo_root,
+            only,
+            all,
+            repeat,
+            max_cost,
+            history,
+            source,
+        } => {
+            let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
+            let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
+            let opts = silence_engine::eval_calibrate::CalibrateOptions {
+                only,
+                all,
+                repeat,
+                max_cost,
+                history,
+                source: silence_engine::eval_runner::source_or_default(source),
+            };
+            let code = silence_engine::eval_calibrate::calibrate(&dir, &cfg, &repo, &opts).await?;
+            std::process::exit(code);
+        }
+        Cmd::EvalsReport { repo_root } => {
+            let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
+            let path = silence_engine::eval_history::write_summary(&repo)?;
+            println!("{}", path.display());
+            Ok(())
         }
         Cmd::McpBridge { port, token } => silence_engine::agent::run_bridge(port, &token).await,
     }

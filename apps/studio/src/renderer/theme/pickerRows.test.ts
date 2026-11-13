@@ -8,7 +8,7 @@ describe("pickerRows", () => {
     const models = [
       m("claude-opus", "Claude Opus 5.5"),
       m("north", "North Mini Code"),
-      m("claude-opus@api", "Claude Opus 5.5", false), // no Anthropic key
+      m("claude-opus@api", "Claude Opus 5.5", false), // no Claude API key
       m("claude-opus@cli", "Claude Opus 5.5", false), // CLI missing
     ];
     const { rows, dupes } = pickerRows(models, "auto");

@@ -10,7 +10,19 @@ export type ChatLine =
   | { kind: "user"; text: string; images?: string[]; imageIds?: string[]; imageCount?: number }
   | { kind: "token"; text: string }
   | { kind: "tool"; name: string; output: string }
-  | { kind: "route"; text: string }
+  /**
+   * Route of a model call. `slot` set on Auto (`frontier|strong|small`); `model` = short name;
+   * `purpose` = `agent`, `plan`, `title`, `subagent:explore`…; `reason` for the tooltip.
+   */
+  | {
+      kind: "route";
+      text: string;
+      model?: string;
+      slot?: string;
+      escalated?: boolean;
+      reason?: string;
+      purpose?: string;
+    }
   /** Engine gợi ý chuyển mode (vd. Ask → Agent) để áp dụng thay đổi vừa đề xuất. */
   | { kind: "mode_suggest"; mode: SessionMode; reason: string; prompt: string }
   | { kind: "sys"; text: string }
@@ -40,6 +52,12 @@ export type ChatThread = {
   forkedFromId?: string;
   /** auto = cắt từ prompt (tạm); ai = Engine sinh (`chat.title`); user = đổi tên tay. ai/user không bị ghi đè. */
   titleSource?: "auto" | "ai" | "user";
+  /** Ghim lên nhóm "Đã ghim" đầu lịch sử. */
+  pinned?: boolean;
+  /** Lưu trữ: ẩn khỏi nhóm ngày và tab, xem lại ở nhóm "Đã lưu trữ". */
+  archived?: boolean;
+  /** Đánh dấu chưa đọc (tay); tự xoá khi mở thread. */
+  unread?: boolean;
 };
 
 /** `applied`: Engine already wrote the file (Balanced) — card offers Undo, not Apply/Reject. */
