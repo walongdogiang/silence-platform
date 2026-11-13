@@ -18,7 +18,7 @@ Tham chiếu Cursor IDE (không phải Agents Window). Viewport desktop; không 
 
 ```mermaid
 flowchart LR
-  TB[TitleBar — panel / Chat / Settings]
+  TB[TitleBar — panel / Chat / Evals / Settings]
   subgraph chat [Chat Workspace]
     TAB[Tab ngang]
     WS[Hội thoại + composer]
@@ -27,7 +27,7 @@ flowchart LR
   TB --> chat
 ```
 
-- **TitleBar** (`TitleBar.tsx`): full width, `-webkit-app-region: drag`. Logo, menu File…Help, ← →, tên folder, **Toggle Panel → Chat → Settings**, − □ ×. Icon Chat (giữa panel và Settings) bật/tắt **cả** Chat Workspace. Nút panel (Ctrl+J) mở panel dưới: Terminal, Output; Problems / Debug Console / Ports = chưa gắn.
+- **TitleBar** (`TitleBar.tsx`): full width, `-webkit-app-region: drag`. Logo, menu File…Help, ← →, tên folder, **Toggle Panel → Chat → Evals → Settings**, − □ ×. Icon Chat (sau panel) bật/tắt **cả** Chat Workspace. Icon Evals chỉ hiện ở checkout có `evals/`, mở trang Evals thay khung chat và hiện chip tiến độ khi đang chạy (`evals.md`). Nút panel (Ctrl+J) mở panel dưới: Terminal, Output; Problems / Debug Console / Ports = chưa gắn.
 - **Không** cột icon dọc trái. **Không** Explorer trong Chat Workspace (không cây file, không icon thư mục trên sidebar).
 - **Chat Workspace** (khi hiện): hàng tab ngang trên khung chat + hội thoại giữa + lịch sử phải. Tab không đè panel lịch sử.
 - **Thanh Agents** (panel lịch sử phải): nút góc trên phải ẩn/hiện panel — tooltip `Toggle Agents Side Bar (Ctrl+Alt+U)`. Khi ẩn, nút hiện lại ở cuối hàng tab. Không xóa lịch sử.

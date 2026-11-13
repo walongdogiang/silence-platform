@@ -16,7 +16,11 @@ Eval là bài kiểm tra định kỳ cho agent: cho Agent thật (gọi model t
 
 ## Cần gì
 
-- `SILENCE_API_BASE`, `SILENCE_API_KEY` (OpenRouter theo `config/models.yaml`). Tài khoản phải còn credit.
+- Thông tin đăng nhập của **nguồn bạn chọn để chạy**. Không bắt buộc nguồn nào (xem Chọn source):
+  - OpenRouter `company-gateway`: `SILENCE_API_BASE`, `SILENCE_API_KEY`. Các id ghim thuộc nguồn này, nên cần khi chạy **không** chọn nguồn (CI hiện chạy như vậy).
+  - Claude API `claude-api`: `ANTHROPIC_API_KEY`.
+  - Claude CLI `claude-cli`: lệnh `claude` đã đăng nhập.
+  - Tài khoản phải còn credit.
 - `python` trên PATH: `verify_cmd` chạy test của fixture.
 - Rust build được `silence-engine`. Trên Windows thiếu SDK thì thay `cargo` bằng `.\scripts\cargo-msvc.bat`.
 
@@ -26,6 +30,7 @@ Eval là bài kiểm tra định kỳ cho agent: cho Agent thật (gọi model t
 npm run evals                      # bộ v0, model theo ghim, ghi lịch sử
 npm run evals -- --only E01-edit-add-pow,B06-bugfix-mul
 npm run evals -- --model claude-sonnet   # ép mọi task dùng 1 model (thử nghiệm)
+npm run evals -- --source claude-cli     # chạy cả bộ trên một nguồn: claude-cli, claude-api, company-gateway
 npm run evals:calibrate            # hiệu chỉnh task chưa ghim của v0
 npm run evals:report               # sinh lại history/SUMMARY.md, không gọi API
 cargo run -p silence-engine -- evals --dir evals/modes --repo-root . --history
@@ -48,7 +53,7 @@ Option của `evals`:
 
 ## Chạy trong Studio
 
-Settings (Appearance) → **Evals**, mục chỉ hiện khi Studio chạy từ checkout của repo này. Trang này làm được mọi thứ của lệnh `evals` mà không cần nhớ option:
+Settings → **Giới thiệu** → hàng **Evals** → nút mở trang. Mục chỉ hiện khi Studio chạy từ checkout của repo này. Trang này làm được mọi thứ của lệnh `evals` mà không cần nhớ option:
 - chọn bộ, chọn từng task (lọc theo loại, theo kết quả lần trước), nguồn, model, mức suy nghĩ, số lần thử, trần chi phí;
 - xem **ước tính chi phí** trước khi chạy, rồi xem tiến độ trực tiếp và **Dừng** được giữa chừng;
 - **Chạy lại task trượt**, mở **chi tiết task** (báo cáo của agent, file đã đổi so với fixture, audit, thư mục kết quả);
@@ -58,7 +63,8 @@ Mặc định lượt chạy từ Studio không ghi `history/runs.jsonl` (profil
 
 ## Chọn source
 
-`--source <provider>` (CLI) hoặc ô **Nguồn** (Studio) chạy mọi task trên một nguồn: OpenRouter `company-gateway`, Claude API `claude-api`, Claude CLI `claude-cli`.
+Eval không cố định nguồn. `--source <provider>` (CLI) hoặc ô **Nguồn** (Studio) chạy mọi task trên một nguồn: OpenRouter `company-gateway`, Claude API `claude-api`, Claude CLI `claude-cli`.
+- Không chọn nguồn (bỏ `--source`, hoặc Studio để "Model riêng của từng task"): mỗi task chạy đúng id model của nó (id đã ghim hoặc `model:` trong manifest). Các id này hiện thuộc OpenRouter, trừ task ghi rõ nguồn như `claude-sonnet@api`.
 - Model được **giữ tier, đổi nguồn**: cùng họ model trước (`claude-haiku` → `claude-haiku@api`), không có thì model cùng tier của nguồn đó. Không có cả hai thì task thành SKIP, kèm lý do.
 - Task `auto` chạy Auto trong nguồn đã chọn.
 - Ghim (`models.yaml`) và hiệu chỉnh vẫn dùng id của OpenRouter; một bộ ghim dùng chung cho mọi nguồn.

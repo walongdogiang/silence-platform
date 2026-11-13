@@ -396,6 +396,8 @@ export type EvalProgress =
   | { type: "task_done"; task: EvalTaskMetrics }
   | { type: "finished"; summary: EvalRunSummary }
   | { type: "failed"; message: string };
+/** `eval.status`: every progress event of the current (or last) run, to replay after a reload. */
+export type EvalLiveStatus = { running: boolean; events: EvalProgress[] };
 /** `eval.task {suite, task_id, attempt?}`. */
 export type EvalTaskDetail = {
   suite: string;

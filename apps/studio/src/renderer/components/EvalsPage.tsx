@@ -14,33 +14,20 @@ import {
   withSuite,
   type EvalStore,
 } from "../evalConfig";
+import { liveProgress, type Live } from "../evalLive";
 import { useT, type T } from "../i18n";
 import { MarkdownMessage } from "./MarkdownMessage";
 import type {
   EvalCatalog,
   EvalConfig,
   EvalEstimate,
-  EvalProgress,
   EvalRun,
-  EvalRunSummary,
   EvalStatus,
   EvalTaskDetail,
-  EvalTaskMetrics,
   ModelInfo,
 } from "../types";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
-
-type LiveRow = { id: string; model: string; attempt?: number; metrics?: EvalTaskMetrics; skip?: string };
-type Live = {
-  suite: string;
-  order: string[];
-  rows: Record<string, LiveRow>;
-  running: boolean;
-  stopping: boolean;
-  summary?: EvalRunSummary;
-  failed?: string;
-};
 
 function rpc<R>(method: string, params?: unknown): Promise<R> {
   return window.silence.rpc(method, params) as Promise<R>;
@@ -62,7 +49,15 @@ function StatusBadge(props: { status?: EvalStatus | "RUN" | "WAIT"; flaky?: bool
  * estimate; run with live progress; open one task's report, changes and audit. Named setups and
  * "reset to default" are kept in `evalConfig.ts`.
  */
-export function EvalsPage(props: { models: ModelInfo[] }) {
+export function EvalsPage(props: {
+  models: ModelInfo[];
+  /** Run state kept by the App (`useEvalLive`), so it survives closing this page. */
+  live: Live | null;
+  /** Increases when a run ends: reload the catalog and recent runs. */
+  ended: number;
+  onStopping: () => void;
+  onClose: () => void;
+}) {
   const t = useT();
   const [catalog, setCatalog] = useState<EvalCatalog | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -74,7 +69,7 @@ export function EvalsPage(props: { models: ModelInfo[] }) {
   const [kindFilter, setKindFilter] = useState("");
   const [lastFilter, setLastFilter] = useState<"" | "failed" | "never">("");
   const [query, setQuery] = useState("");
-  const [live, setLive] = useState<Live | null>(null);
+  const live = props.live;
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [detail, setDetail] = useState<EvalTaskDetail | null>(null);
   const [detailTab, setDetailTab] = useState<"report" | "diff" | "audit">("report");
@@ -103,31 +98,11 @@ export function EvalsPage(props: { models: ModelInfo[] }) {
     }
   };
 
+  // On open and after each run that ends while the App listens.
   useEffect(() => {
     void refresh();
-    const off = window.silence.onEval?.((payload) => onProgress(payload as EvalProgress));
-    return () => off?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function onProgress(p: EvalProgress) {
-    setLive((cur) => {
-      if (p.type === "started") {
-        const rows: Record<string, LiveRow> = {};
-        for (const id of p.tasks) rows[id] = { id, model: "" };
-        return { suite: p.suite, order: p.tasks, rows, running: true, stopping: false };
-      }
-      if (!cur) return cur;
-      const rows = { ...cur.rows };
-      if (p.type === "task_started") rows[p.id] = { ...rows[p.id], id: p.id, model: p.model, attempt: p.attempt };
-      if (p.type === "skipped") rows[p.id] = { id: p.id, model: p.model, skip: p.reason };
-      if (p.type === "task_done") rows[p.task.id] = { id: p.task.id, model: p.task.model, metrics: p.task };
-      if (p.type === "finished") return { ...cur, rows, running: false, stopping: false, summary: p.summary };
-      if (p.type === "failed") return { ...cur, rows, running: false, stopping: false, failed: p.message };
-      return { ...cur, rows };
-    });
-    if (p.type === "finished" || p.type === "failed") void refresh();
-  }
+  }, [props.ended]);
 
   // Estimate (debounced) whenever the config changes.
   useEffect(() => {
@@ -179,7 +154,7 @@ export function EvalsPage(props: { models: ModelInfo[] }) {
   }
 
   async function stop() {
-    setLive((l) => (l ? { ...l, stopping: true } : l));
+    props.onStopping();
     await rpc("eval.cancel").catch(() => undefined);
   }
 
@@ -224,15 +199,19 @@ export function EvalsPage(props: { models: ModelInfo[] }) {
     );
   }
 
-  const done = live ? live.order.filter((id) => live.rows[id]?.metrics || live.rows[id]?.skip).length : 0;
-  const liveUsd = live ? Object.values(live.rows).reduce((a, r) => a + (r.metrics?.cost_usd ?? 0), 0) : 0;
+  const { done, usd: liveUsd } = liveProgress(live);
   const est = estimate?.estimate;
 
   return (
     <div className="network-page evals-page">
-      <header>
-        <h2>{t("evals.title")}</h2>
-        <p>{t("evals.intro")}</p>
+      <header className="evals-head">
+        <div>
+          <h2>{t("evals.title")}</h2>
+          <p>{t("evals.intro")}</p>
+        </div>
+        <button type="button" className="evals-close" title={t("evals.close")} aria-label={t("evals.close")} onClick={props.onClose}>
+          <X size={15} />
+        </button>
       </header>
 
       <div className="evals-grid">

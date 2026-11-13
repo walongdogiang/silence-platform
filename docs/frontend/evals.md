@@ -4,6 +4,7 @@ type: spec
 code:
   - apps/studio/src/renderer/components/EvalsPage.tsx
   - apps/studio/src/renderer/evalConfig.ts
+  - apps/studio/src/renderer/evalLive.ts
   - crates/runtime/src/eval_rpc.rs
 ---
 
@@ -13,8 +14,16 @@ Chạy eval agent ngay trong Studio, thay cho `npm run evals …`. Cách eval ch
 
 ## Mở trang
 
-- Settings → **Giới thiệu** → hàng **Evals** → nút mở trang (chỉ hiện khi Engine thấy thư mục `evals/`). Trang thay chỗ khung chat; mở chat hoặc file khác thì trang đóng.
-- Mục chỉ hiện khi Engine thấy thư mục `evals/` ở repo root (`eval.catalog` trả `available: true`), tức là khi chạy từ checkout của repo 5ilence.
+- Lối vào chính: icon **Evals** (bình thí nghiệm) trên TitleBar, giữa Chat và Settings. Ngoài ra: **View → Evals**, `Ctrl+Shift+E`, hoặc Settings → **Giới thiệu** → hàng **Evals** (lối tắt).
+- Bấm lại icon, nút **×** ở đầu trang, hoặc mở chat/file khác thì trang đóng. Lượt chạy vẫn tiếp tục.
+- Mọi lối vào chỉ hiện khi Engine thấy thư mục `evals/` ở repo root (`eval.catalog` trả `available: true`), tức là khi chạy từ checkout của repo 5ilence.
+
+## Theo dõi khi chạy
+
+- Trạng thái lượt chạy nằm ở App (`evalLive.ts`, `useEvalLive`), không nằm trong trang: đóng trang không mất tiến độ.
+- Khi đang chạy, icon trên TitleBar có chip `Đang chạy x/y · $` (chuỗi `evals.running`); bấm để mở lại trang.
+- Mở app hoặc reload cửa sổ: App gọi `eval.status` (`{running, events}`: mọi sự kiện `eval.progress` của lượt hiện tại hoặc lượt gần nhất) rồi phát lại qua cùng reducer, nên bảng kết quả hiện đủ.
+- Chạy xong hoặc lỗi khi cửa sổ không được focus: thông báo OS theo Settings → Thông báo (dùng `notifyDone`, chỉ gửi tên bộ và số pass/fail).
 
 ## Bố cục
 

@@ -322,6 +322,7 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             Ok(json!({"ok": true}))
         }
         "eval.cancel" => Ok(json!({"cancelled": state.evals.cancel()})),
+        "eval.status" => Ok(state.evals.status()),
         "eval.runs" => Ok(state.evals.runs(20)),
         "eval.task" => {
             let suite = req.params.get("suite").and_then(|v| v.as_str()).unwrap_or("");

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, MessageSquare, Minus, PanelBottom, Settings, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, FlaskConical, MessageSquare, Minus, PanelBottom, Settings, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import logo from "../assets/logo.png";
 import { useT, type MsgKey } from "../i18n";
@@ -30,6 +30,8 @@ export function TitleBar(props: {
   onToggleChatWorkspace: () => void;
   onToggleHistory: () => void;
   onSettings: () => void;
+  /** Evals page (dev checkout only: undefined hides the button and the menu item). */
+  evals?: { open: boolean; running: boolean; progress: string; onToggle: () => void };
   onOpenWorkspace: () => void;
   onQuit: () => void;
 }) {
@@ -56,6 +58,7 @@ export function TitleBar(props: {
         { label: "Chat Workspace", run: props.onToggleChatWorkspace },
         { label: props.historyHidden ? t("shell.showAgents") : t("shell.hideAgents"), run: props.onToggleHistory, off: !chat },
         { label: t("shell.togglePanel"), run: props.onTogglePanel },
+        ...(props.evals ? [{ label: t("evals.menu"), run: props.evals.onToggle }] : []),
       ];
     }
     if (id === "terminal") {
@@ -146,6 +149,18 @@ export function TitleBar(props: {
         >
           <MessageSquare size={15} />
         </button>
+        {props.evals ? (
+          <button
+            type="button"
+            className={`chrome-icon chrome-evals ${props.evals.open ? "on" : ""} ${props.evals.running ? "running" : ""}`}
+            aria-pressed={props.evals.open}
+            title={props.evals.running ? props.evals.progress : t("evals.openKey")}
+            onClick={props.evals.onToggle}
+          >
+            <FlaskConical size={15} />
+            {props.evals.running ? <span className="chrome-evals-chip">{props.evals.progress}</span> : null}
+          </button>
+        ) : null}
         <button type="button" className="chrome-icon" title={t("shell.settings")} onClick={props.onSettings}>
           <Settings size={15} />
         </button>
