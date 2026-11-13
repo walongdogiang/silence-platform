@@ -14,8 +14,36 @@ use silence_protocol::{PermissionMode, SessionEvent, SessionMode};
 use silence_router::Catalog;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+/// Set to stop a run: no new task starts and the running attempt is aborted.
+pub type CancelFlag = Arc<AtomicBool>;
+
+/// Per-attempt settings that are not part of the task: the source to run on, an effort
+/// override, and the cancel flag.
+#[derive(Debug, Clone, Default)]
+pub struct AttemptOpts {
+    /// Provider an `auto` task routes within (`session.set_model` source).
+    pub source: Option<String>,
+    /// Overrides the task's `effort`.
+    pub effort: Option<String>,
+    pub cancel: CancelFlag,
+}
+
+/// Progress of a run, for the CLI printer and Studio (`eval.progress`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EvalProgress {
+    Started { run_id: String, suite: String, tasks: Vec<String> },
+    TaskStarted { id: String, model: String, attempt: u32 },
+    Skipped { id: String, model: String, reason: String },
+    TaskDone { task: TaskMetrics },
+    Finished { summary: Box<RunMetrics> },
+    /// The run could not start or crashed (bad suite, IO error…).
+    Failed { message: String },
+}
 
 /// Model for tasks with no pin anywhere: the cheapest tier (budget < $10/month).
 pub const DEFAULT_MODEL: &str = "claude-haiku";
@@ -56,6 +84,22 @@ pub(crate) struct Task {
 }
 
 impl Task {
+    /// Session mode the task runs in (`mode`, else Plan for plan tasks, else Agent).
+    pub fn session_mode(&self) -> SessionMode {
+        if let Some(m) = self.mode {
+            m
+        } else if self.plan_only || self.kind == "plan" {
+            SessionMode::Plan
+        } else {
+            SessionMode::Agent
+        }
+    }
+
+    /// Effort fixed by the task (`auto` when unset).
+    pub fn effort(&self) -> Option<&str> {
+        self.effort.as_deref()
+    }
+
     /// First env var in `requires_env` that is unset or empty.
     pub(crate) fn missing_env(&self) -> Option<&str> {
         self.requires_env
@@ -205,6 +249,10 @@ pub struct RunOptions {
     pub history: bool,
     /// Label stored in history (`manual`, `nightly`, `weekly`…).
     pub profile: String,
+    /// Run every task on this source (same model family or tier there; `auto` routes within it).
+    pub source: Option<String>,
+    /// Effort for every task (overrides the manifest's `effort`).
+    pub effort: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -218,19 +266,22 @@ impl Default for RunOptions {
             max_cost: None,
             history: false,
             profile: "manual".into(),
+            source: None,
+            effort: None,
         }
     }
 }
 
 /// A loaded suite: manifest, pins, catalog and paths.
-pub(crate) struct Suite {
+pub struct Suite {
     pub(crate) name: String,
     pub(crate) manifest: Manifest,
     pub(crate) pins: ModelPins,
     pub(crate) pins_path: PathBuf,
     catalog: Catalog,
     pub(crate) results_dir: PathBuf,
-    fixture: PathBuf,
+    pub(crate) fixture: PathBuf,
+    pub(crate) repo_root: PathBuf,
 }
 
 impl Suite {
@@ -261,7 +312,20 @@ impl Suite {
             catalog,
             results_dir,
             fixture,
+            repo_root: repo_root.to_path_buf(),
         })
+    }
+
+    /// Model a run will use for `task`: [`Suite::model_for`], then moved to `source` (same
+    /// family or tier there). `Err` = the task would be skipped, with the reason.
+    pub(crate) fn planned_model(&self, task: &Task, cli: Option<&str>, source: Option<&str>) -> std::result::Result<String, String> {
+        let model = self
+            .model_for(task, cli)
+            .ok_or_else(|| "unsolved: chưa model nào qua được".to_string())?;
+        match source {
+            Some(src) => self.catalog.same_model_on(src, &model).map_err(|e| format!("{e}")),
+            None => Ok(model),
+        }
     }
 
     pub(crate) fn model_for(&self, task: &Task, cli: Option<&str>) -> Option<String> {
@@ -275,7 +339,7 @@ impl Suite {
     /// Attempt `n` (1-based) of `task` on `model`, in `results/<id>/attempt-<n>/` (workspace,
     /// audit, report). Attempt 1 clears `results/<id>/`, so a task keeps only its latest run, but
     /// every attempt of that run (a failed one in the middle of `--repeat` stays inspectable).
-    pub(crate) async fn attempt(&self, task: &Task, model: &str, n: u32) -> Result<TaskMetrics> {
+    pub(crate) async fn attempt(&self, task: &Task, model: &str, n: u32, opts: &AttemptOpts) -> Result<TaskMetrics> {
         let root = self.results_dir.join(&task.id);
         if n <= 1 && root.exists() {
             // Old audit lines would leak into `audit_matches` / `audit_absent`.
@@ -286,17 +350,12 @@ impl Suite {
         copy_dir(&self.fixture, &ws)?;
         let audit = AuditLog::open(&task_dir)?;
         let ctx = Arc::new(AppCtx::new(self.catalog.clone(), audit));
-        let mode = if let Some(m) = task.mode {
-            m
-        } else if task.plan_only || task.kind == "plan" {
-            SessionMode::Plan
-        } else {
-            SessionMode::Agent
-        };
+        let mode = task.session_mode();
+        let effort = opts.effort.clone().or_else(|| task.effort.clone());
         let started = std::time::Instant::now();
         let mut metrics = TaskMetrics::new(&task.id, &task.kind);
         metrics.model = model.to_string();
-        metrics.effort = task.effort.clone().unwrap_or_else(|| "auto".into());
+        metrics.effort = effort.clone().unwrap_or_else(|| "auto".into());
         let sid = agent::create_session(
             &ctx,
             &ws.to_string_lossy(),
@@ -305,7 +364,13 @@ impl Suite {
             PermissionMode::Yolo,
         )
         .await?;
-        if let Some(e) = &task.effort {
+        if model == "auto" {
+            if let Some(src) = &opts.source {
+                // Auto on the chosen source (the CLI included).
+                agent::set_model(&ctx, &sid, "auto", Some(src)).await?;
+            }
+        }
+        if let Some(e) = &effort {
             agent::set_effort(&ctx, &sid, e).await?;
         }
         // Base context (system + rules + tool schemas): only used when the provider
@@ -319,8 +384,16 @@ impl Suite {
         agent::prompt(ctx.clone(), sid.clone(), task.prompt.clone()).await?;
         let mut report = String::new();
         let mut plan = String::new();
-        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics).await;
+        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics, &opts.cancel, &ctx, &sid).await;
         metrics.finish();
+        let _ = std::fs::write(task_dir.join("report.md"), &report);
+        if opts.cancel.load(Ordering::Relaxed) {
+            metrics.status = Status::Skip;
+            metrics.error = Some("cancelled".into());
+            metrics.attempts = 1;
+            metrics.duration_secs = started.elapsed().as_secs_f64();
+            return Ok(metrics);
+        }
         let passed = ok_run && {
             let audit_text = std::fs::read_to_string(task_dir.join("audit.jsonl")).unwrap_or_default();
             check_pass(task, &ws, &self.fixture, &report, &plan, &self.manifest.verify_cmd)
@@ -381,7 +454,6 @@ fn git_sha(repo_root: &Path) -> String {
 }
 
 fn skipped(task: &Task, model: &str, reason: String) -> TaskMetrics {
-    println!("SKIP {} ({reason})", task.id);
     let mut m = TaskMetrics::new(&task.id, &task.kind);
     m.model = model.into();
     m.status = Status::Skip;
@@ -391,33 +463,93 @@ fn skipped(task: &Task, model: &str, reason: String) -> TaskMetrics {
 
 pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &RunOptions) -> Result<i32> {
     let suite = Suite::load(dir, catalog_path, repo_root)?;
-    let meta = RunMeta::now(&suite.name, &opts.profile, opts.repeat.max(1), repo_root);
+    let cancel = CancelFlag::default();
+    let summary = run_with(&suite, opts, &cancel, &mut print_progress).await?;
+    finish_run(&summary, repo_root, opts.history)
+}
+
+/// CLI output of a run (same lines as before the progress callback existed).
+pub fn print_progress(p: EvalProgress) {
+    match p {
+        EvalProgress::Skipped { id, reason, .. } => println!("SKIP {id} ({reason})"),
+        EvalProgress::TaskDone { task: t } => println!(
+            "{} {} {} {} {}/{}{} ${:.4}",
+            t.status.as_str(),
+            t.id,
+            t.kind,
+            t.model,
+            t.passes,
+            t.attempts,
+            if t.flaky { " flaky" } else { "" },
+            t.cost_usd
+        ),
+        _ => {}
+    }
+}
+
+/// The run itself: every selected task in manifest order, reported through `on`. The caller
+/// writes the results (`finish_run`). `cancel` stops it between tasks and aborts the attempt in
+/// flight; the rest become SKIP ("cancelled").
+pub async fn run_with(
+    suite: &Suite,
+    opts: &RunOptions,
+    cancel: &CancelFlag,
+    on: &mut (dyn FnMut(EvalProgress) + Send),
+) -> Result<RunMetrics> {
+    let meta = RunMeta::now(&suite.name, &opts.profile, opts.repeat.max(1), &suite.repo_root);
+    let selected: Vec<&Task> = suite
+        .manifest
+        .tasks
+        .iter()
+        .filter(|t| opts.only.is_empty() || opts.only.contains(&t.id))
+        .collect();
+    on(EvalProgress::Started {
+        run_id: meta.run_id.clone(),
+        suite: suite.name.clone(),
+        tasks: selected.iter().map(|t| t.id.clone()).collect(),
+    });
+    let attempt_opts = AttemptOpts {
+        source: opts.source.clone(),
+        effort: opts.effort.clone(),
+        cancel: cancel.clone(),
+    };
     let mut rows: Vec<TaskMetrics> = Vec::new();
     let mut spent = 0.0;
     let mut stopped: Option<String> = None;
     let over_budget = |spent: f64| opts.max_cost.is_some_and(|cap| spent >= cap);
-    for task in &suite.manifest.tasks {
-        if !opts.only.is_empty() && !opts.only.contains(&task.id) {
-            continue;
-        }
+    for task in selected {
         let Some(model) = suite.model_for(task, opts.model.as_deref()) else {
             if opts.pinned.is_none() {
-                rows.push(skipped(task, UNSOLVED, "unsolved: chưa model nào qua được".into()));
+                skip_task(on, &mut rows, task, UNSOLVED, "unsolved: chưa model nào qua được".into());
             }
             continue;
         };
         if opts.pinned.as_ref().is_some_and(|p| p != &model) {
             continue;
         }
+        // "Run on source X": same family or tier there; `auto` routes within X.
+        let model = match &opts.source {
+            Some(src) => match suite.catalog.same_model_on(src, &model) {
+                Ok(m) => m,
+                Err(e) => {
+                    skip_task(on, &mut rows, task, &model, format!("{e}"));
+                    continue;
+                }
+            },
+            None => model,
+        };
         if let Some(missing) = task.missing_env() {
-            rows.push(skipped(task, &model, format!("{missing} not set")));
+            skip_task(on, &mut rows, task, &model, format!("{missing} not set"));
             continue;
+        }
+        if stopped.is_none() && cancel.load(Ordering::Relaxed) {
+            stopped = Some("cancelled".into());
         }
         if stopped.is_none() && over_budget(spent) {
             stopped = Some(format!("đạt trần chi ${:.2}", opts.max_cost.unwrap_or_default()));
         }
         if let Some(reason) = &stopped {
-            rows.push(skipped(task, &model, reason.clone()));
+            skip_task(on, &mut rows, task, &model, reason.clone());
             continue;
         }
         let mut agg = TaskMetrics::new(&task.id, &task.kind);
@@ -425,9 +557,13 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &RunOp
         let mut n = 0;
         for _ in 0..opts.repeat.max(1) {
             n += 1;
-            let m = suite.attempt(task, &model, n).await?;
+            on(EvalProgress::TaskStarted { id: task.id.clone(), model: model.clone(), attempt: n });
+            let m = suite.attempt(task, &model, n, &attempt_opts).await?;
             spent += m.cost_usd;
             agg.merge_attempt(&m);
+            if m.error.as_deref() == Some("cancelled") {
+                stopped = Some("cancelled".into());
+            }
             if let Some(code) = m.error_code.as_deref().filter(|c| is_fatal_error(c)) {
                 stopped = Some(format!("{code}: dừng lượt chạy"));
             }
@@ -437,7 +573,8 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &RunOp
         }
         agg.status = agg.aggregate_status();
         if agg.status == Status::Fail && opts.retry_failed && stopped.is_none() && !over_budget(spent) {
-            let m = suite.attempt(task, &model, n + 1).await?;
+            on(EvalProgress::TaskStarted { id: task.id.clone(), model: model.clone(), attempt: n + 1 });
+            let m = suite.attempt(task, &model, n + 1, &attempt_opts).await?;
             spent += m.cost_usd;
             agg.add_usage(&m);
             if m.status == Status::Pass {
@@ -445,21 +582,26 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &RunOp
                 agg.flaky = true;
             }
         }
-        println!(
-            "{} {} {} {} {}/{}{} ${:.4}",
-            agg.status.as_str(),
-            task.id,
-            task.kind,
-            agg.model,
-            agg.passes,
-            agg.attempts,
-            if agg.flaky { " flaky" } else { "" },
-            agg.cost_usd
-        );
+        if agg.error.as_deref() == Some("cancelled") {
+            agg.status = Status::Skip;
+        }
+        on(EvalProgress::TaskDone { task: agg.clone() });
         rows.push(agg);
     }
     let summary = RunMetrics::new(meta, rows, stopped);
-    finish_run(&summary, repo_root, opts.history)
+    on(EvalProgress::Finished { summary: Box::new(summary.clone()) });
+    Ok(summary)
+}
+
+fn skip_task(
+    on: &mut (dyn FnMut(EvalProgress) + Send),
+    rows: &mut Vec<TaskMetrics>,
+    task: &Task,
+    model: &str,
+    reason: String,
+) {
+    on(EvalProgress::Skipped { id: task.id.clone(), model: model.into(), reason: reason.clone() });
+    rows.push(skipped(task, model, reason));
 }
 
 /// Print the table, write `results/metrics-<run_id>.json`, optionally record history.
@@ -475,17 +617,26 @@ pub(crate) fn finish_run(summary: &RunMetrics, repo_root: &Path, history: bool) 
     }
     println!();
     print!("{}", summary.table());
+    let out = save_run(summary, repo_root, history)?;
+    println!("metrics: {}", out.display());
+    if history {
+        println!("history: {}", eval_history::history_dir(repo_root).join("SUMMARY.md").display());
+    }
+    Ok(summary.exit_code())
+}
+
+/// Write `results/metrics-<run_id>.json` and, with `history`, the history line + SUMMARY.md.
+/// No console output (Studio runs use this).
+pub fn save_run(summary: &RunMetrics, repo_root: &Path, history: bool) -> Result<PathBuf> {
     let out = repo_root
         .join("evals/results")
         .join(format!("metrics-{}.json", summary.meta.run_id));
     std::fs::write(&out, serde_json::to_string_pretty(summary)?)?;
-    println!("metrics: {}", out.display());
     if history {
         eval_history::append(repo_root, summary)?;
-        let path = eval_history::write_summary(repo_root)?;
-        println!("history: {}", path.display());
+        eval_history::write_summary(repo_root)?;
     }
-    Ok(summary.exit_code())
+    Ok(out)
 }
 
 async fn wait_done(
@@ -493,15 +644,37 @@ async fn wait_done(
     report: &mut String,
     plan: &mut String,
     metrics: &mut TaskMetrics,
+    cancel: &CancelFlag,
+    ctx: &Arc<AppCtx>,
+    sid: &str,
 ) -> bool {
     let deadline = tokio::time::Duration::from_secs(180);
     let start = tokio::time::Instant::now();
+    let mut idle = tokio::time::Duration::ZERO;
+    let tick = tokio::time::Duration::from_millis(500);
     loop {
         if start.elapsed() > deadline {
             metrics.error = Some("eval deadline 180s".into());
             return false;
         }
-        let ev = tokio::time::timeout(tokio::time::Duration::from_secs(120), rx.recv()).await;
+        if cancel.load(Ordering::Relaxed) {
+            let _ = agent::abort(ctx, sid).await;
+            return false;
+        }
+        // Short waits so a cancel is seen within half a second; 120s with no event = stuck.
+        let ev = match tokio::time::timeout(tick, rx.recv()).await {
+            Err(_) => {
+                idle += tick;
+                if idle < tokio::time::Duration::from_secs(120) {
+                    continue;
+                }
+                Err(())
+            }
+            Ok(v) => {
+                idle = tokio::time::Duration::ZERO;
+                Ok(v)
+            }
+        };
         if let Ok(Some(e)) = &ev {
             metrics.observe(e);
         }
@@ -1179,6 +1352,49 @@ mod tests {
         m.finalize_cost(price);
         // 1M estimated input on Sonnet ($1) + 1M on Opus ($2) + the reported $0.25.
         assert!((m.cost_usd - 3.25).abs() < 1e-9, "{}", m.cost_usd);
+    }
+
+    fn shipped_suite(name: &str) -> (Suite, tempfile::TempDir) {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        // Results go to a temp repo root so tests never touch evals/results.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("evals")).unwrap();
+        let mut s = Suite::load(&repo.join("evals").join(name), &repo.join("config/models.yaml"), tmp.path()).unwrap();
+        s.fixture = repo.join("evals").join(&s.manifest.workspace);
+        (s, tmp)
+    }
+
+    #[tokio::test]
+    async fn run_with_reports_progress_without_calling_a_model() {
+        let (suite, _tmp) = shipped_suite("v0");
+        let opts = RunOptions {
+            only: vec!["E01-edit-add-pow".into(), "B06-bugfix-mul".into()],
+            max_cost: Some(0.0),
+            source: Some("anthropic".into()),
+            ..Default::default()
+        };
+        let mut seen = Vec::new();
+        let summary = run_with(&suite, &opts, &CancelFlag::default(), &mut |p| seen.push(p)).await.unwrap();
+        assert!(matches!(&seen[0], EvalProgress::Started { tasks, .. } if tasks.len() == 2));
+        let skipped: Vec<(String, String)> = seen
+            .iter()
+            .filter_map(|p| match p {
+                EvalProgress::Skipped { id, model, .. } => Some((id.clone(), model.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(skipped.len(), 2, "a $0 cap starts nothing");
+        assert!(skipped.iter().all(|(_, m)| m.ends_with("@api")), "models moved to the source: {skipped:?}");
+        assert!(matches!(seen.last(), Some(EvalProgress::Finished { .. })));
+        assert_eq!(summary.counts.skip, 2);
+
+        let cancel = CancelFlag::default();
+        cancel.store(true, Ordering::Relaxed);
+        let opts = RunOptions { only: vec!["E01-edit-add-pow".into()], ..Default::default() };
+        let mut seen = Vec::new();
+        let summary = run_with(&suite, &opts, &cancel, &mut |p| seen.push(p)).await.unwrap();
+        assert_eq!(summary.stopped.as_deref(), Some("cancelled"));
+        assert!(seen.iter().any(|p| matches!(p, EvalProgress::Skipped { reason, .. } if reason == "cancelled")));
     }
 
     #[test]

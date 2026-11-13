@@ -42,6 +42,7 @@ import { DiffPane } from "./components/DiffPane";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
 import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
 import { NetworkPanel } from "./components/NetworkPanel";
+import { EvalsPage } from "./components/EvalsPage";
 import {
   loadPick,
   loadPreferredProvider,
@@ -233,6 +234,9 @@ export function App() {
   const t = translator(appearance.lang);
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
   const [showNetwork, setShowNetwork] = useState(false);
+  /** Settings → Evals full page (dev: only when the Engine sees an `evals/` folder). */
+  const [showEvals, setShowEvals] = useState(false);
+  const [evalsAvailable, setEvalsAvailable] = useState(false);
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
   const [focusModel, setFocusModel] = useState<{ id: string; n: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
@@ -259,6 +263,13 @@ export function App() {
   const [budgetHit, setBudgetHit] = useState(false);
   /** Settings → Models → scroll to Auto (`NetworkPanel.focusAuto`). */
   const [focusAuto, setFocusAuto] = useState(0);
+  // The Evals entry only shows when the Engine finds `evals/` (dev checkout).
+  useEffect(() => {
+    void window.silence
+      ?.rpc("eval.catalog")
+      .then((r) => setEvalsAvailable(Boolean((r as { available?: boolean }).available)))
+      .catch(() => setEvalsAvailable(false));
+  }, []);
   const modelsRef = useRef<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
   const [mode, setMode] = useState<SessionMode>("agent");
@@ -847,6 +858,7 @@ export function App() {
     setBusy(false);
     setRun(null);
     setShowNetwork(false);
+    setShowEvals(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
     setThreads((xs) => [thread, ...xs.filter((x) => x.lines.length > 0)]);
@@ -955,6 +967,7 @@ export function App() {
     if (!t) return;
     setShellView("chat");
     setShowNetwork(false);
+    setShowEvals(false);
     rememberThread(id);
     if (id !== activeThreadId) {
       snapshotActive();
@@ -1041,6 +1054,7 @@ export function App() {
       setFile(rel);
       setReviewOpen(true);
       setShowNetwork(false);
+      setShowEvals(false);
       setFileText(r.text);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -1393,6 +1407,7 @@ export function App() {
       sourceAccounts={cliEmail ? { "claude_cli": cliEmail } : undefined}
       onSetupSources={() => {
         setShowNetwork(true);
+        setShowEvals(false);
         setShellView("chat");
       }}
       busy={busy}
@@ -1403,12 +1418,14 @@ export function App() {
       onOpenFile={(p) => void openFile(p)}
       onAddModels={() => {
         setShowNetwork(true);
+        setShowEvals(false);
         setShellView("chat");
       }}
       lockedIds={locked.map((m) => m.id)}
       onEnableModel={(id) => {
         setFocusModel({ id, n: Date.now() });
         setShowNetwork(true);
+        setShowEvals(false);
         setShellView("chat");
       }}
       autoConfig={autoFor(autoCfgs, source)}
@@ -1418,6 +1435,7 @@ export function App() {
       onAutoMore={() => {
         setFocusAuto(Date.now());
         setShowNetwork(true);
+        setShowEvals(false);
         setShellView("chat");
       }}
     />
@@ -1587,7 +1605,9 @@ export function App() {
           <div className="work-body">
             {chatHidden
               ? null
-              : showNetwork
+              : showEvals
+                ? <EvalsPage models={models} />
+                : showNetwork
                 ? (
                   <NetworkPanel
                     catalog={models}
@@ -1636,6 +1656,16 @@ export function App() {
         onChange={setAppearance}
         onClose={() => setAppearOpen(false)}
         workspace={workspace}
+        onOpenEvals={
+          evalsAvailable
+            ? () => {
+                setShowEvals(true);
+                setShowNetwork(false);
+                setShellView("chat");
+                setAppearOpen(false);
+              }
+            : undefined
+        }
         permMode={permMode}
         onPermMode={(m) => {
           setPermMode(m);

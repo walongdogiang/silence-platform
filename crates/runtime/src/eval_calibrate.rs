@@ -5,7 +5,7 @@
 //! An attempt that fails ends that model early (it can no longer pass every attempt).
 
 use crate::eval_history::CALIBRATE_PROFILE;
-use crate::eval_runner::{finish_run, is_fatal_error, RunMeta, RunMetrics, Status, Suite, UNSOLVED};
+use crate::eval_runner::{finish_run, is_fatal_error, AttemptOpts, RunMeta, RunMetrics, Status, Suite, UNSOLVED};
 use anyhow::Result;
 use std::path::Path;
 
@@ -111,7 +111,7 @@ pub async fn calibrate(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: 
                     break 'ladder;
                 }
                 n += 1;
-                let m = suite.attempt(task, model, n).await?;
+                let m = suite.attempt(task, model, n, &AttemptOpts::default()).await?;
                 spent += m.cost_usd;
                 println!("  {} {} {} ${:.4}", m.status.as_str(), task.id, model, m.cost_usd);
                 let status = m.status;

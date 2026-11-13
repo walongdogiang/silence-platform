@@ -71,6 +71,7 @@ Mục lục chi tiết UI: [frontend/README.md](frontend/README.md).
 | [frontend/composer.md](frontend/composer.md) | Ô nhập, mode, Auto, tools | Sửa Composer |
 | [frontend/status.md](frontend/status.md) | Chỉ báo phiên (elapsed, token, chờ duyệt, gộp Read, duyệt plan 4 nút, description lệnh, rail, todo, background) | Sửa run pulse / bước narrate / duyệt plan / session rail / task list |
 | [frontend/tokens.md](frontend/tokens.md) | Token màu, appearance | Sửa theme / appearance |
+| [frontend/evals.md](frontend/evals.md) | Trang Evals trong Studio: chọn task/nguồn, ước tính, chạy, chi tiết | Sửa trang Evals hoặc RPC `eval.*` |
 | [frontend/i18n.md](frontend/i18n.md) | Ngôn ngữ giao diện VI/EN, từ điển `i18n.ts`, thuật ngữ không dịch, chuỗi còn từ Engine | Thêm hoặc sửa chữ hiển thị trên UI |
 | [frontend/chat-markdown-roadmap.md](frontend/chat-markdown-roadmap.md) | Việc Markdown chat cố ý chưa làm | Tránh làm sớm / mở lại backlog Markdown |
 

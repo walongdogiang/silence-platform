@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.12";
+export const PROTOCOL_VERSION = "0.1.13";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -257,3 +257,92 @@ export type SessionSpendResult = { spent_usd: number; budget_usd: number | null 
 export type SetModelParams = { session_id: string; model: string; source?: string };
 /** `providers.set_preferred` — `""` = catalog order. CLI providers are refused. */
 export type SetPreferredParams = { provider: string };
+
+/* ── Evals from Studio (`eval.*` RPC, `eval.progress` notifications) ── */
+export type EvalStatus = "PASS" | "FAIL" | "ERROR" | "SKIP";
+/** `eval.estimate` / `eval.start`. No permission field: eval sessions are created by the Engine. */
+export type EvalConfig = {
+  suite: string;
+  tasks: string[];
+  /** Provider id; omitted = each task's own model. */
+  source?: string;
+  /** Catalog id or `auto`; omitted = per task (pin / manifest). */
+  model?: string;
+  effort?: string;
+  repeat: number;
+  retry_failed: boolean;
+  max_cost?: number;
+  history: boolean;
+};
+export type EvalTaskInfo = {
+  id: string;
+  kind: string;
+  mode: string;
+  manifest_model?: string | null;
+  pinned?: string | null;
+  effort?: string | null;
+  missing_env?: string | null;
+  last?: { run_id: string; status: EvalStatus; model: string; cost_usd: number } | null;
+};
+/** `eval.catalog`. `sources` = rows of `providers.status`. */
+export type EvalCatalog = {
+  available: boolean;
+  suites: { name: string; error?: string; tasks: EvalTaskInfo[] }[];
+  sources: { id: string; label: string; kind: string; available: boolean; unavailable_reason: string }[];
+  running: boolean;
+};
+export type EvalEstimate = {
+  estimate: { tasks: { id: string; model: string; usd: number | null }[]; total_usd: number; unknown: number };
+  skipped: { id: string; reason: string }[];
+};
+export type EvalTaskMetrics = {
+  id: string;
+  kind: string;
+  status: EvalStatus;
+  model: string;
+  effort: string;
+  attempts: number;
+  passes: number;
+  errors: number;
+  flaky: boolean;
+  duration_secs: number;
+  cost_usd: number;
+  model_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  tool_calls: number;
+  error?: string;
+  error_code?: string;
+  slots?: string[];
+  escalated?: boolean;
+};
+export type EvalRunSummary = {
+  run_id: string;
+  suite: string;
+  profile: string;
+  started_at: string;
+  stopped?: string | null;
+  counts: { pass: number; fail: number; error: number; skip: number };
+  total_cost_usd: number;
+  tasks: EvalTaskMetrics[];
+};
+/** Row of `eval.runs` (`{ runs }`). */
+export type EvalRun = EvalRunSummary & { failed: string[] };
+export type EvalProgress =
+  | { type: "started"; run_id: string; suite: string; tasks: string[] }
+  | { type: "task_started"; id: string; model: string; attempt: number }
+  | { type: "skipped"; id: string; model: string; reason: string }
+  | { type: "task_done"; task: EvalTaskMetrics }
+  | { type: "finished"; summary: EvalRunSummary }
+  | { type: "failed"; message: string };
+/** `eval.task {suite, task_id, attempt?}`. */
+export type EvalTaskDetail = {
+  suite: string;
+  task_id: string;
+  attempt: number;
+  attempts: number[];
+  workspace: string;
+  report: string;
+  audit: string[];
+  files: { path: string; status: "added" | "modified" | "deleted"; before: string; after: string; binary: boolean }[];
+};

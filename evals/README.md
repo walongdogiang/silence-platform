@@ -43,6 +43,26 @@ Option của `evals`:
 | `--max-cost <usd>` | Đạt trần chi thì không bắt đầu task mới (các task còn lại ghi SKIP) |
 | `--history` | Ghi 1 dòng vào `history/runs.jsonl` và sinh lại `SUMMARY.md` |
 | `--profile <tên>` | Nhãn trong lịch sử: `manual` (mặc định), `nightly`, `weekly` |
+| `--source <provider>` | Chạy trên một nguồn (xem Chọn source) |
+| `--effort <mức>` | Mức suy nghĩ cho mọi task |
+
+## Chạy trong Studio
+
+Settings (Appearance) → **Evals**, mục chỉ hiện khi Studio chạy từ checkout của repo này. Trang này làm được mọi thứ của lệnh `evals` mà không cần nhớ option:
+- chọn bộ, chọn từng task (lọc theo loại, theo kết quả lần trước), nguồn, model, mức suy nghĩ, số lần thử, trần chi phí;
+- xem **ước tính chi phí** trước khi chạy, rồi xem tiến độ trực tiếp và **Dừng** được giữa chừng;
+- **Chạy lại task trượt**, mở **chi tiết task** (báo cáo của agent, file đã đổi so với fixture, audit, thư mục kết quả);
+- lưu nhiều cấu hình có đặt tên, **Đặt lại mặc định**.
+
+Mặc định lượt chạy từ Studio không ghi `history/runs.jsonl` (profile `studio`). Spec trang: `docs/frontend/evals.md`.
+
+## Chọn source
+
+`--source <provider>` (CLI) hoặc ô **Nguồn** (Studio) chạy mọi task trên một nguồn: OpenRouter `company-gateway`, Anthropic API `anthropic`, Claude CLI `claude-cli`.
+- Model được **giữ tier, đổi nguồn**: cùng họ model trước (`claude-haiku` → `claude-haiku@api`), không có thì model cùng tier của nguồn đó. Không có cả hai thì task thành SKIP, kèm lý do.
+- Task `auto` chạy Auto trong nguồn đã chọn.
+- Ghim (`models.yaml`) và hiệu chỉnh vẫn dùng id của OpenRouter; một bộ ghim dùng chung cho mọi nguồn.
+- `--effort <level>` đặt mức suy nghĩ cho mọi task (ghi đè `effort` trong manifest).
 
 ## Đọc kết quả
 
