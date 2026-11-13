@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CliInfo } from "../types";
 import { authLabel, expiryNote, fmtUsd, isSubscriptionLogin, planLabel } from "../cliInfo";
+import { useT } from "../i18n";
 
 const LOGIN_CMD = "claude auth login";
 
@@ -10,6 +11,7 @@ const LOGIN_CMD = "claude auth login";
  * call). Shown only on this machine.
  */
 export function CliDetails(props: { refreshKey?: number }) {
+  const t = useT();
   const [info, setInfo] = useState<CliInfo | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -43,80 +45,78 @@ export function CliDetails(props: { refreshKey?: number }) {
   }
 
   if (err) return <p className="hint">{err}</p>;
-  if (!info) return <p className="provider-note">{loading ? "Reading Claude CLI…" : ""}</p>;
+  if (!info) return <p className="provider-note">{loading ? t("cli.reading") : ""}</p>;
 
   const a = info.account;
-  const exp = a ? expiryNote(a.login_expires_at) : null;
+  const exp = a ? expiryNote(a.login_expires_at, t) : null;
+  const turns = (n: number) => t(n === 1 ? "cli.turns1" : "cli.turns", { n });
 
   return (
     <div className="cli-details">
       <section>
-        <h4>Account</h4>
+        <h4>{t("cli.account")}</h4>
         {!info.installed ? (
-          <p className="hint">Claude CLI is not installed. Install Claude Code, then click Check again.</p>
+          <p className="hint">{t("cli.notInstalled")}</p>
         ) : !a ? (
-          <p className="hint">Could not read the sign-in status (`claude auth status`).</p>
+          <p className="hint">{t("cli.statusUnknown")}</p>
         ) : !a.logged_in ? (
           <div className="cli-login">
-            <p className="hint">Not signed in. Run this in a terminal, then click Check again:</p>
+            <p className="hint">{t("cli.notSignedIn")}</p>
             <code>{LOGIN_CMD}</code>
             <button type="button" className="ghost" onClick={() => void copyLogin()}>
-              {copied ? "Copied" : "Copy"}
+              {copied ? t("common.copied") : t("common.copy")}
             </button>
           </div>
         ) : (
           <dl className="cli-kv">
-            <dt>Signed in as</dt>
+            <dt>{t("cli.signedInAs")}</dt>
             <dd>{a.email || "—"}</dd>
             {a.org_name ? (
               <>
-                <dt>Organization</dt>
+                <dt>{t("cli.org")}</dt>
                 <dd>{a.org_name}</dd>
               </>
             ) : null}
-            <dt>Plan</dt>
+            <dt>{t("cli.plan")}</dt>
             <dd>{planLabel(a.plan)}</dd>
-            <dt>Sign-in method</dt>
-            <dd>{authLabel(a.auth_method, a.api_provider)}</dd>
+            <dt>{t("cli.method")}</dt>
+            <dd>{authLabel(a.auth_method, a.api_provider, t)}</dd>
             {exp ? (
               <>
-                <dt>Login</dt>
+                <dt>{t("cli.login")}</dt>
                 <dd className={exp.warn ? "cli-warn" : undefined}>{exp.text}</dd>
               </>
             ) : null}
           </dl>
         )}
         {a?.logged_in && isSubscriptionLogin(a.auth_method) ? (
-          <p className="cli-notice">
-            This uses your personal Claude subscription. Personal / internal use only — do not ship 5ilence to
-            others signed in this way.
-          </p>
+          <p className="cli-notice">{t("cli.subscriptionNotice")}</p>
         ) : null}
       </section>
 
       <section>
-        <h4>Install</h4>
+        <h4>{t("cli.install")}</h4>
         <dl className="cli-kv">
-          <dt>Version</dt>
+          <dt>{t("cli.version")}</dt>
           <dd>{info.version || "—"}</dd>
-          <dt>Command</dt>
+          <dt>{t("cli.command")}</dt>
           <dd>
             <code>{info.program}</code>
           </dd>
           {a?.config_dir ? (
             <>
-              <dt>Config folder</dt>
+              <dt>{t("cli.configDir")}</dt>
               <dd>
                 <code>{a.config_dir}</code>
               </dd>
             </>
           ) : null}
         </dl>
-        <p className="provider-note">Change the command with the SILENCE_CLAUDE_CLI environment variable.</p>
+        <p className="provider-note">{t("cli.commandHint")}</p>
       </section>
 
       <section>
-        <h4>How 5ilence runs it</h4>
+        <h4>{t("cli.howRuns")}</h4>
         <ul className="cli-guards">
           {info.safeguards.map(([what, flag]) => (
             <li key={flag}>
@@ -126,26 +126,25 @@ export function CliDetails(props: { refreshKey?: number }) {
           ))}
         </ul>
         {info.models.length ? (
-          <p className="provider-note">Models: {info.models.map(([label, id]) => `${label} (${id})`).join(", ")}</p>
+          <p className="provider-note">
+            {t("cli.models", { list: info.models.map(([label, id]) => `${label} (${id})`).join(", ") })}
+          </p>
         ) : null}
       </section>
 
       <section>
-        <h4>Usage</h4>
+        <h4>{t("cli.usage")}</h4>
         <dl className="cli-kv">
-          <dt>Today</dt>
+          <dt>{t("cli.today")}</dt>
           <dd>
-            {info.usage.turns_today} turn{info.usage.turns_today === 1 ? "" : "s"} · {fmtUsd(info.usage.usd_today)}
+            {turns(info.usage.turns_today)} · {fmtUsd(info.usage.usd_today)}
           </dd>
-          <dt>All time</dt>
+          <dt>{t("cli.allTime")}</dt>
           <dd>
-            {info.usage.turns_total} turn{info.usage.turns_total === 1 ? "" : "s"} · {fmtUsd(info.usage.usd_total)}
+            {turns(info.usage.turns_total)} · {fmtUsd(info.usage.usd_total)}
           </dd>
         </dl>
-        <p className="provider-note">
-          Cost as the CLI reports it for turns run from 5ilence. Remaining subscription quota is not readable from
-          the CLI — check it with /usage inside Claude Code.
-        </p>
+        <p className="provider-note">{t("cli.usageNote")}</p>
       </section>
     </div>
   );

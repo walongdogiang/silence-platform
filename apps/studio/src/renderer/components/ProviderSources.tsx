@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { useT, type MsgKey } from "../i18n";
 import type { ProviderStatus } from "../types";
 import { CliDetails } from "./CliDetails";
 
 type KeyStatus = { provider: string; has_key: boolean; last4: string };
 
-const KIND_NOTE: Record<ProviderStatus["kind"], string> = {
-  openai_compat: "OpenAI-compatible (OpenRouter). One key for models from many vendors.",
-  anthropic: "Calls the Anthropic Messages API directly: prompt caching, effort, thinking.",
-  claude_cli:
-    "Uses the Claude CLI signed in on this machine. Tools still run in 5ilence (Risk Engine + diff). Personal / internal use only.",
+const KIND_NOTE: Record<ProviderStatus["kind"], MsgKey> = {
+  openai_compat: "src.note.openai_compat",
+  anthropic: "src.note.anthropic",
+  claude_cli: "src.note.claude_cli",
 };
 
 /**
@@ -21,6 +21,7 @@ export function ProviderSources(props: {
   /** Called after a key change so the model list can refresh availability. */
   onChanged?: () => void;
 }) {
+  const t = useT();
   const [rows, setRows] = useState<ProviderStatus[]>([]);
   const [keys, setKeys] = useState<KeyStatus[]>([]);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -50,13 +51,13 @@ export function ProviderSources(props: {
   async function saveKey(provider: string, value: string) {
     const api = window.silence?.credentials;
     if (!api) {
-      setMsg((m) => ({ ...m, [provider]: "This Studio build cannot store keys." }));
+      setMsg((m) => ({ ...m, [provider]: t("src.noKeyStore") }));
       return;
     }
     try {
       setKeys(await api.set(provider, value));
       setDraft((d) => ({ ...d, [provider]: "" }));
-      setMsg((m) => ({ ...m, [provider]: value ? "Saved (encrypted on this machine)." : "Key removed." }));
+      setMsg((m) => ({ ...m, [provider]: value ? t("src.saved") : t("src.removed") }));
       await refresh();
       props.onChanged?.();
     } catch (e) {
@@ -67,11 +68,8 @@ export function ProviderSources(props: {
   return (
     <section className="provider-sources">
       <header>
-        <h2>Model sources</h2>
-        <p>
-          Set up the sources 5ilence can call. Pick the one to use under Source in the model menu;
-          Auto routes only inside that source.
-        </p>
+        <h2>{t("src.title")}</h2>
+        <p>{t("src.intro")}</p>
       </header>
       {msg._ ? <p className="hint">{msg._}</p> : null}
       <div className="provider-cards">
@@ -83,10 +81,10 @@ export function ProviderSources(props: {
               <div className="provider-head">
                 <b>{p.label}</b>
                 <span className={`provider-dot${p.available ? " ok" : ""}`}>
-                  {p.available ? "Ready" : "Not available"}
+                  {p.available ? t("src.ready") : t("src.notAvailable")}
                 </span>
               </div>
-              <p className="provider-note">{KIND_NOTE[p.kind] ?? ""}</p>
+              <p className="provider-note">{KIND_NOTE[p.kind] ? t(KIND_NOTE[p.kind]) : ""}</p>
               {!p.available && p.unavailable_reason ? <p className="hint">{p.unavailable_reason}</p> : null}
               {isCli && p.cli_version ? <p className="provider-note">{p.cli_version}</p> : null}
               {p.needs_key ? (
@@ -105,16 +103,16 @@ export function ProviderSources(props: {
                     value={draft[p.id] ?? ""}
                     onChange={(e) => setDraft((d) => ({ ...d, [p.id]: e.target.value }))}
                     placeholder={
-                      k?.has_key ? `Saved …${k.last4}` : p.has_key ? "Using key from environment variable" : "Paste API key"
+                      k?.has_key ? t("src.savedKey", { last4: k.last4 }) : p.has_key ? t("src.envKey") : t("src.pasteKey")
                     }
                     aria-label={`API key ${p.label}`}
                   />
                   <button type="submit" className="primary" disabled={!(draft[p.id] ?? "").trim()}>
-                    Save
+                    {t("common.save")}
                   </button>
                   {k?.has_key ? (
                     <button type="button" className="ghost" onClick={() => void saveKey(p.id, "")}>
-                      Remove
+                      {t("common.remove")}
                     </button>
                   ) : null}
                 </form>
@@ -135,7 +133,7 @@ export function ProviderSources(props: {
           }}
           disabled={loading}
         >
-          {loading ? "Checking…" : "Check again"}
+          {loading ? t("src.checking") : t("src.checkAgain")}
         </button>
       </div>
     </section>

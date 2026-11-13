@@ -1,6 +1,7 @@
 import { Check, FileCode2, Maximize2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { diffHunks, summarizeDiff } from "../diffSummary";
+import { useT } from "../i18n";
 import type { Diff } from "../models";
 import { languageFor } from "../syntax";
 import { DiffTable } from "./CodeView";
@@ -44,6 +45,7 @@ export function DiffCard(props: {
   /** Bấm ảnh xem trước (SVG) → lightbox. */
   onOpenImage?: (images: string[], index: number) => void;
 }) {
+  const t = useT();
   const { diff } = props;
   const [expanded, setExpanded] = useState(false);
   const svg = isSvgPath(diff.path) && diff.after.trim().length > 0;
@@ -71,9 +73,9 @@ export function DiffCard(props: {
   const lang = languageFor(diff.path);
 
   return (
-    <section className="diff-card" aria-label={`Thay đổi đề xuất cho ${diff.path}`}>
+    <section className="diff-card" aria-label={t("diff.proposedFor", { path: diff.path })}>
       <header className="diff-card-head">
-        <button type="button" className="diff-card-file" onClick={props.onShow} title="Mở trong panel Changes">
+        <button type="button" className="diff-card-file" onClick={props.onShow} title={t("diff.openInPanel")}>
           <FileCode2 size={15} aria-hidden />
           <span className="diff-path">
             {dir && <span className="dir">{dir}</span>}
@@ -82,12 +84,12 @@ export function DiffCard(props: {
         </button>
         <DiffStat added={sum.added} removed={sum.removed} />
         {svg ? (
-          <div className="diff-view-toggle" role="tablist" aria-label="Cách xem">
+          <div className="diff-view-toggle" role="tablist" aria-label={t("diff.viewAs")}>
             <button type="button" role="tab" aria-selected={view === "preview"} onClick={() => setView("preview")}>
-              Xem trước
+              {t("diff.preview")}
             </button>
             <button type="button" role="tab" aria-selected={view === "code"} onClick={() => setView("code")}>
-              Mã
+              {t("diff.code")}
             </button>
           </div>
         ) : null}
@@ -95,8 +97,8 @@ export function DiffCard(props: {
           type="button"
           className="icon-btn diff-card-open"
           onClick={props.onShow}
-          title="Mở trong panel Changes"
-          aria-label="Mở trong panel Changes"
+          title={t("diff.openInPanel")}
+          aria-label={t("diff.openInPanel")}
         >
           <Maximize2 size={14} />
         </button>
@@ -107,10 +109,10 @@ export function DiffCard(props: {
           <button
             type="button"
             className="img-zoom"
-            title="Bấm để phóng to"
+            title={t("img.clickToZoom")}
             onClick={() => props.onOpenImage?.([svgDataUrl(diff.after)], 0)}
           >
-            <img src={svgDataUrl(diff.after)} alt={`Xem trước ${name}`} />
+            <img src={svgDataUrl(diff.after)} alt={t("diff.previewOf", { name })} />
           </button>
         </div>
       ) : total > 0 ? (
@@ -118,12 +120,12 @@ export function DiffCard(props: {
           <DiffTable hunks={shown} lang={lang} />
           {total > PREVIEW_ROWS && (
             <button type="button" className="diff-more" onClick={() => setExpanded((v) => !v)}>
-              {expanded ? "Thu gọn" : `Hiện thêm ${total - PREVIEW_ROWS} dòng`}
+              {expanded ? t("diff.collapse") : t("diff.showMore", { n: total - PREVIEW_ROWS })}
             </button>
           )}
         </div>
       ) : (
-        <p className="diff-card-empty">Không có thay đổi nội dung.</p>
+        <p className="diff-card-empty">{t("diff.noContentChange")}</p>
       )}
 
       {diff.applied ? (
@@ -131,20 +133,20 @@ export function DiffCard(props: {
         <footer className="diff-card-foot">
           <span className="diff-card-applied">
             <Check size={14} aria-hidden />
-            Đã áp dụng
+            {t("diff.applied")}
           </span>
-          <button type="button" className="ghost sm" onClick={props.onReject} title="Ghi lại nội dung trước khi sửa">
-            Hoàn tác
+          <button type="button" className="ghost sm" onClick={props.onReject} title={t("diff.undoTip")}>
+            {t("diff.undo")}
           </button>
         </footer>
       ) : (
         <footer className="diff-card-foot">
           <button type="button" className="ghost sm" onClick={props.onReject}>
-            Reject
+            {t("common.reject")}
           </button>
           <button type="button" className="primary sm" onClick={props.onApply}>
             <Check size={14} aria-hidden />
-            Apply
+            {t("common.apply")}
           </button>
         </footer>
       )}

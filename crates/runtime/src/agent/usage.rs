@@ -23,7 +23,7 @@ pub async fn context_usage(
         let est = estimate_parts(&s, mode);
         let model = match (&s.last_model, requested) {
             (Some(m), "auto") => m.clone(),
-            _ => pick_model_for(&ctx.catalog, requested, mode, "")?.model_id,
+            _ => preview_model(&ctx.catalog, requested, mode, &s.source)?,
         };
         (est, model, s.last_prompt_tokens, profile(mode).read_only)
     };

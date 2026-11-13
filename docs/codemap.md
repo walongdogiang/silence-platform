@@ -31,7 +31,8 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Chặn mở session YOLO qua RPC | `runtime/src/rpc.rs::client_permission_allowed` |
 | Phạm vi duyệt (một lần / phiên / workspace), Stop từ chối quyền đang chờ, đổi chế độ quyền | `agent/policy.rs::decide_permission_scoped`, `agent/mod.rs::abort`, `set_permission`; UI `renderer/permissionUi.ts`, card trong `ChatPane.tsx`, Settings `PermissionsSection.tsx` |
 | Thông báo desktop khi chờ duyệt | `main/notify.ts`, handler `silence-notify-permission` trong `main/index.ts` |
-| Chọn model theo lượt | `agent/mod.rs::pick_model_for`; catalog + phân loại: `crates/router/src/lib.rs` (`classify`); cấu hình: `config/models.yaml` |
+| Chọn model theo lượt (Model Auto) | slot theo mode/mục đích + leo cấp + trần chi phí: `agent/auto.rs` (`pick_main`, `pick_aux`, `Escalation`, `budget`); slot → model: `crates/router/src/auto.rs` (`Catalog::route_auto`, preset, pool); RPC `auto.set_config`, `session.budget_continue`, `session.spend`, `session.carry_spend`; cấu hình: `config/models.yaml` (`escalation.on`) |
+| Auto ở Studio | `renderer/autoConfig.ts` (lưu, preset, `slotModel`, `engineConfig`, chi phí theo slot); `components/AutoSettings.tsx` (submenu + Settings); chip lượt: `ChatPane.tsx::autoChip` |
 | Gọi API model, chi phí | `runtime/src/gateway/mod.rs` (`chat`, `chat_short`, `chat_cost_usd`; rẽ nhánh theo `provider.kind`) |
 | Anthropic Messages API (chuyển message, SSE, cache, thinking block) | `runtime/src/gateway/anthropic.rs` (`build_request`, `convert_messages`, `StreamState`) |
 | Claude CLI backend + MCP bridge | `runtime/src/agent/cli.rs` (`run_cli_turn`, `cli_args`, `serve_bridge`, `run_bridge`); subcommand `mcp-bridge` ở `main.rs` |

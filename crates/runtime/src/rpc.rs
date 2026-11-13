@@ -118,7 +118,21 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         "session.set_model" => {
             let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
             let model = req.params.get("model").and_then(|v| v.as_str()).unwrap_or("auto");
-            agent::set_model(&state.ctx, sid, model).await?;
+            let source = req.params.get("source").and_then(|v| v.as_str());
+            agent::set_model(&state.ctx, sid, model, source).await?;
+            Ok(json!({"ok": true}))
+        }
+        // The UI's per-thread spend, for a new live session of the same chat. Only raises it.
+        "session.carry_spend" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let usd = req.params.get("usd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            agent::carry_spend(&state.ctx, sid, usd).await?;
+            Ok(json!({"ok": true}))
+        }
+        // One more turn past the Auto spend cap (the UI's "Continue one turn").
+        "session.budget_continue" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            agent::budget_continue(&state.ctx, sid).await?;
             Ok(json!({"ok": true}))
         }
         "session.set_effort" => {
@@ -189,6 +203,15 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             let p: silence_protocol::SetCredentialParams = serde_json::from_value(req.params)?;
             state.ctx.catalog.set_credential(&p.provider, p.key.trim())?;
             Ok(json!({"ok": true}))
+        }
+        "auto.set_config" => {
+            let p: silence_protocol::SetAutoConfigParams = serde_json::from_value(req.params)?;
+            state.ctx.catalog.set_auto(&p.provider, p.config)?;
+            Ok(json!({"ok": true}))
+        }
+        "session.spend" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(agent::session_spend(&state.ctx, sid).await?)
         }
         "providers.set_preferred" => {
             let p: silence_protocol::SetPreferredParams = serde_json::from_value(req.params)?;
@@ -387,7 +410,7 @@ mod tests {
     async fn roundtrip(line: &str) -> Value {
         let data = tempfile::tempdir().unwrap();
         let raw = serde_json::from_value(json!({
-            "version": 1, "providers": [], "models": [], "routes": {}
+            "version": 1, "providers": [], "models": []
         }))
         .unwrap();
         let ctx = Arc::new(AppCtx::new(

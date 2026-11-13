@@ -78,10 +78,11 @@ describe("effort", () => {
       expect(resolveSource("gone", s)).toBe("or");
     });
 
-    it("keeps, resets to Auto, or picks the CLI mid model on switch", () => {
+    it("keeps the model or resets to Auto on switch, the CLI included", () => {
       expect(modelForSource("or-sonnet", "or", cat)).toBe("or-sonnet");
       expect(modelForSource("or-sonnet", "api", cat)).toBe("auto");
-      expect(modelForSource("auto", "cli", cat)).toBe("cli-sonnet");
+      expect(modelForSource("auto", "cli", cat)).toBe("auto");
+      expect(modelForSource("or-sonnet", "cli", cat)).toBe("auto");
       expect(modelForSource("cli-haiku", "cli", cat)).toBe("cli-haiku");
     });
   });

@@ -1,0 +1,131 @@
+import type { ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { LangContext, type Lang } from "../i18n";
+import type { ChatLine } from "../models";
+import { ChatHistoryPanel } from "./ChatHistoryPanel";
+import { ChatPane } from "./ChatPane";
+import { Composer } from "./Composer";
+import { TitleBar } from "./TitleBar";
+
+/** Vietnamese letters with diacritics: none may show in the English UI (user/agent text aside). */
+const VI = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
+
+const inLang = (lang: Lang, node: ReactNode) =>
+  renderToStaticMarkup(<LangContext.Provider value={lang}>{node}</LangContext.Provider>);
+
+const noop = () => {};
+
+const lines: ChatLine[] = [
+  { kind: "user", text: "explain the project" },
+  { kind: "narrate", verb: "Read", detail: "App.tsx (1–40)", file: "src/App.tsx", ranges: [[1, 40]] },
+  { kind: "narrate", verb: "Searched", detail: "`foo` in a.ts" },
+  { kind: "thought", brief: "Thought", body: "thinking", ms: 3000 },
+  { kind: "worked", ms: 21_000, at: 0 },
+  { kind: "checkpoint", id: "cp", at: 0, label: "Checkpoint", files: [{ path: "a.ts", before: "", after: "x" }] },
+  { kind: "tool", name: "read", output: "ok" },
+  { kind: "token", text: "Done." },
+  { kind: "error", message: "boom", info: { code: "NETWORK", retryable: true, detail: "" } },
+];
+
+const pane = (
+  <ChatPane
+    lines={lines}
+    plan={"1. Add the parser module\n2. Wire it into the CLI"}
+    perm={{
+      request_id: "r",
+      name: "shell",
+      input: { command: "npm install zod" },
+      reason: "",
+      risk: { tier: "ask", reasons: [], pattern: "npm install *" },
+    }}
+    diff={{ path: "src/a.ts", before: "a\n", after: "b\n" }}
+    sessionId="s"
+    hasSession
+    wsName="demo"
+    onApprovePlan={noop}
+    onRevisePlan={noop}
+    onAllow={noop}
+    onDeny={noop}
+    onApplyDiff={noop}
+    onRejectDiff={noop}
+    onShowDiff={noop}
+    onRestoreCheckpoint={noop}
+    onForkChat={noop}
+    onRetry={noop}
+    permError
+  />
+);
+
+const composer = (
+  <Composer
+    prompt=""
+    onPrompt={noop}
+    onSend={noop}
+    onChip={noop}
+    mode="agent"
+    model="auto"
+    models={[]}
+    onModel={noop}
+    files={["src/a.ts"]}
+    busy={false}
+    disabled={false}
+  />
+);
+
+const history = (
+  <ChatHistoryPanel
+    workspace="w"
+    threads={[{ id: "1", sessionId: "s", workspace: "w", title: "Đoạn chat mới", preview: "", updatedAt: Date.now(), lines: [{ kind: "user", text: "hi" }] }]}
+    activeId="1"
+    onNewChat={noop}
+    onSelect={noop}
+    onDelete={noop}
+    onRename={noop}
+    onCustomize={noop}
+    onToggle={noop}
+  />
+);
+
+const titleBar = (
+  <TitleBar
+    wsName="demo"
+    chatHidden={false}
+    panelOpen={false}
+    historyHidden={false}
+    canBack={false}
+    canForward={false}
+    onBack={noop}
+    onForward={noop}
+    onTogglePanel={noop}
+    onOpenTerminal={noop}
+    onToggleChatWorkspace={noop}
+    onToggleHistory={noop}
+    onSettings={noop}
+    onOpenWorkspace={noop}
+    onQuit={noop}
+  />
+);
+
+describe("UI language sweep", () => {
+  it.each([
+    ["ChatPane", pane],
+    ["Composer", composer],
+    ["ChatHistoryPanel", history],
+    ["TitleBar", titleBar],
+  ])("%s in English has no Vietnamese text", (_, node) => {
+    const out = inLang("en", node);
+    const at = out.search(VI);
+    // On failure, shows the markup around the first Vietnamese letter.
+    expect(at < 0 ? "" : out.slice(Math.max(0, at - 60), at + 20)).toBe("");
+  });
+
+  it("the same views switch to Vietnamese", () => {
+    expect(inLang("en", pane)).toContain("Explored 1 file");
+    expect(inLang("en", history)).toContain("New chat");
+    expect(inLang("vi", pane)).toContain("Đã khảo sát");
+    expect(inLang("vi", pane)).toContain("Cho phép một lần");
+    expect(inLang("vi", composer)).toContain("Lập kế hoạch, xây dựng");
+    expect(inLang("en", composer)).toContain("Plan, Build, / for skills, @ for context");
+  });
+});

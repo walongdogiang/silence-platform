@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { imageRefsIn, readWorkspaceImage } from "../workspaceImages";
 import type { EditTarget } from "../imageActions";
+import { useT } from "../i18n";
 import { ImageFrame } from "./ImageFrame";
 
 type Loaded = { path: string; url: string };
@@ -41,17 +42,18 @@ export function WorkspaceImage(props: {
   onOpen?: (images: string[], index: number) => void;
   onEdit?: (target: EditTarget) => void;
 }) {
+  const t = useT();
   const loaded = useWorkspaceImages(props.workspace, [props.path]);
-  if (loaded === null) return <span className="md-img-loading">[đang tải ảnh {props.path}…]</span>;
+  if (loaded === null) return <span className="md-img-loading">{t("md.imgLoading", { path: props.path })}</span>;
   const img = loaded[0];
-  if (!img) return <span className="md-img-blocked">[không mở được ảnh {props.path}]</span>;
+  if (!img) return <span className="md-img-blocked">{t("md.imgFailed", { path: props.path })}</span>;
   return (
     <ImageFrame
       className="md-img"
       src={img.url}
       alt={props.alt || img.path}
       path={img.path}
-      title={`${img.path} · bấm để phóng to`}
+      title={t("md.imgZoom", { path: img.path })}
       onOpen={() => props.onOpen?.([img.url], 0)}
       onEdit={props.onEdit ? () => props.onEdit?.({ src: img.url, path: img.path }) : undefined}
     />
@@ -68,6 +70,7 @@ export function ImageRefStrip(props: {
   onOpen?: (images: string[], index: number) => void;
   onEdit?: (target: EditTarget) => void;
 }) {
+  const t = useT();
   const paths = imageRefsIn(props.text);
   const loaded = useWorkspaceImages(props.workspace, paths);
   if (!loaded?.length) return null;
@@ -80,7 +83,7 @@ export function ImageRefStrip(props: {
             src={img.url}
             alt={img.path}
             path={img.path}
-            title={`${img.path} · bấm để phóng to`}
+            title={t("md.imgZoom", { path: img.path })}
             onOpen={() => props.onOpen?.(urls, i)}
             onEdit={props.onEdit ? () => props.onEdit?.({ src: img.url, path: img.path }) : undefined}
           />

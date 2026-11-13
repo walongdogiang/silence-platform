@@ -10,6 +10,10 @@ import {
   toImagePoint,
   type Mark,
 } from "./imageEdit";
+import { translator } from "./i18n";
+
+const vi = translator("vi");
+const en = translator("en");
 
 const pin = (id: string, x: number, y: number, note = ""): Mark => ({ id, kind: "pin", color: "#f00", size: 10, at: { x, y }, note });
 
@@ -84,13 +88,14 @@ describe("toạ độ và xuất", () => {
 
 describe("prompt điền sẵn", () => {
   it("hình SVG có ghim: tiêu đề + toạ độ theo viewBox", () => {
-    expect(editPrompt({ title: "Mèo", isSvg: true, pins: [{ at: { x: 320.4, y: 210.6 }, note: " đổi cây " }, { at: { x: 1, y: 2 }, note: "" }] })).toBe(
+    expect(editPrompt({ title: "Mèo", isSvg: true, pins: [{ at: { x: 320.4, y: 210.6 }, note: " đổi cây " }, { at: { x: 1, y: 2 }, note: "" }] }, vi)).toBe(
       'Sửa hình "Mèo" theo chỗ đánh dấu trong ảnh đính kèm:\n1. (x=320, y=211 theo viewBox): đổi cây\n2. (x=1, y=2 theo viewBox): …\n',
     );
   });
 
   it("ảnh workspace / ảnh dán, không ghim", () => {
-    expect(editPrompt({ path: "out/cat.png", isSvg: false, pins: [] })).toBe("Sửa ảnh `out/cat.png` theo chỗ đánh dấu trong ảnh đính kèm: ");
-    expect(editPrompt({ isSvg: false, pins: [] })).toBe("Sửa ảnh này theo chỗ đánh dấu trong ảnh đính kèm: ");
+    expect(editPrompt({ path: "out/cat.png", isSvg: false, pins: [] }, vi)).toBe("Sửa ảnh `out/cat.png` theo chỗ đánh dấu trong ảnh đính kèm: ");
+    expect(editPrompt({ isSvg: false, pins: [] }, vi)).toBe("Sửa ảnh này theo chỗ đánh dấu trong ảnh đính kèm: ");
+    expect(editPrompt({ isSvg: false, pins: [] }, en)).toBe("Edit this image following the marks in the attached image: ");
   });
 });

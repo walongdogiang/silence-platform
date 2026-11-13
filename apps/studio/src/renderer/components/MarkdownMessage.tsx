@@ -8,6 +8,7 @@ import { workspaceImageSrc } from "../workspaceImages";
 import { WorkspaceImage } from "./WorkspaceImage";
 import { VisualBlock } from "./VisualBlock";
 import type { EditTarget } from "../imageActions";
+import { useT } from "../i18n";
 
 export { parsePathRef };
 
@@ -41,13 +42,14 @@ export function MarkdownMessage(props: {
   onEditImage?: (target: EditTarget) => void;
 }) {
   const { onOpenFile, workspace, onOpenImage, streaming, onEditImage } = props;
+  const t = useT();
   const components = useMemo<Components>(
     () => ({
       a({ href, children }) {
         const ref = href && !isHttp(href) && onOpenFile ? parsePathRef(href.replace(/^\.\//, "")) : null;
         if (ref && onOpenFile) {
           return (
-            <button type="button" className="md-path md-link-file" title={`Mở ${ref.path}`} onClick={() => onOpenFile(ref.path)}>
+            <button type="button" className="md-path md-link-file" title={t("md.open", { path: ref.path })} onClick={() => onOpenFile(ref.path)}>
               {children}
             </button>
           );
@@ -69,7 +71,7 @@ export function MarkdownMessage(props: {
       img({ alt, src }) {
         const path = workspace ? workspaceImageSrc(src) : null;
         if (path) return <WorkspaceImage workspace={workspace} path={path} alt={alt} onOpen={onOpenImage} onEdit={onEditImage} />;
-        return <span className="md-img-blocked">{alt ? `[ảnh: ${alt}]` : "[ảnh bị chặn]"}</span>;
+        return <span className="md-img-blocked">{alt ? t("md.imgAlt", { alt }) : t("md.imgBlocked")}</span>;
       },
       code({ className, children }) {
         const text = textOf(children);
@@ -100,7 +102,7 @@ export function MarkdownMessage(props: {
             <button
               type="button"
               className="md-path"
-              title={`Mở ${ref.path}`}
+              title={t("md.open", { path: ref.path })}
               onClick={() => onOpenFile(ref.path)}
             >
               {text}
@@ -121,7 +123,9 @@ export function MarkdownMessage(props: {
         );
       },
     }),
-    [onOpenFile, workspace, onOpenImage, streaming, onEditImage],
+    // `t` changes with the UI language (new function each render): key the memo on its output.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onOpenFile, workspace, onOpenImage, streaming, onEditImage, t("md.imgBlocked")],
   );
 
   return (

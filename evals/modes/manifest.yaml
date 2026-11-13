@@ -54,3 +54,48 @@ tasks:
     prompt: "Sửa hai việc độc lập: mul() phải nhân (src/calc.py) và UserStore.get trả None khi thiếu user (src/user.py)."
     pass_if:
       test: test_mul
+
+  # Model Auto: chọn slot theo mode + mục đích, không đọc prompt (crates/runtime/src/agent/auto.rs).
+  # Kiểm slot qua dòng `route` trong audit (`detail.slot`, `detail.escalated`).
+  - id: A01-auto-plan-frontier
+    kind: plan
+    mode: plan
+    model: auto
+    prompt: "Lập plan sửa moving_average trong src/stats.py cho đúng cửa sổ trượt."
+    pass_if:
+      unchanged:
+        - src/stats.py
+      plan_mentions:
+        - moving_average
+      audit_matches:
+        - '"kind":"route".*"slot":"frontier"'
+
+  - id: A02-auto-ask-strong
+    kind: explore
+    mode: ask
+    model: auto
+    prompt: "median() trong src/stats.py xử lý danh sách số chẵn phần tử thế nào?"
+    pass_if:
+      unchanged:
+        - src/stats.py
+      report_mentions:
+        - median
+      audit_matches:
+        - '"kind":"route".*"slot":"strong"'
+      audit_absent:
+        - '"kind":"route".*"slot":"frontier"'
+
+  - id: A03-auto-agent-bugfix
+    kind: bugfix
+    mode: agent
+    model: auto
+    # Lỗi off-by-one dễ sửa sai lần đầu: nếu test còn đỏ sau khi sửa, Auto leo cấp (effort rồi
+    # Frontier). Pass chỉ đòi test xanh và lượt bắt đầu ở Strong; có leo hay không thì xem
+    # `"escalated":true` trong audit (không bắt buộc: model sửa đúng ngay thì không leo). Logic leo
+    # cấp được kiểm chắc chắn bằng unit test (`agent/auto.rs`); task này kiểm đường đi thật.
+    prompt: "test_moving_average đang fail. Sửa moving_average trong src/stats.py, chạy lại test cho tới khi xanh."
+    verify_filter: test_moving_average
+    pass_if:
+      test: test_moving_average
+      audit_matches:
+        - '"kind":"route".*"slot":"strong"'

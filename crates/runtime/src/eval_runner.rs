@@ -477,6 +477,8 @@ mod tests {
             input_tokens: i,
             output_tokens: o,
             usd: 0.0,
+            slot: String::new(),
+            baseline_usd: 0.0,
         }
     }
 

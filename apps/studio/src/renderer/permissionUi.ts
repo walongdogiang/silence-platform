@@ -1,3 +1,4 @@
+import type { MsgKey, T } from "./i18n";
 import type { Perm } from "./models";
 import type { RiskTier } from "./types";
 
@@ -5,18 +6,16 @@ import type { RiskTier } from "./types";
 export type PermScope = "once" | "session" | "workspace";
 
 /** Nhãn badge theo tầng rủi ro (docs/security/permissions.md). */
-export function tierBadge(tier: RiskTier | undefined): { label: string; cls: string } {
+export function tierBadge(tier: RiskTier | undefined, t: T): { label: string; cls: string } {
   switch (tier) {
     case "block":
-      return { label: "Đã chặn", cls: "block" };
-    case "ask":
-      return { label: "Cần duyệt", cls: "ask" };
+      return { label: t("perm.tier.block"), cls: "block" };
     case "logged":
-      return { label: "Tự chạy · có ghi nhận", cls: "logged" };
+      return { label: t("perm.tier.logged"), cls: "logged" };
     case "auto":
-      return { label: "Chỉ đọc", cls: "auto" };
+      return { label: t("perm.tier.auto"), cls: "auto" };
     default:
-      return { label: "Cần duyệt", cls: "ask" };
+      return { label: t("perm.tier.ask"), cls: "ask" };
   }
 }
 
@@ -30,28 +29,20 @@ function patternText(perm: Perm, pattern: string): string {
 }
 
 /** Nhãn 2 nút nhớ; `null` khi Engine không cho nhớ (lệnh nguy hiểm, pipeline…). */
-export function scopeLabels(perm: Perm | null): { session: string; workspace: string } | null {
+export function scopeLabels(perm: Perm | null, t: T): { session: string; workspace: string } | null {
   if (!perm) return null;
   const p = rememberPattern(perm);
   if (!p) return null;
-  const t = patternText(perm, p);
-  return { session: `Cho phép ${t} trong phiên này`, workspace: `Luôn cho phép ${t} trong workspace` };
+  const what = patternText(perm, p);
+  return { session: t("perm.allowSession", { what }), workspace: t("perm.allowWorkspace", { what }) };
 }
 
 /** Chế độ quyền chọn được trong Settings. `autonomous` chờ sandbox chặn mạng nên chưa chọn được. */
 export type UiPermMode = "ask" | "balanced";
 
-export const PERM_MODES: { id: UiPermMode; label: string; desc: string }[] = [
-  {
-    id: "balanced",
-    label: "Cân bằng (mặc định)",
-    desc: "Đọc, sửa file trong workspace và chạy test tự chạy (có hiển thị, Hoàn tác được). Mạng, cài package, xoá, git huỷ thay đổi, bí mật thì hỏi kèm giải thích. Lệnh nguy hiểm bị chặn.",
-  },
-  {
-    id: "ask",
-    label: "Thận trọng",
-    desc: "Chỉ đọc là tự chạy. Sửa file chờ bạn Apply; chạy lệnh nào cũng hỏi. Lệnh nguy hiểm vẫn bị chặn.",
-  },
+export const PERM_MODES: { id: UiPermMode; label: MsgKey; desc: MsgKey }[] = [
+  { id: "balanced", label: "perm.mode.balanced", desc: "perm.mode.balancedDesc" },
+  { id: "ask", label: "perm.mode.ask", desc: "perm.mode.askDesc" },
 ];
 
 export const PERM_MODE_KEY = "silence.permission.mode";

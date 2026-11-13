@@ -152,17 +152,14 @@ export function resolveSource(saved: string, sources: ModelSource[]): string {
 }
 
 /**
- * The model to use after switching to `source`: keep the current one if it belongs there;
- * otherwise Auto, except on the Claude CLI (Auto never routes there), where the mid model
- * (or the first one) is picked.
+ * The model to use after switching to `source`: keep the current one if it belongs there,
+ * otherwise Auto (available on every source, the Claude CLI included).
  */
 export function modelForSource(current: string, source: string, models: ModelInfo[]): string {
+  if (current === "auto") return "auto";
   const sources = modelSources(models);
   const inSource = models.filter((m) => sourceOf(m, sources) === source);
-  if (inSource.some((m) => m.id === current)) return current;
-  const kind = sources.find((s) => s.id === source)?.kind;
-  if (kind !== "claude_cli") return "auto";
-  return (inSource.find((m) => m.tier === "mid") ?? inSource[0])?.id ?? "auto";
+  return inSource.some((m) => m.id === current) ? current : "auto";
 }
 
 const PREFERRED_KEY = "silence.models.preferredProvider";

@@ -3,6 +3,8 @@ description: Spec ô nhập chat — context usage, danh sách file, textarea, c
 type: spec
 code:
   - apps/studio/src/renderer/components/Composer.tsx
+  - apps/studio/src/renderer/components/AutoSettings.tsx
+  - apps/studio/src/renderer/autoConfig.ts
   - apps/studio/src/renderer/modes.ts
   - apps/studio/src/renderer/models.ts
   - apps/studio/src/renderer/contextUsage.ts
@@ -19,7 +21,7 @@ Bám Cursor chat input. File: `components/Composer.tsx`.
 1. **Context Usage panel** — chỉ khi bấm vòng gauge.
 2. **Files + Review** — chỉ khi `files.length > 0` (tree workspace). Ẩn khi 0 Files.
 3. **Ảnh dán** — chỉ khi có ảnh (xem "Dán ảnh").
-4. **Textarea** — placeholder luôn: `Plan, Build, / for skills, @ for context`.
+4. **Textarea** — placeholder theo ngôn ngữ UI (`composer.placeholder` trong `i18n.ts`): EN `Plan, Build, / for skills, @ for context`, VI `Lập kế hoạch, xây dựng, / để dùng skill, @ để thêm ngữ cảnh`.
 5. **Hàng dưới:** mode + Auto (trái) · tools (phải).
 
 ## Mode
@@ -43,12 +45,40 @@ Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat
 
 ## Model và Effort
 
+- **Auto** luôn là dòng đầu danh sách, ở **mọi source** (kể cả Claude CLI). Dưới chữ Auto có một dòng tóm tắt theo cấu hình của source đang chọn, ví dụ "Opus lập kế hoạch · Sonnet thực thi · Haiku việc phụ" (`autoSummary`). Auto **không đọc nội dung prompt**. Engine chọn slot theo mode và mục đích của lời gọi (mặc định dưới đây; slot của lượt chính đổi được theo từng mode trong Tuỳ chỉnh Auto):
+  - **Frontier**: Plan, Review, subagent review.
+  - **Strong**: Agent, Ask, Debug, MultiTask, lượt thực thi sau Approve plan, subagent implement.
+  - **Small**: tiêu đề chat, subagent explore.
+
+  Gặp khó thì leo cấp, bậc 1 là effort +1, bậc 2 là lên Frontier, và giữ Frontier đến hết lượt. Tín hiệu leo cấp: test đỏ sau khi sửa, cùng tool lỗi 2 lần, lặp cùng lời gọi 3 lần hoặc 4 bước liền không tiến triển, trả lời rỗng, lỗi provider tạm thời. Ở Debug, test đỏ đầu tiên lên thẳng Frontier. Trên Claude CLI không đổi model giữa lượt được: lượt có tín hiệu xấu khiến lượt **sau** bắt đầu ở Frontier.
+- Dòng **Auto** đứng đầu: icon ✦ (`--accent`) + chữ Auto, **không có dòng phụ**. Rê chuột thì tooltip ghi model của từng việc (Lập kế hoạch & review / Thực thi / Việc phụ).
+- Chữ trong menu model và toàn bộ UI Auto theo ngôn ngữ giao diện (`docs/frontend/i18n.md`).
+- Dòng **Auto settings / Cài đặt Auto** (trên Nguồn, giá trị là tên preset) mở submenu **chỉ có lựa chọn nhanh** (`AutoQuickMenu`):
+  - 4 preset Cân bằng / Tiết kiệm / Thông minh nhất / Tuỳ chỉnh, mỗi preset có dòng phụ là model của 3 slot (Tuỳ chỉnh: "Chọn model từng slot trong Cài đặt");
+  - ô "Trần chi phí / chat" (placeholder "Không giới hạn") kèm "Đã dùng $x" của chat hiện tại;
+  - **More settings…** mở Settings → Models và cuộn tới mục Auto (`NetworkPanel.focusAuto`).
+- **Settings → Models → Auto** (`AutoSettings`), tab theo source:
+  - 4 thẻ preset kèm mô tả và model;
+  - preset Tuỳ chỉnh: chọn model cho từng slot;
+  - bảng **"Việc nào dùng slot nào"**: mỗi mode một nút phân đoạn Frontier/Strong/Small (chấm `--accent` = slot mặc định), cột cuối là model sẽ dùng; dòng "Việc phụ" cố định Small (`AutoConfig.mode_slots`, `withModeSlot`). Chỉ áp dụng khi chọn Auto, leo cấp vẫn chạy từ slot đã chọn;
+  - **pool** "Model Auto được dùng": bỏ/tích một model thì hiện "Sau thay đổi: Frontier → Sonnet 5.5" nếu có slot đổi model (`poolImpact`). Model `opt_in` chỉ dùng được khi được tích;
+  - **Trần chi phí mỗi chat**, kèm số chat đang mở đã dùng.
+
+  Cấu hình lưu ở `localStorage` `silence.auto.v1`, dạng `{[source]: AutoConfig}`. Model tắt ở Settings → Models không vào pool (`engineConfig`). Tên model trong phần Auto dùng dạng ngắn `Opus 5.5` như picker (`shortName`).
+- Trigger khi chọn Auto: `Auto · Sonnet 5.5`, là model của lượt chính gần nhất (bỏ qua route của title/subagent); chưa có lượt nào thì chỉ hiện `Auto`.
+- **Chip mỗi lượt**: summary của meta lượt có chip `Auto → Opus · leo cấp: tests failed after an edit` (màu `--warning` khi đã leo cấp). Tooltip liệt kê mọi route trong lượt. Các dòng route trong phần mở rộng ghi model, slot và mục đích.
+- **Chi phí theo slot**: panel Context Usage có thêm "Chi phí phiên này", tách theo Frontier/Strong/Small, kèm "tiết kiệm ~$X so với dùng toàn model mạnh nhất" (lấy từ `cost.baseline_usd`). Số này theo từng thread, còn sau reload.
+- **Trần chi phí**:
+  - Dùng ≥ 80% trần thì Auto không leo lên Frontier.
+  - Dùng ≥ 100%, **hoặc bước tiếp theo ước tính sẽ vượt trần**, thì Engine dừng lượt bằng `done{stop:"budget"}` (dừng ở bước đầu thì bỏ luôn câu hỏi chưa trả lời). Ước tính một bước = chi phí bước trước nếu cùng model, không thì tính theo kích thước history cộng 2K token trả lời.
+  - Số đã tiêu được lưu theo **thread** (`localStorage` `silence.auto.spend.v1`), gửi lại bằng `session.carry_spend` trước mỗi lượt; Engine giữ số lớn hơn. Nhờ vậy Engine restart hay tạo session mới cho cùng thread không reset trần. Resume session thì Engine cộng lại từ các event `cost` trong log. UI trả câu đó vào composer và hiện banner trên composer gồm "Nâng trần +50%", "Tiếp tục 1 lượt" (`session.budget_continue` rồi gửi lại) và ×.
+  - Trần chỉ áp cho Auto. Chọn model tường minh thì không bị chặn.
 - Menu model chỉ hiện tên model; **tier** (`fast`/`mid`/`strong`/`free` trong `models.yaml`) là gợi ý route của Auto nên không hiện ra UI (không còn nhãn Fast / Balanced / Powerful / Free). Tooltip khi rê chuột hiện nguồn model.
 - Model `opt_in` trong `models.yaml` (hiện có Fable 5.2 ở Claude CLI, rất tốn token) tắt mặc định: vẫn hiện trong picker nhưng xám, không chọn được, có nút **Enable** mở Settings → Models và cuộn tới + nháy dòng đó (`lockedModels`, `NetworkPanel.focus`); Auto không bao giờ chọn, cho tới khi user bật công tắc ở Settings → Models (`ModelPrefs.enabled`; dòng đó ghi "Uses many more tokens — off by default"). Tắt lại khi đang chọn nó → về model mặc định của nguồn.
-- **Source** (dòng trong menu model, trên Effort, submenu cùng kiểu Effort): OpenRouter / Anthropic API / Claude CLI. Danh sách model chỉ hiện model của nguồn đang chọn, chỉ **tên model** (bỏ tiền tố `Claude `, ví dụ `Opus 5.5`), không tiêu đề nhóm hay tên hãng. Nguồn chưa dùng được (chưa có key, chưa cài CLI) vẫn có trong submenu, mờ, chữ **Set up** mở Settings → Model sources. Dòng Claude CLI hiện email rút gọn của tài khoản CLI (`providers.cli_info`), hoặc "not signed in". Đổi nguồn: model hiện tại thuộc nguồn mới thì giữ, không thì về Auto; nguồn Claude CLI không có Auto (chọn sẵn model tier `mid`). Nguồn lưu ở `localStorage` (`silence.models.preferredProvider`) và gửi Engine qua `providers.set_preferred` để Auto chỉ route trong nguồn đó (Engine chỉ lùi sang nguồn khác khi nguồn đó thiếu tier cần). Settings không còn radio ưu tiên.
+- **Source** (dòng trong menu model, trên Effort, submenu cùng kiểu Effort): OpenRouter / Anthropic API / Claude CLI. Danh sách model chỉ hiện model của nguồn đang chọn, chỉ **tên model** (bỏ tiền tố `Claude `, ví dụ `Opus 5.5`), không tiêu đề nhóm hay tên hãng. Nguồn chưa dùng được (chưa có key, chưa cài CLI) vẫn có trong submenu, mờ, chữ **Set up** mở Settings → Model sources. Dòng Claude CLI hiện email rút gọn của tài khoản CLI (`providers.cli_info`), hoặc "not signed in". Đổi nguồn: model hiện tại thuộc nguồn mới thì giữ, không thì về Auto (mọi nguồn, kể cả Claude CLI). Nguồn lưu ở `localStorage` (`silence.models.preferredProvider`), gửi Engine kèm `session.set_model {model, source}` để Auto chỉ chọn trong nguồn đó; `providers.set_preferred` vẫn gửi (CLI → `""`) cho các lookup theo tier. Settings không còn radio ưu tiên.
 - Dòng **Effort** cuối menu, có cho mọi model: model OpenRouter không khai báo `efforts` (model free, model tự thêm) được đủ 5 mức; chưa chọn mức thì không gửi effort, không có badge Recommended. Submenu dùng `position: fixed` (không bị khung chat cắt), đặt bởi `placeSubmenu`: bên phải menu model nếu đủ chỗ, không thì bên trái (chevron đổi hướng), không bên nào đủ thì đè lên menu; đáy thẳng hàng với dòng Effort, luôn nằm trong cửa sổ; Esc đóng. Nội dung: câu mô tả ngắn, rồi Low / Medium / High / Extra / Max (không có dòng Auto). Badge pill **Recommended** ở `default_effort` của model; Max có pill cảnh báo màu `--warning` (icon tam giác, "Highest usage"); dấu ✓ màu `--accent`. Recommended = `default_effort` của model, hiện là Medium cho mọi model Claude (giống Claude Code). Chưa chọn mức nào (`auto`) thì Engine gửi hẳn mức Recommended (không phó mặc mặc định của API, vốn khác nhau theo model), nên ✓ nằm ở đó; với Auto (model), ✓ chỉ hiện khi mọi model có chung một mức mặc định. Auto (model) chỉ hiện các mức mọi model trong catalog đều hỗ trợ.
 - Trigger: tên model rút gọn (bỏ tiền tố `Claude `, ví dụ `Opus 5.5`) màu `--text-primary`, độ đậm thường; cách 6px là mức effort đang dùng (kể cả mức Recommended khi chưa chọn) màu `--text-secondary`, không dấu chấm ngăn; chevron `--text-muted`. Model không có mức mặc định và chưa chọn effort thì chỉ hiện tên. Model + effort lưu ở `localStorage` (`silence.composer.pick.v1`), còn sau reload; model không còn trong catalog → về Auto; đổi model mà mức effort không hỗ trợ → về Auto.
-- Đồng bộ trước mỗi `session.prompt`: `session.set_model`, `session.set_mode`, `session.set_effort`, `providers.set_preferred`. Engine ánh xạ effort theo nguồn: Anthropic `output_config.effort`, OpenRouter `reasoning.effort` (giữ nguyên mức; với Claude, OpenRouter đổi thành thinking budget theo `max_output_tokens`), CLI `--effort`.
+- Đồng bộ trước mỗi `session.prompt`: `session.set_model` (kèm `source`), `session.set_mode`, `session.set_effort`, `auto.set_config` (cấu hình Auto của source đang chọn), `providers.set_preferred`. Khi mở app và khi bật/tắt model, mọi cấu hình Auto đã lưu được gửi lại, vì Engine chỉ giữ chúng trong bộ nhớ. Engine ánh xạ effort theo nguồn: Anthropic `output_config.effort`, OpenRouter `reasoning.effort` (giữ nguyên mức; với Claude, OpenRouter đổi thành thinking budget theo `max_output_tokens`), CLI `--effort`.
 
 ## Cụm phải
 

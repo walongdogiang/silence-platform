@@ -1,15 +1,16 @@
 import { Plus, X } from "lucide-react";
 import type { Ref } from "react";
+import { useT, type MsgKey } from "../i18n";
 import { SoftScroll } from "./SoftScroll";
 
 export type PanelTab = "terminal" | "output" | "problems" | "debug" | "ports";
 
-const TABS: { id: PanelTab; label: string; live?: boolean }[] = [
-  { id: "problems", label: "Problems" },
-  { id: "output", label: "Output", live: true },
-  { id: "debug", label: "Debug Console" },
-  { id: "terminal", label: "Terminal", live: true },
-  { id: "ports", label: "Ports" },
+const TABS: { id: PanelTab; label: MsgKey; live?: boolean }[] = [
+  { id: "problems", label: "panel.problems" },
+  { id: "output", label: "panel.output", live: true },
+  { id: "debug", label: "panel.debug" },
+  { id: "terminal", label: "panel.terminal", live: true },
+  { id: "ports", label: "panel.ports" },
 ];
 
 export function BottomPanel(props: {
@@ -20,27 +21,28 @@ export function BottomPanel(props: {
   termRef: Ref<HTMLDivElement>;
   output: string[];
 }) {
+  const tr = useT();
   return (
-    <section className={`bottom-panel${props.open ? "" : " hidden"}`} aria-label="Panel">
+    <section className={`bottom-panel${props.open ? "" : " hidden"}`} aria-label={tr("panel.label")}>
       <div className="bottom-tabs">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             className={props.tab === t.id ? "active" : ""}
-            title={t.live ? t.label : `${t.label} (chưa gắn)`}
+            title={t.live ? tr(t.label) : `${tr(t.label)} (${tr("common.notWired")})`}
             onClick={() => props.onTab(t.id)}
           >
-            {t.label}
+            {tr(t.label)}
           </button>
         ))}
         <span className="bottom-tabs-spacer" />
         {props.tab === "terminal" ? (
-          <button type="button" className="bottom-tab-icon" title="New Terminal (chưa gắn)" disabled>
+          <button type="button" className="bottom-tab-icon" title={tr("panel.newTerminal")} disabled>
             <Plus size={14} />
           </button>
         ) : null}
-        <button type="button" className="bottom-tab-icon" title="Đóng panel" onClick={props.onClose}>
+        <button type="button" className="bottom-tab-icon" title={tr("panel.close")} onClick={props.onClose}>
           <X size={14} />
         </button>
       </div>
@@ -49,12 +51,12 @@ export function BottomPanel(props: {
         {props.tab === "output" ? (
           <SoftScroll className="bottom-output-scroll" deps={[props.output.length, props.output[props.output.length - 1]]}>
             <pre className="bottom-output">
-              {props.output.length === 0 ? "Chưa có output." : props.output.join("\n")}
+              {props.output.length === 0 ? tr("panel.noOutput") : props.output.join("\n")}
             </pre>
           </SoftScroll>
         ) : null}
         {props.tab === "problems" || props.tab === "debug" || props.tab === "ports" ? (
-          <p className="hint">{TABS.find((t) => t.id === props.tab)?.label} chưa gắn backend.</p>
+          <p className="hint">{tr("panel.notWired", { tab: tr(TABS.find((t) => t.id === props.tab)?.label ?? "panel.problems") })}</p>
         ) : null}
       </div>
     </section>

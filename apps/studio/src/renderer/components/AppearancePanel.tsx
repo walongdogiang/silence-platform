@@ -1,5 +1,6 @@
 import { Monitor, Moon, Sun, X } from "lucide-react";
 import { PermissionsSection } from "./PermissionsSection";
+import { LANGS, useT, type MsgKey } from "../i18n";
 import type { UiPermMode } from "../permissionUi";
 import mountains from "../assets/wallpapers/mountains.png";
 import {
@@ -21,19 +22,13 @@ const PALETTES: { id: PaletteId; label: string; swatch: string }[] = [
   { id: "plum", label: "Plum", swatch: "#a48bcc" },
 ];
 
-const WALLS: { id: WallpaperId; label: string }[] = [
-  { id: "none", label: "None" },
-  { id: "aurora", label: "Aurora" },
-  { id: "mountains", label: "Mountains" },
-  { id: "forest", label: "Forest" },
-  { id: "desert", label: "Desert" },
-  { id: "ocean", label: "Ocean" },
-];
+/** Palette names above are theme names (not translated); the rest follows the UI language. */
+const WALLS: WallpaperId[] = ["none", "aurora", "mountains", "forest", "desert", "ocean"];
 
-const THEMES: { id: ThemeMode; label: string; icon: typeof Moon }[] = [
-  { id: "dark", label: "Dark", icon: Moon },
-  { id: "light", label: "Light", icon: Sun },
-  { id: "auto", label: "Auto", icon: Monitor },
+const THEMES: { id: ThemeMode; label: MsgKey; icon: typeof Moon }[] = [
+  { id: "dark", label: "appear.dark", icon: Moon },
+  { id: "light", label: "appear.light", icon: Sun },
+  { id: "auto", label: "appear.auto", icon: Monitor },
 ];
 
 export function AppearancePanel(props: {
@@ -45,6 +40,7 @@ export function AppearancePanel(props: {
   permMode: UiPermMode;
   onPermMode: (m: UiPermMode) => void;
 }) {
+  const t = useT();
   if (!props.open) return null;
   const a = props.value;
   const set = (patch: Partial<Appearance>) => props.onChange({ ...a, ...patch });
@@ -52,21 +48,32 @@ export function AppearancePanel(props: {
   return (
     <aside className="appear">
       <header>
-        <h2>Appearance</h2>
-        <button type="button" className="icon-btn" onClick={props.onClose} aria-label="Đóng">
+        <h2>{t("appear.title")}</h2>
+        <button type="button" className="icon-btn" onClick={props.onClose} aria-label={t("common.close")}>
           <X size={16} />
         </button>
       </header>
 
       <div className="appear-sec">
-        <h3>Theme</h3>
+        <h3>{t("appear.language")}</h3>
+        <div className="seg">
+          {LANGS.map((l) => (
+            <button key={l.id} type="button" className={a.lang === l.id ? "on" : ""} onClick={() => set({ lang: l.id })}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="appear-sec">
+        <h3>{t("appear.theme")}</h3>
         <div className="seg theme">
-          {THEMES.map((t) => {
-            const Icon = t.icon;
+          {THEMES.map((th) => {
+            const Icon = th.icon;
             return (
-              <button key={t.id} type="button" className={a.theme === t.id ? "on" : ""} onClick={() => set({ theme: t.id })}>
+              <button key={th.id} type="button" className={a.theme === th.id ? "on" : ""} onClick={() => set({ theme: th.id })}>
                 <Icon size={14} />
-                {t.label}
+                {t(th.label)}
               </button>
             );
           })}
@@ -74,7 +81,7 @@ export function AppearancePanel(props: {
       </div>
 
       <div className="appear-sec">
-        <h3>Color Palette</h3>
+        <h3>{t("appear.palette")}</h3>
         <div className="dots">
           {PALETTES.map((p) => (
             <button
@@ -91,18 +98,18 @@ export function AppearancePanel(props: {
       </div>
 
       <div className="appear-sec">
-        <h3>UI Density</h3>
+        <h3>{t("appear.density")}</h3>
         <div className="seg">
           {(["compact", "default", "spacious"] as DensityId[]).map((d) => (
             <button key={d} type="button" className={a.density === d ? "on" : ""} onClick={() => set({ density: d })}>
-              {d}
+              {t(`appear.density.${d}`)}
             </button>
           ))}
         </div>
       </div>
 
       <div className="appear-sec">
-        <h3>Accent Color</h3>
+        <h3>{t("appear.accent")}</h3>
         <div className="dots">
           {(Object.keys(ACCENTS) as AccentId[]).map((id) => (
             <button
@@ -110,8 +117,8 @@ export function AppearancePanel(props: {
               type="button"
               className={a.accent === id ? "on" : ""}
               style={{ background: ACCENTS[id].accent }}
-              title={id}
-              aria-label={id}
+              title={t(`appear.accent.${id}`)}
+              aria-label={t(`appear.accent.${id}`)}
               onClick={() => set({ accent: id })}
             />
           ))}
@@ -119,24 +126,24 @@ export function AppearancePanel(props: {
       </div>
 
       <div className="appear-sec">
-        <h3>Background</h3>
+        <h3>{t("appear.background")}</h3>
         <div className="wall-grid">
           {WALLS.map((w) => (
             <button
-              key={w.id}
+              key={w}
               type="button"
-              className={`wall-thumb ${a.wallpaper === w.id ? "on" : ""}`}
-              data-wall={w.id}
-              onClick={() => set({ wallpaper: w.id })}
-              style={w.id === "mountains" ? { backgroundImage: `url(${mountains})` } : undefined}
+              className={`wall-thumb ${a.wallpaper === w ? "on" : ""}`}
+              data-wall={w}
+              onClick={() => set({ wallpaper: w })}
+              style={w === "mountains" ? { backgroundImage: `url(${mountains})` } : undefined}
             >
-              <span>{w.label}</span>
+              <span>{t(`appear.wall.${w}`)}</span>
             </button>
           ))}
         </div>
         <label className="toggle">
           <input type="checkbox" checked={a.blur} onChange={(e) => set({ blur: e.target.checked })} />
-          Show Wallpaper Blur
+          {t("appear.blur")}
         </label>
         <label className="toggle">
           <input
@@ -144,14 +151,14 @@ export function AppearancePanel(props: {
             checked={a.reduceMotion}
             onChange={(e) => set({ reduceMotion: e.target.checked })}
           />
-          Reduce Motion
+          {t("appear.reduceMotion")}
         </label>
       </div>
 
       <PermissionsSection workspace={props.workspace ?? ""} mode={props.permMode} onMode={props.onPermMode} />
 
       <button type="button" className="ghost" onClick={() => props.onChange({ ...DEFAULT_APPEARANCE })}>
-        Reset to default
+        {t("appear.reset")}
       </button>
     </aside>
   );
