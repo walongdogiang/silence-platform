@@ -51,7 +51,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Terminal (ConPTY) | `runtime/src/pty.rs` |
 | Chỉ bind loopback | `runtime/src/bind_policy.rs` |
 | Ẩn secret trong log | `runtime/src/redact.rs` |
-| Entry CLI, chạy eval | `runtime/src/main.rs`, `runtime/src/eval_runner.rs`; danh sách eval: `evals/v0/manifest.yaml` |
+| Entry CLI, chạy eval | `runtime/src/main.rs`; chạy `runtime/src/eval_runner.rs` (`run`, `Suite::attempt`, `resolve_model`), hiệu chỉnh `eval_calibrate.rs` (`pick_model`), lịch sử `eval_history.rs` (`render_summary`); hướng dẫn `evals/README.md` |
 | Tool `read`/`write`/`edit`/`glob`/`grep`/`shell`/`git_*`, jail workspace | `crates/tools/src/lib.rs` (`specs`, `Workspace`) |
 | Ảnh: đọc ảnh workspace (`read_image`, `view_image` spec), ảnh user dán (validate, content parts, strip cho model không vision) | `crates/tools/src/image.rs`, `crates/runtime/src/images.rs`; tool `view_image` ở `agent/mod.rs` (`view_image`, `builtin_tools`) |
 | Job Object, timeout process | `crates/sandbox/src/lib.rs` |

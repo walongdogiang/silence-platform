@@ -90,7 +90,7 @@ Plan: `/gsd-plan-phase --prd docs/PRD.md`. Không `/gsd-new-project` đè PRD. G
 | File | Mục đích | Khi nào đọc |
 | --- | --- | --- |
 | [../config/models.yaml](../config/models.yaml) | Cấu hình model / route | Đổi Auto-model hoặc danh sách model |
-| [../evals/v0/manifest.yaml](../evals/v0/manifest.yaml) | Danh sách eval harness | Đổi vòng agent / thêm eval |
+| [../evals/README.md](../evals/README.md) | Eval: cách chạy, ghim model, lịch sử, ngân sách; task ở `evals/*/manifest.yaml` | Đổi vòng agent / thêm eval / chạy eval |
 
 ## Kit agent trong app (không phải playbook Cursor)
 

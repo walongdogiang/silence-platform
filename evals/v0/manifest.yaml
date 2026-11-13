@@ -1,6 +1,6 @@
-# Eval v0 — 27 task trên fixture sample-app (thay bằng repo nội bộ khi có).
+# Eval v0 — 30 task trên fixture sample-app (thay bằng repo nội bộ khi có).
 # kinds: edit | bugfix | explore | plan
-# Runner: silence-engine evals --dir evals/v0
+# Hướng dẫn chạy, ghim model, lịch sử: evals/README.md
 
 workspace: fixtures/sample-app
 setup: []

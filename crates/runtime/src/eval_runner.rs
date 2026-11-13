@@ -1,30 +1,40 @@
+//! Eval runner: `silence-engine evals --dir evals/<suite>`. Hướng dẫn: `evals/README.md`.
+//!
+//! Each task runs on a fresh copy of the suite fixture with a pinned model (see
+//! [`Suite::model_for`]); results land in `evals/results/` (gitignored) and, with `--history`,
+//! one line in `evals/history/runs.jsonl` (committed; see `eval_history`).
+
 use crate::agent::{self, AppCtx};
 use crate::audit::AuditLog;
 use crate::compact::estimate_tokens;
+use crate::eval_history;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use silence_protocol::{PermissionMode, SessionEvent, SessionMode};
 use silence_router::Catalog;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// Model for tasks with no pin anywhere: the cheapest tier (budget < $10/month).
+pub const DEFAULT_MODEL: &str = "claude-haiku";
+/// Pin value for a task no model in the ladder could pass; such tasks are skipped.
+pub const UNSOLVED: &str = "unsolved";
+
 #[derive(Debug, Deserialize)]
-struct Manifest {
+pub(crate) struct Manifest {
     workspace: String,
     #[serde(default)]
     verify_cmd: String,
-    tasks: Vec<Task>,
+    pub(crate) tasks: Vec<Task>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Task {
-    id: String,
-    kind: String,
+pub(crate) struct Task {
+    pub(crate) id: String,
+    pub(crate) kind: String,
     prompt: String,
-    #[serde(default)]
-    read_only: bool,
     #[serde(default)]
     plan_only: bool,
     /// Session mode for this task (agent/plan/ask/debug/review/multitask). Overrides `plan_only`.
@@ -32,9 +42,10 @@ struct Task {
     mode: Option<SessionMode>,
     #[serde(default)]
     verify_filter: Option<String>,
-    /// Model id for the session (default `auto`), e.g. `claude-sonnet@api` to exercise one source.
+    /// Model fixed by the task author (e.g. `claude-sonnet@api` to exercise one source, or
+    /// `auto` to test the router). Wins over `models.yaml`; calibration leaves it alone.
     #[serde(default)]
-    model: Option<String>,
+    pub(crate) model: Option<String>,
     /// Session effort (`auto` default).
     #[serde(default)]
     effort: Option<String>,
@@ -42,6 +53,16 @@ struct Task {
     #[serde(default)]
     requires_env: Vec<String>,
     pass_if: PassIf,
+}
+
+impl Task {
+    /// First env var in `requires_env` that is unset or empty.
+    pub(crate) fn missing_env(&self) -> Option<&str> {
+        self.requires_env
+            .iter()
+            .find(|k| std::env::var(k.as_str()).map(|v| v.is_empty()).unwrap_or(true))
+            .map(|s| s.as_str())
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -71,38 +92,200 @@ struct GrepCheck {
     pattern: String,
 }
 
-pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i32> {
-    let manifest_path = if dir.join("manifest.yaml").exists() {
-        dir.join("manifest.yaml")
+/// `<suite>/models.yaml`: task id → pinned model, written by `evals-calibrate`.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct ModelPins {
+    #[serde(default)]
+    pub models: BTreeMap<String, String>,
+}
+
+impl ModelPins {
+    pub fn load(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let text = std::fs::read_to_string(path).context("read models.yaml")?;
+        Ok(serde_yaml::from_str::<Option<Self>>(&text)?.unwrap_or_default())
+    }
+
+    pub fn save(&self, path: &Path) -> Result<()> {
+        let body = serde_yaml::to_string(self)?;
+        let text = format!(
+            "# Model đã ghim cho từng task. Sinh bởi `npm run evals:calibrate`; lý do ở evals/DECISIONS.md.\n\
+             # `unsolved` = không model nào qua được: task bị bỏ qua cho tới khi sửa task/harness.\n\
+             # Task có `model:` trong manifest thì manifest thắng (không ghi ở đây).\n{body}"
+        );
+        std::fs::write(path, text).context("write models.yaml")
+    }
+}
+
+/// Model precedence: `--model` → `model:` in the manifest → `models.yaml` → [`DEFAULT_MODEL`].
+/// `None` = the pin is [`UNSOLVED`] and nothing overrides it: skip the task.
+pub fn resolve_model(cli: Option<&str>, task: Option<&str>, pinned: Option<&str>) -> Option<String> {
+    if let Some(m) = cli.or(task) {
+        return Some(m.to_string());
+    }
+    match pinned {
+        Some(UNSOLVED) => None,
+        Some(m) => Some(m.to_string()),
+        None => Some(DEFAULT_MODEL.to_string()),
+    }
+}
+
+/// Outcome of one task (or one attempt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Status {
+    Pass,
+    #[default]
+    Fail,
+    /// The model could not be reached (credits, key, network…): not the agent's fault.
+    Error,
+    Skip,
+}
+
+impl Status {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Status::Pass => "PASS",
+            Status::Fail => "FAIL",
+            Status::Error => "ERROR",
+            Status::Skip => "SKIP",
+        }
+    }
+}
+
+/// Error codes (`ErrorInfo.code`) meaning the model could not be reached.
+pub fn is_infra_error(code: &str) -> bool {
+    matches!(
+        code,
+        "PROVIDER_CREDITS"
+            | "PROVIDER_AUTH"
+            | "PROVIDER_RATE"
+            | "PROVIDER_UNAVAILABLE"
+            | "NETWORK"
+            | "TIMEOUT"
+            | "CLI_NOT_FOUND"
+            | "CLI_AUTH"
+    )
+}
+
+/// Infra errors every later task would hit too: stop the run instead of burning through it.
+pub fn is_fatal_error(code: &str) -> bool {
+    matches!(code, "PROVIDER_CREDITS" | "PROVIDER_AUTH" | "CLI_NOT_FOUND" | "CLI_AUTH")
+}
+
+/// Status of one attempt: infra error code → `Error`, else pass/fail by the checks.
+pub fn attempt_status(passed: bool, error_code: Option<&str>) -> Status {
+    if error_code.is_some_and(is_infra_error) {
+        Status::Error
+    } else if passed {
+        Status::Pass
     } else {
-        dir.to_path_buf()
-    };
-    let text = std::fs::read_to_string(&manifest_path).context("read eval manifest")?;
-    let manifest: Manifest = serde_yaml::from_str(&text)?;
-    let catalog = Catalog::load(catalog_path)?;
-    let results_dir = repo_root.join("evals/results");
-    std::fs::create_dir_all(&results_dir)?;
-    let fixture = repo_root.join("evals").join(&manifest.workspace);
-    let mut failed = 0;
-    let mut ran = 0;
-    let mut all_metrics: Vec<TaskMetrics> = Vec::new();
-    for task in &manifest.tasks {
-        if let Some(missing) = task
-            .requires_env
-            .iter()
-            .find(|k| std::env::var(k.as_str()).map(|v| v.is_empty()).unwrap_or(true))
-        {
-            println!("SKIP {} ({missing} not set)", task.id);
-            continue;
+        Status::Fail
+    }
+}
+
+/// Options of `silence-engine evals`.
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    /// Override the model of every task.
+    pub model: Option<String>,
+    /// Run only these task ids (empty = all).
+    pub only: Vec<String>,
+    /// Run only tasks whose resolved model is this one (nightly: `claude-haiku`).
+    pub pinned: Option<String>,
+    /// Attempts per task; the task passes only if every attempt passes.
+    pub repeat: u32,
+    /// One extra attempt for a failed task; a pass then marks it `flaky` (not failed).
+    pub retry_failed: bool,
+    /// Stop starting attempts once this much (USD) has been spent.
+    pub max_cost: Option<f64>,
+    /// Append the run to `evals/history/runs.jsonl` and regenerate `SUMMARY.md`.
+    pub history: bool,
+    /// Label stored in history (`manual`, `nightly`, `weekly`…).
+    pub profile: String,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            model: None,
+            only: Vec::new(),
+            pinned: None,
+            repeat: 1,
+            retry_failed: false,
+            max_cost: None,
+            history: false,
+            profile: "manual".into(),
         }
-        ran += 1;
-        let ws = results_dir.join(&task.id).join("workspace");
-        if ws.exists() {
-            let _ = std::fs::remove_dir_all(&ws);
+    }
+}
+
+/// A loaded suite: manifest, pins, catalog and paths.
+pub(crate) struct Suite {
+    pub(crate) name: String,
+    pub(crate) manifest: Manifest,
+    pub(crate) pins: ModelPins,
+    pub(crate) pins_path: PathBuf,
+    catalog: Catalog,
+    pub(crate) results_dir: PathBuf,
+    fixture: PathBuf,
+}
+
+impl Suite {
+    pub(crate) fn load(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<Self> {
+        let manifest_path = if dir.join("manifest.yaml").exists() {
+            dir.join("manifest.yaml")
+        } else {
+            dir.to_path_buf()
+        };
+        let suite_dir = manifest_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let name = suite_dir
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "suite".into());
+        let text = std::fs::read_to_string(&manifest_path).context("read eval manifest")?;
+        let manifest: Manifest = serde_yaml::from_str(&text)?;
+        let pins_path = suite_dir.join("models.yaml");
+        let pins = ModelPins::load(&pins_path)?;
+        let catalog = Catalog::load(catalog_path)?;
+        let results_dir = repo_root.join("evals/results");
+        std::fs::create_dir_all(&results_dir)?;
+        let fixture = repo_root.join("evals").join(&manifest.workspace);
+        Ok(Self {
+            name,
+            manifest,
+            pins,
+            pins_path,
+            catalog,
+            results_dir,
+            fixture,
+        })
+    }
+
+    pub(crate) fn model_for(&self, task: &Task, cli: Option<&str>) -> Option<String> {
+        resolve_model(
+            cli,
+            task.model.as_deref(),
+            self.pins.models.get(&task.id).map(|s| s.as_str()),
+        )
+    }
+
+    /// Attempt `n` (1-based) of `task` on `model`, in `results/<id>/attempt-<n>/` (workspace,
+    /// audit, report). Attempt 1 clears `results/<id>/`, so a task keeps only its latest run, but
+    /// every attempt of that run (a failed one in the middle of `--repeat` stays inspectable).
+    pub(crate) async fn attempt(&self, task: &Task, model: &str, n: u32) -> Result<TaskMetrics> {
+        let root = self.results_dir.join(&task.id);
+        if n <= 1 && root.exists() {
+            // Old audit lines would leak into `audit_matches` / `audit_absent`.
+            let _ = std::fs::remove_dir_all(&root);
         }
-        copy_dir(&fixture, &ws)?;
-        let audit = AuditLog::open(&results_dir.join(&task.id))?;
-        let ctx = Arc::new(AppCtx::new(catalog.clone(), audit));
+        let task_dir = attempt_dir(&self.results_dir, &task.id, n.max(1));
+        let ws = task_dir.join("workspace");
+        copy_dir(&self.fixture, &ws)?;
+        let audit = AuditLog::open(&task_dir)?;
+        let ctx = Arc::new(AppCtx::new(self.catalog.clone(), audit));
         let mode = if let Some(m) = task.mode {
             m
         } else if task.plan_only || task.kind == "plan" {
@@ -110,10 +293,14 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         } else {
             SessionMode::Agent
         };
+        let started = std::time::Instant::now();
+        let mut metrics = TaskMetrics::new(&task.id, &task.kind);
+        metrics.model = model.to_string();
+        metrics.effort = task.effort.clone().unwrap_or_else(|| "auto".into());
         let sid = agent::create_session(
             &ctx,
             &ws.to_string_lossy(),
-            Some(task.model.clone().unwrap_or_else(|| "auto".into())),
+            Some(model.to_string()),
             mode,
             PermissionMode::Yolo,
         )
@@ -127,7 +314,6 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
             .await
             .map(|u| u.used as u64)
             .unwrap_or(0);
-        let mut metrics = TaskMetrics::new(&task.id, &task.kind);
         metrics.start_context(base + estimate_tokens(&task.prompt) as u64);
         let mut rx = agent::subscribe(&ctx, &sid).await;
         agent::prompt(ctx.clone(), sid.clone(), task.prompt.clone()).await?;
@@ -135,35 +321,171 @@ pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path) -> Result<i3
         let mut plan = String::new();
         let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics).await;
         metrics.finish();
-        let passed = if !ok_run {
-            false
-        } else {
-            let audit_text = std::fs::read_to_string(results_dir.join(&task.id).join("audit.jsonl")).unwrap_or_default();
-            check_pass(task, &ws, &fixture, &report, &plan, &manifest.verify_cmd)
+        let passed = ok_run && {
+            let audit_text = std::fs::read_to_string(task_dir.join("audit.jsonl")).unwrap_or_default();
+            check_pass(task, &ws, &self.fixture, &report, &plan, &self.manifest.verify_cmd)
                 && audit_pass(&task.pass_if, &audit_text)
         };
-        println!(
-            "{} {} {}",
-            if passed { "PASS" } else { "FAIL" },
-            task.id,
-            task.kind
-        );
-        if !passed {
-            failed += 1;
-        }
-        metrics.passed = passed;
-        all_metrics.push(metrics);
-        let _ = task.read_only;
+        metrics.status = attempt_status(passed, metrics.error_code.as_deref());
+        metrics.attempts = 1;
+        metrics.passes = u32::from(metrics.status == Status::Pass);
+        metrics.errors = u32::from(metrics.status == Status::Error);
+        metrics.duration_secs = started.elapsed().as_secs_f64();
+        let catalog = &self.catalog;
+        metrics.finalize_cost(|m| catalog.resolve(m).ok().map(|e| (e.input_cost_per_1m, e.output_cost_per_1m)));
+        Ok(metrics)
     }
-    println!("{}/{} passed", ran - failed, ran);
-    let summary = RunMetrics::new(all_metrics);
+}
+
+/// Run metadata stored with every run (metrics JSON and history line).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RunMeta {
+    pub run_id: String,
+    pub started_at: String,
+    pub git_sha: String,
+    pub suite: String,
+    pub profile: String,
+    pub repeat: u32,
+}
+
+impl RunMeta {
+    pub fn now(suite: &str, profile: &str, repeat: u32, repo_root: &Path) -> Self {
+        let now = chrono::Local::now();
+        Self {
+            run_id: now.format("%Y%m%d-%H%M%S").to_string(),
+            started_at: now.to_rfc3339(),
+            git_sha: git_sha(repo_root),
+            suite: suite.into(),
+            profile: profile.into(),
+            repeat,
+        }
+    }
+}
+
+/// `results/<task id>/attempt-<n>/`.
+pub fn attempt_dir(results_dir: &Path, task_id: &str, n: u32) -> PathBuf {
+    results_dir.join(task_id).join(format!("attempt-{n}"))
+}
+
+fn git_sha(repo_root: &Path) -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("GITHUB_SHA").ok().map(|s| s.chars().take(7).collect()))
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn skipped(task: &Task, model: &str, reason: String) -> TaskMetrics {
+    println!("SKIP {} ({reason})", task.id);
+    let mut m = TaskMetrics::new(&task.id, &task.kind);
+    m.model = model.into();
+    m.status = Status::Skip;
+    m.error = Some(reason);
+    m
+}
+
+pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &RunOptions) -> Result<i32> {
+    let suite = Suite::load(dir, catalog_path, repo_root)?;
+    let meta = RunMeta::now(&suite.name, &opts.profile, opts.repeat.max(1), repo_root);
+    let mut rows: Vec<TaskMetrics> = Vec::new();
+    let mut spent = 0.0;
+    let mut stopped: Option<String> = None;
+    let over_budget = |spent: f64| opts.max_cost.is_some_and(|cap| spent >= cap);
+    for task in &suite.manifest.tasks {
+        if !opts.only.is_empty() && !opts.only.contains(&task.id) {
+            continue;
+        }
+        let Some(model) = suite.model_for(task, opts.model.as_deref()) else {
+            if opts.pinned.is_none() {
+                rows.push(skipped(task, UNSOLVED, "unsolved: chưa model nào qua được".into()));
+            }
+            continue;
+        };
+        if opts.pinned.as_ref().is_some_and(|p| p != &model) {
+            continue;
+        }
+        if let Some(missing) = task.missing_env() {
+            rows.push(skipped(task, &model, format!("{missing} not set")));
+            continue;
+        }
+        if stopped.is_none() && over_budget(spent) {
+            stopped = Some(format!("đạt trần chi ${:.2}", opts.max_cost.unwrap_or_default()));
+        }
+        if let Some(reason) = &stopped {
+            rows.push(skipped(task, &model, reason.clone()));
+            continue;
+        }
+        let mut agg = TaskMetrics::new(&task.id, &task.kind);
+        agg.model = model.clone();
+        let mut n = 0;
+        for _ in 0..opts.repeat.max(1) {
+            n += 1;
+            let m = suite.attempt(task, &model, n).await?;
+            spent += m.cost_usd;
+            agg.merge_attempt(&m);
+            if let Some(code) = m.error_code.as_deref().filter(|c| is_fatal_error(c)) {
+                stopped = Some(format!("{code}: dừng lượt chạy"));
+            }
+            if m.status == Status::Error || stopped.is_some() || over_budget(spent) {
+                break;
+            }
+        }
+        agg.status = agg.aggregate_status();
+        if agg.status == Status::Fail && opts.retry_failed && stopped.is_none() && !over_budget(spent) {
+            let m = suite.attempt(task, &model, n + 1).await?;
+            spent += m.cost_usd;
+            agg.add_usage(&m);
+            if m.status == Status::Pass {
+                agg.status = Status::Pass;
+                agg.flaky = true;
+            }
+        }
+        println!(
+            "{} {} {} {} {}/{}{} ${:.4}",
+            agg.status.as_str(),
+            task.id,
+            task.kind,
+            agg.model,
+            agg.passes,
+            agg.attempts,
+            if agg.flaky { " flaky" } else { "" },
+            agg.cost_usd
+        );
+        rows.push(agg);
+    }
+    let summary = RunMetrics::new(meta, rows, stopped);
+    finish_run(&summary, repo_root, opts.history)
+}
+
+/// Print the table, write `results/metrics-<run_id>.json`, optionally record history.
+/// Exit code: 1 = some task failed; 2 = no failure but infra errors / stopped early; 0 = clean.
+pub(crate) fn finish_run(summary: &RunMetrics, repo_root: &Path, history: bool) -> Result<i32> {
+    let c = &summary.counts;
+    println!(
+        "{} pass · {} fail · {} error · {} skip · ${:.4}",
+        c.pass, c.fail, c.error, c.skip, summary.total_cost_usd
+    );
+    if let Some(s) = &summary.stopped {
+        println!("dừng sớm: {s}");
+    }
     println!();
     print!("{}", summary.table());
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let out = results_dir.join(format!("metrics-{stamp}.json"));
-    std::fs::write(&out, serde_json::to_string_pretty(&summary)?)?;
+    let out = repo_root
+        .join("evals/results")
+        .join(format!("metrics-{}.json", summary.meta.run_id));
+    std::fs::write(&out, serde_json::to_string_pretty(summary)?)?;
     println!("metrics: {}", out.display());
-    Ok(if failed > 0 { 1 } else { 0 })
+    if history {
+        eval_history::append(repo_root, summary)?;
+        let path = eval_history::write_summary(repo_root)?;
+        println!("history: {}", path.display());
+    }
+    Ok(summary.exit_code())
 }
 
 async fn wait_done(
@@ -176,6 +498,7 @@ async fn wait_done(
     let start = tokio::time::Instant::now();
     loop {
         if start.elapsed() > deadline {
+            metrics.error = Some("eval deadline 180s".into());
             return false;
         }
         let ev = tokio::time::timeout(tokio::time::Duration::from_secs(120), rx.recv()).await;
@@ -194,7 +517,10 @@ async fn wait_done(
             Ok(Some(SessionEvent::Error { .. })) => return false,
             Ok(Some(_)) => {}
             Ok(None) => return false,
-            Err(_) => return false,
+            Err(_) => {
+                metrics.error = Some("no event for 120s".into());
+                return false;
+            }
         }
     }
 }
@@ -209,7 +535,18 @@ async fn wait_done(
 pub struct TaskMetrics {
     pub id: String,
     pub kind: String,
-    pub passed: bool,
+    pub status: Status,
+    /// Model the task ran on (the last `Route` decision when the engine reports one).
+    pub model: String,
+    pub effort: String,
+    pub attempts: u32,
+    pub passes: u32,
+    pub errors: u32,
+    /// Failed, then passed on the `--retry-failed` attempt.
+    pub flaky: bool,
+    pub duration_secs: f64,
+    /// Provider-reported USD when every call had usage; else tokens × catalog price.
+    pub cost_usd: f64,
     pub model_calls: u32,
     pub estimated_calls: u32,
     pub input_tokens: u64,
@@ -217,9 +554,25 @@ pub struct TaskMetrics {
     pub tool_calls: u32,
     pub tool_calls_by_name: BTreeMap<String, u32>,
     pub tool_output_bytes: u64,
-    /// `SessionEvent::Error` of the task (already secret-filtered by the Engine).
+    /// Auto slots of the main turn's `Route`s, in order (empty on an explicit model).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<String>,
+    /// Auto escalated during the task (effort or Frontier).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub escalated: bool,
+    /// Reported USD per Auto slot (`frontier|strong|small`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub usd_by_slot: BTreeMap<String, f64>,
+    /// `SessionEvent::Error` of the task (already secret-filtered by the Engine), or why it
+    /// was skipped / timed out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// `ErrorInfo.code` of that error (`PROVIDER_CREDITS`…), decides `Error` vs `Fail`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    /// Sum of `Cost.usd` (0 for calls without usage).
+    #[serde(skip)]
+    usd_reported: f64,
     /// Estimated size of the next request (chars/4), for calls without usage.
     #[serde(skip)]
     context_est: u64,
@@ -232,6 +585,13 @@ pub struct TaskMetrics {
     /// The previous call reported no usage: its tool-call args still count as its output.
     #[serde(skip)]
     prev_call_estimated: bool,
+    /// Estimated (input, output) tokens of calls without usage, per model that made them.
+    /// Auto can switch models inside one task, so each call is priced on its own model.
+    #[serde(skip)]
+    est_tokens: BTreeMap<String, (u64, u64)>,
+    /// Model of the previous estimated call (its tool-call args are added later).
+    #[serde(skip)]
+    est_model: String,
 }
 
 impl TaskMetrics {
@@ -255,20 +615,41 @@ impl TaskMetrics {
                 self.context_est += t;
                 self.text_since_cost += t;
             }
+            // Side calls (sub-agents, titles) route too; the task's model is the main turn's.
+            SessionEvent::Route { task_class, model_id, slot, escalated, .. } => {
+                if !task_class.starts_with("subagent:") && task_class != "title" {
+                    self.model = model_id.clone();
+                    if !slot.is_empty() && self.slots.last() != Some(slot) {
+                        self.slots.push(slot.clone());
+                    }
+                }
+                self.escalated |= *escalated;
+            }
             // `run_turn` emits Cost after the call's text streamed and before its tools run.
             SessionEvent::Cost {
                 input_tokens,
                 output_tokens,
+                usd,
+                slot,
                 ..
             } => {
+                if !slot.is_empty() {
+                    *self.usd_by_slot.entry(slot.clone()).or_default() += usd;
+                }
                 self.close_prev_call();
                 self.model_calls += 1;
+                self.usd_reported += usd;
                 let text = std::mem::take(&mut self.text_since_cost);
                 if *input_tokens == 0 && *output_tokens == 0 {
+                    let input = self.context_est.saturating_sub(text);
                     self.estimated_calls += 1;
-                    self.input_tokens += self.context_est.saturating_sub(text);
+                    self.input_tokens += input;
                     self.output_tokens += text;
                     self.prev_call_estimated = true;
+                    self.est_model = self.model.clone();
+                    let e = self.est_tokens.entry(self.est_model.clone()).or_default();
+                    e.0 += input;
+                    e.1 += text;
                 } else {
                     self.input_tokens += *input_tokens as u64;
                     self.output_tokens += *output_tokens as u64;
@@ -288,6 +669,7 @@ impl TaskMetrics {
             SessionEvent::Error { message, error } => {
                 let code = error.as_ref().map(|e| e.code.as_str()).unwrap_or("ERROR");
                 self.error = Some(format!("{code}: {message}"));
+                self.error_code = error.as_ref().map(|e| e.code.clone());
             }
             _ => {}
         }
@@ -298,55 +680,152 @@ impl TaskMetrics {
         self.close_prev_call();
     }
 
+    /// `cost_usd`: what the provider reported, plus calls without usage priced from their
+    /// estimated tokens on the model that made each of them (`price_of(model)` = USD per 1M
+    /// input, output; an upper bound, cache discounts unknown). A model without a price adds 0.
+    pub fn finalize_cost(&mut self, price_of: impl Fn(&str) -> Option<(f64, f64)>) {
+        let estimated: f64 = self
+            .est_tokens
+            .iter()
+            .filter_map(|(model, (i, o))| {
+                price_of(model).map(|(pi, po)| (*i as f64 * pi + *o as f64 * po) / 1_000_000.0)
+            })
+            .sum();
+        self.cost_usd = self.usd_reported + estimated;
+    }
+
     fn close_prev_call(&mut self) {
         let args = std::mem::take(&mut self.args_since_cost);
         if std::mem::take(&mut self.prev_call_estimated) {
             self.output_tokens += args;
+            self.est_tokens.entry(self.est_model.clone()).or_default().1 += args;
         }
     }
 
-    fn add(&mut self, o: &TaskMetrics) {
+    /// Tokens, tools, cost and time of `o` (no attempt counting).
+    fn add_usage(&mut self, o: &TaskMetrics) {
         self.model_calls += o.model_calls;
         self.estimated_calls += o.estimated_calls;
         self.input_tokens += o.input_tokens;
         self.output_tokens += o.output_tokens;
         self.tool_calls += o.tool_calls;
         self.tool_output_bytes += o.tool_output_bytes;
+        self.cost_usd += o.cost_usd;
+        self.duration_secs += o.duration_secs;
         for (k, v) in &o.tool_calls_by_name {
             *self.tool_calls_by_name.entry(k.clone()).or_default() += v;
         }
     }
+
+    /// Fold one attempt into this task row.
+    pub fn merge_attempt(&mut self, o: &TaskMetrics) {
+        self.add_usage(o);
+        self.attempts += o.attempts;
+        self.passes += o.passes;
+        self.errors += o.errors;
+        if !o.model.is_empty() {
+            self.model = o.model.clone();
+        }
+        self.effort = o.effort.clone();
+        if o.error.is_some() {
+            self.error = o.error.clone();
+            self.error_code = o.error_code.clone();
+        }
+    }
+
+    /// Any infra error → `Error`; every attempt passed → `Pass`; else `Fail`.
+    pub fn aggregate_status(&self) -> Status {
+        if self.errors > 0 {
+            Status::Error
+        } else if self.attempts > 0 && self.passes == self.attempts {
+            Status::Pass
+        } else {
+            Status::Fail
+        }
+    }
 }
 
-/// Whole-run summary, written to `evals/results/metrics-<time>.json`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Counts {
+    pub pass: u32,
+    pub fail: u32,
+    pub error: u32,
+    pub skip: u32,
+}
+
+/// Whole-run summary, written to `evals/results/metrics-<run_id>.json`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunMetrics {
+    #[serde(flatten)]
+    pub meta: RunMeta,
+    /// Why the run stopped before the end (fatal provider error, budget).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<String>,
+    pub counts: Counts,
+    pub total_cost_usd: f64,
     pub tasks: Vec<TaskMetrics>,
     pub total: TaskMetrics,
 }
 
 impl RunMetrics {
-    pub fn new(tasks: Vec<TaskMetrics>) -> Self {
+    pub fn new(meta: RunMeta, tasks: Vec<TaskMetrics>, stopped: Option<String>) -> Self {
         let mut total = TaskMetrics::new("TOTAL", "");
-        total.passed = tasks.iter().all(|t| t.passed);
+        let mut counts = Counts::default();
         for t in &tasks {
-            total.add(t);
+            total.add_usage(t);
+            match t.status {
+                Status::Pass => counts.pass += 1,
+                Status::Fail => counts.fail += 1,
+                Status::Error => counts.error += 1,
+                Status::Skip => counts.skip += 1,
+            }
         }
-        Self { tasks, total }
+        total.status = if counts.fail > 0 {
+            Status::Fail
+        } else if counts.error > 0 {
+            Status::Error
+        } else {
+            Status::Pass
+        };
+        Self {
+            meta,
+            stopped,
+            counts,
+            total_cost_usd: total.cost_usd,
+            tasks,
+            total,
+        }
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        if self.counts.fail > 0 {
+            1
+        } else if self.counts.error > 0 || self.stopped.is_some() {
+            2
+        } else {
+            0
+        }
     }
 
     pub fn table(&self) -> String {
-        let row = |a: &str, b: &str, c: &str, d: &str, e: &str, f: &str, g: &str, h: &str| {
-            format!("{a:<28} {b:>4} {c:>6} {d:>10} {e:>9} {f:>6} {g:>11}  {h}\n")
+        let row = |cols: [&str; 9], h: &str| {
+            let [a, b, c, d, e, f, g, i, j] = cols;
+            format!("{a:<28} {b:>5} {c:<16} {d:>5} {e:>6} {f:>9} {g:>8} {i:>8} {j:>6}  {h}\n")
         };
         let mut s = row(
-            "task", "ok", "calls", "in_tok", "out_tok", "tools", "tool_bytes", "tools_by_name",
+            ["task", "ok", "model", "n", "calls", "in_tok", "out_tok", "usd", "secs"],
+            "tools_by_name",
         );
         for t in self.tasks.iter().chain(std::iter::once(&self.total)) {
             let calls = if t.estimated_calls > 0 {
                 format!("{}~{}", t.model_calls, t.estimated_calls)
             } else {
                 t.model_calls.to_string()
+            };
+            let n = if t.flaky {
+                format!("{}/{}~", t.passes, t.attempts)
+            } else {
+                format!("{}/{}", t.passes, t.attempts)
             };
             let by_name = t
                 .tool_calls_by_name
@@ -355,13 +834,17 @@ impl RunMetrics {
                 .collect::<Vec<_>>()
                 .join(" ");
             s.push_str(&row(
-                &t.id,
-                if t.passed { "PASS" } else { "FAIL" },
-                &calls,
-                &t.input_tokens.to_string(),
-                &t.output_tokens.to_string(),
-                &t.tool_calls.to_string(),
-                &t.tool_output_bytes.to_string(),
+                [
+                    &t.id,
+                    t.status.as_str(),
+                    &t.model,
+                    &n,
+                    &calls,
+                    &t.input_tokens.to_string(),
+                    &t.output_tokens.to_string(),
+                    &format!("{:.4}", t.cost_usd),
+                    &format!("{:.0}", t.duration_secs),
+                ],
                 &by_name,
             ));
         }
@@ -498,6 +981,18 @@ mod tests {
         ]
     }
 
+    fn provider_error(code: &str) -> SessionEvent {
+        SessionEvent::Error {
+            message: format!("turn failed: {code}"),
+            error: Some(silence_protocol::ErrorInfo {
+                code: code.into(),
+                status: None,
+                retryable: false,
+                detail: String::new(),
+            }),
+        }
+    }
+
     #[test]
     fn audit_checks_match_real_audit_lines() {
         let line = |kind: &str, codes: &[&str]| {
@@ -570,7 +1065,7 @@ mod tests {
     #[test]
     fn run_totals_table_and_json() {
         let mut a = TaskMetrics::new("a", "edit");
-        a.passed = true;
+        a.status = Status::Pass;
         a.observe(&cost(10, 2));
         for e in &tool("grep", "abc") {
             a.observe(e);
@@ -581,12 +1076,15 @@ mod tests {
             error: None,
         });
         assert_eq!(b.error.as_deref(), Some("ERROR: rate limited"));
+        assert_eq!(b.error_code, None);
         b.observe(&cost(20, 3));
         for e in &tool("outline", "abcd") {
             b.observe(e);
         }
-        let run = RunMetrics::new(vec![a, b]);
-        assert!(!run.total.passed);
+        let run = RunMetrics::new(RunMeta { run_id: "r1".into(), ..Default::default() }, vec![a, b], None);
+        assert_eq!(run.total.status, Status::Fail);
+        assert_eq!(run.counts, Counts { pass: 1, fail: 1, error: 0, skip: 0 });
+        assert_eq!(run.exit_code(), 1);
         assert_eq!(run.total.input_tokens, 30);
         assert_eq!(run.total.output_tokens, 5);
         assert_eq!(run.total.tool_calls, 2);
@@ -596,7 +1094,157 @@ mod tests {
         assert!(table.contains("TOTAL"));
         assert!(table.contains("outline=1"));
         let js = serde_json::to_value(&run).unwrap();
+        assert_eq!(js["run_id"], "r1");
         assert_eq!(js["total"]["input_tokens"], 30);
+        assert_eq!(js["tasks"][0]["status"], "PASS");
         assert!(js["tasks"][0].get("context_est").is_none());
+    }
+
+    #[test]
+    fn infra_errors_are_error_not_fail() {
+        let mut m = TaskMetrics::new("t", "edit");
+        m.observe(&provider_error("PROVIDER_CREDITS"));
+        assert_eq!(m.error_code.as_deref(), Some("PROVIDER_CREDITS"));
+        assert_eq!(attempt_status(false, m.error_code.as_deref()), Status::Error);
+        assert!(is_fatal_error("PROVIDER_CREDITS"));
+        assert!(!is_fatal_error("PROVIDER_RATE"));
+        assert_eq!(attempt_status(false, Some("PROVIDER_RATE")), Status::Error);
+        // A refusal or unknown error is the agent's outcome, not infra.
+        assert_eq!(attempt_status(false, Some("PROVIDER_REFUSAL")), Status::Fail);
+        assert_eq!(attempt_status(false, None), Status::Fail);
+        assert_eq!(attempt_status(true, None), Status::Pass);
+
+        let mut e = TaskMetrics::new("e", "edit");
+        e.status = Status::Error;
+        let run = RunMetrics::new(RunMeta::default(), vec![e], Some("PROVIDER_CREDITS: dừng".into()));
+        assert_eq!(run.total.status, Status::Error);
+        assert_eq!(run.exit_code(), 2);
+        let clean = RunMetrics::new(RunMeta::default(), vec![], None);
+        assert_eq!(clean.exit_code(), 0);
+    }
+
+    #[test]
+    fn model_precedence() {
+        assert_eq!(resolve_model(Some("claude-opus"), Some("auto"), Some("claude-sonnet")).as_deref(), Some("claude-opus"));
+        assert_eq!(resolve_model(None, Some("auto"), Some("claude-sonnet")).as_deref(), Some("auto"));
+        assert_eq!(resolve_model(None, None, Some("claude-sonnet")).as_deref(), Some("claude-sonnet"));
+        assert_eq!(resolve_model(None, None, None).as_deref(), Some(DEFAULT_MODEL));
+        assert_eq!(resolve_model(None, None, Some(UNSOLVED)), None);
+        assert_eq!(resolve_model(Some("claude-opus"), None, Some(UNSOLVED)).as_deref(), Some("claude-opus"));
+    }
+
+    #[test]
+    fn cost_prefers_provider_usd_else_catalog_price() {
+        let mut m = TaskMetrics::new("t", "edit");
+        m.observe(&SessionEvent::Cost { input_tokens: 1_000_000, output_tokens: 100_000, usd: 0.123, slot: String::new(), baseline_usd: 0.0 });
+        m.finish();
+        m.finalize_cost(|_| Some((0.10, 0.50)));
+        assert!((m.cost_usd - 0.123).abs() < 1e-9);
+
+        let mut est = TaskMetrics::new("t", "edit");
+        est.est_tokens.insert("m".into(), (2_000_000, 200_000));
+        est.finalize_cost(|_| Some((2.0, 10.0)));
+        assert!((est.cost_usd - 6.0).abs() < 1e-9);
+
+        let mut cli = TaskMetrics::new("t", "edit");
+        cli.observe(&SessionEvent::Cost { input_tokens: 10, output_tokens: 1, usd: 0.5, slot: String::new(), baseline_usd: 0.0 });
+        cli.finalize_cost(|_| Some((0.0, 0.0)));
+        assert!((cli.cost_usd - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn calls_without_usage_are_priced_on_their_own_model() {
+        let route = |model: &str| SessionEvent::Route {
+            task_class: "agent".into(),
+            model_id: model.into(),
+            reason: String::new(),
+            slot: "strong".into(),
+            escalated: false,
+        };
+        let mut m = TaskMetrics::new("t", "bugfix");
+        m.model = "auto".into();
+        m.start_context(1_000_000);
+        // Call 1 on Sonnet without usage, call 2 on Opus with usage, call 3 on Opus without.
+        m.observe(&route("sonnet"));
+        m.observe(&cost(0, 0));
+        m.observe(&route("opus"));
+        m.observe(&SessionEvent::Cost { input_tokens: 5, output_tokens: 5, usd: 0.25, slot: "frontier".into(), baseline_usd: 0.25 });
+        m.observe(&cost(0, 0));
+        m.finish();
+        let price = |model: &str| match model {
+            "sonnet" => Some((1.0, 0.0)),
+            "opus" => Some((2.0, 0.0)),
+            _ => None,
+        };
+        m.finalize_cost(price);
+        // 1M estimated input on Sonnet ($1) + 1M on Opus ($2) + the reported $0.25.
+        assert!((m.cost_usd - 3.25).abs() < 1e-9, "{}", m.cost_usd);
+    }
+
+    #[test]
+    fn attempts_get_their_own_folder() {
+        let p = attempt_dir(Path::new("r"), "B06", 2);
+        assert!(p.ends_with("B06/attempt-2") || p.ends_with("B06\\attempt-2"));
+    }
+
+    #[test]
+    fn auto_routes_record_main_slots_only() {
+        let route = |class: &str, slot: &str, esc: bool| SessionEvent::Route {
+            task_class: class.into(),
+            model_id: format!("m-{slot}"),
+            reason: String::new(),
+            slot: slot.into(),
+            escalated: esc,
+        };
+        let mut m = TaskMetrics::new("t", "edit");
+        m.observe(&route("agent", "strong", false));
+        m.observe(&route("subagent:explore", "small", false));
+        m.observe(&route("agent", "frontier", true));
+        m.observe(&SessionEvent::Cost { input_tokens: 1, output_tokens: 1, usd: 0.2, slot: "frontier".into(), baseline_usd: 0.2 });
+        assert_eq!(m.slots, vec!["strong", "frontier"]);
+        assert_eq!(m.model, "m-frontier");
+        assert!(m.escalated);
+        assert!((m.usd_by_slot["frontier"] - 0.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn attempts_aggregate() {
+        let attempt = |s: Status| {
+            let mut m = TaskMetrics::new("t", "edit");
+            m.status = s;
+            m.attempts = 1;
+            m.passes = u32::from(s == Status::Pass);
+            m.errors = u32::from(s == Status::Error);
+            m.cost_usd = 0.01;
+            m
+        };
+        let mut agg = TaskMetrics::new("t", "edit");
+        agg.merge_attempt(&attempt(Status::Pass));
+        agg.merge_attempt(&attempt(Status::Pass));
+        assert_eq!(agg.aggregate_status(), Status::Pass);
+        assert!((agg.cost_usd - 0.02).abs() < 1e-9);
+        agg.merge_attempt(&attempt(Status::Fail));
+        assert_eq!(agg.aggregate_status(), Status::Fail);
+        agg.merge_attempt(&attempt(Status::Error));
+        assert_eq!(agg.aggregate_status(), Status::Error);
+        assert_eq!(TaskMetrics::new("x", "").aggregate_status(), Status::Fail);
+    }
+
+    #[test]
+    fn model_pins_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("silence-pins-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("models.yaml");
+        assert!(ModelPins::load(&path).unwrap().models.is_empty());
+        let mut pins = ModelPins::default();
+        pins.models.insert("B06".into(), "claude-sonnet".into());
+        pins.models.insert("E01".into(), "claude-haiku".into());
+        pins.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# Model đã ghim"));
+        assert_eq!(ModelPins::load(&path).unwrap().models["B06"], "claude-sonnet");
+        std::fs::write(&path, "# trống\n").unwrap();
+        assert!(ModelPins::load(&path).unwrap().models.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
