@@ -22,12 +22,17 @@ Vấn đề cần giải: hỏi mọi thứ thì agent phải dừng liên tục
 
 ## Tham khảo
 
-| | Claude Code | Cursor | Codex CLI | 5ilence |
-| --- | --- | --- | --- | --- |
-| Phân tầng | auto mode: model phân loại từng hành động | allowlist/denylist lệnh | danh sách lệnh an toàn + approval policy | Luật cứng 4 tầng; model phân loại cho vùng xám là việc sau |
-| Sandbox | shell sandbox (file + mạng) | terminal sandbox | Auto = ghi trong workspace, không mạng | Job Object (đã có); chặn mạng (sau) |
-| Nhớ quyền | theo mẫu `Bash(npm test:*)` | allowlist lệnh | — | theo mẫu lệnh (B3) |
-| Chặn cứng | deny rules, hook PreToolUse | denylist, chặn xoá file/dotfile | — | Tầng 3 trong Engine |
+Đối chiếu tài liệu chính thức, 11/2026:
+
+| | Claude Code | Cursor | Codex | VS Code / Copilot | 5ilence |
+| --- | --- | --- | --- | --- | --- |
+| Phân tầng | auto mode: classifier xét từng hành động | Auto-review (mặc định): allowlist, sandbox, rồi classifier | sandbox mode + approval policy | mức duyệt: Default / Bypass / Autopilot | Luật cứng 4 tầng; classifier cho vùng xám là việc sau |
+| Sandbox | khuyên chạy bypass trong container/VM | chặn mạng mặc định, ghi trong workspace; macOS + Linux | `workspace-write`, tắt mạng mặc định; có Windows gốc | độc lập với mức duyệt; macOS, Linux, WSL2 | Job Object (đã có); chặn mạng (sau) |
+| Nhớ quyền | theo mẫu `Bash(npm test:*)` | allowlist lệnh | — | auto-approve theo lệnh | theo mẫu lệnh (B3) |
+| Chặn cứng | deny rules, hook PreToolUse | file-deletion / external-file protection | — | — | Tầng 3 trong Engine |
+| Chế độ bỏ qua hết | `bypassPermissions`, công tắc "Allow bypass permissions mode"; admin tắt bằng `disableBypassPermissionsMode` | Run Everything (không sandbox, không classifier) | `--yolo` = `danger-full-access` + `never`, "not recommended" | Bypass Approvals / Autopilot | **Không có.** `yolo` chỉ dùng trong `eval_runner` |
+
+Điểm chung: chế độ bỏ qua hết luôn có, nhưng không bên nào đặt làm mặc định, kèm cảnh báo "chỉ dùng trong container/VM", và admin tắt được. Hướng đầu tư là **tự chạy trong ranh giới sandbox**, cũng là hướng của `autonomous`. Lý do không thêm bypass: [backlog.md](backlog.md).
 
 ## 4 tầng
 

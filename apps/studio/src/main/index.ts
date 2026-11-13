@@ -210,6 +210,10 @@ function onData(chunk: Buffer) {
         sendToRenderer(msg.params);
         continue;
       }
+      if (msg.method === "eval.progress") {
+        liveContents()?.send("silence-eval", msg.params);
+        continue;
+      }
       if (msg.id != null && pending.has(msg.id)) {
         const p = pending.get(msg.id)!;
         pending.delete(msg.id);
@@ -443,6 +447,16 @@ app.whenReady().then(async () => {
       keepAwakeId = null;
     }
     return keepAwakeId !== null;
+  });
+  // Evals page: show an eval result folder. Only paths under <repo>/evals/results.
+  ipcMain.handle("silence-reveal-eval", (_e, target: unknown) => {
+    if (typeof target !== "string" || !target) return false;
+    const base = path.resolve(repoRoot, "evals", "results");
+    const full = path.resolve(target);
+    const rel = path.relative(base, full);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
+    shell.showItemInFolder(full);
+    return true;
   });
   ipcMain.handle("silence-pick-folder", async () => {
     const res = await dialog.showOpenDialog({ properties: ["openDirectory"] });

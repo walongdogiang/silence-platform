@@ -15,9 +15,9 @@
     "studio:watch": "node scripts/studio-watch.mjs",
     "build:engine": "scripts\\cargo-msvc.bat build -p silence-engine",
     "runtime": "cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420",
-    "evals": "node scripts/evals.mjs",
-    "evals:calibrate": "node scripts/evals.mjs calibrate",
-    "evals:report": "node scripts/evals.mjs report",
+    "evals": "cargo run -p silence-engine -- evals --dir evals/v0 --repo-root . --history",
+    "evals:calibrate": "cargo run -p silence-engine -- evals-calibrate --dir evals/v0 --repo-root . --history",
+    "evals:report": "cargo run -p silence-engine -- evals-report --repo-root .",
     "check:rules": "node scripts/check-rules-sync.mjs",
     "check:docs": "node scripts/check-docs-meta.mjs"
   }

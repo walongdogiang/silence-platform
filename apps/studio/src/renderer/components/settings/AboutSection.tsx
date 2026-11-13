@@ -7,7 +7,7 @@ import { SettingRow } from "./SettingRow";
 const STUDIO_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 /** Settings → About: versions and whether the Engine answers. No new RPC: reuses `providers.status`. */
-export function AboutSection() {
+export function AboutSection(props: { onOpenEvals?: () => void } = {}) {
   const t = useT();
   const [engine, setEngine] = useState<"checking" | "ok" | "down">("checking");
   const [cli, setCli] = useState("");
@@ -47,6 +47,13 @@ export function AboutSection() {
       <SettingRow id="about-cli" label="Claude CLI" desc={t("about.cliDesc")}>
         <span className="set-value">{cli || "—"}</span>
       </SettingRow>
+      {props.onOpenEvals ? (
+        <SettingRow id="about-evals" label={t("evals.title")} desc={t("evals.openHint")}>
+          <button type="button" className="btn-light" onClick={props.onOpenEvals}>
+            {t("evals.open")}
+          </button>
+        </SettingRow>
+      ) : null}
     </>
   );
 }

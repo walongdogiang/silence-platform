@@ -5,7 +5,7 @@
 //! An attempt that fails ends that model early (it can no longer pass every attempt).
 
 use crate::eval_history::CALIBRATE_PROFILE;
-use crate::eval_runner::{finish_run, is_fatal_error, RunMeta, RunMetrics, Status, Suite, UNSOLVED};
+use crate::eval_runner::{finish_run, is_fatal_error, AttemptOpts, RunMeta, RunMetrics, Status, Suite, UNSOLVED};
 use anyhow::Result;
 use std::path::Path;
 
@@ -66,13 +66,10 @@ pub struct CalibrateOptions {
     pub repeat: u32,
     pub max_cost: f64,
     pub history: bool,
-    /// Provider the ladder runs on (pins stay source-neutral: `claude-haiku`).
-    pub source: String,
 }
 
 pub async fn calibrate(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &CalibrateOptions) -> Result<i32> {
     let mut suite = Suite::load(dir, catalog_path, repo_root)?;
-    suite.source = opts.source.clone();
     let repeat = opts.repeat.max(1);
     let meta = RunMeta::now(&suite.name, CALIBRATE_PROFILE, repeat, repo_root);
     let mut rows = Vec::new();
@@ -104,6 +101,8 @@ pub async fn calibrate(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: 
         }
         let mut tried: Vec<Tried> = Vec::new();
         let mut pin = None;
+        // Attempt folders `results/<id>/attempt-<n>/` number the whole ladder of this task.
+        let mut n = 0;
         'ladder: for model in LADDER {
             let mut t = Tried { model: model.into(), statuses: Vec::new() };
             for _ in 0..repeat {
@@ -111,7 +110,8 @@ pub async fn calibrate(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: 
                     stopped = Some(format!("đạt trần chi ${:.2}", opts.max_cost));
                     break 'ladder;
                 }
-                let m = suite.attempt(task, model).await?;
+                n += 1;
+                let m = suite.attempt(task, model, n, &AttemptOpts::default()).await?;
                 spent += m.cost_usd;
                 println!("  {} {} {} ${:.4}", m.status.as_str(), task.id, model, m.cost_usd);
                 let status = m.status;

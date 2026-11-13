@@ -42,6 +42,7 @@ import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
 import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
+import { EvalsPage } from "./components/EvalsPage";
 import {
   loadDefaultSource,
   loadPick,
@@ -253,6 +254,9 @@ export function App() {
   /** Settings dialog: open on `section`; `n` changes on every request so it can re-target. */
   const [settings, setSettings] = useState<{ section: SettingsSection; n: number } | null>(null);
   const openSettings = (section: SettingsSection = loadSettingsSection()) => setSettings({ section, n: Date.now() });
+  /** Settings → Giới thiệu → Evals full page (dev: only when the Engine sees an `evals/` folder). */
+  const [showEvals, setShowEvals] = useState(false);
+  const [evalsAvailable, setEvalsAvailable] = useState(false);
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
   const [focusModel, setFocusModel] = useState<{ id: string; n: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
@@ -284,6 +288,13 @@ export function App() {
   const [focusAdd, setFocusAdd] = useState(0);
   /** Picker → Source → Set up → Settings → Model → Sources tab. */
   const [focusSources, setFocusSources] = useState(0);
+  // The Evals entry only shows when the Engine finds `evals/` (dev checkout).
+  useEffect(() => {
+    void window.silence
+      ?.rpc("eval.catalog")
+      .then((r) => setEvalsAvailable(Boolean((r as { available?: boolean }).available)))
+      .catch(() => setEvalsAvailable(false));
+  }, []);
   const modelsRef = useRef<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
   const [mode, setMode] = useState<SessionMode>("agent");
@@ -922,6 +933,7 @@ export function App() {
     setImages([]);
     setBusy(false);
     setRun(null);
+    setShowEvals(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
     setThreads((xs) => [thread, ...xs.filter((x) => x.lines.length > 0)]);
@@ -1075,6 +1087,7 @@ export function App() {
     const t = threads.find((x) => x.id === id);
     if (!t) return;
     setShellView("chat");
+    setShowEvals(false);
     rememberThread(id);
     if (t.unread || t.archived) patchThread(id, { unread: false, archived: false });
     if (id !== activeThreadId) {
@@ -1177,6 +1190,7 @@ export function App() {
       const r = (await window.silence.rpc("fs.read", { workspace, path: rel })) as { text: string };
       setFile(rel);
       setReviewOpen(true);
+        setShowEvals(false);
       setFileText(r.text);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -1725,7 +1739,7 @@ export function App() {
             />
           ) : null}
           <div className="work-body">
-            {chatHidden ? null : chatMain}
+            {chatHidden ? null : showEvals ? <EvalsPage models={models} /> : chatMain}
           </div>
           <BottomPanel
             open={panelOpen}
@@ -1768,6 +1782,15 @@ export function App() {
           onPrefs={setPrefs}
           chatCount={threads.length}
           onClearHistory={clearHistory}
+          onOpenEvals={
+            evalsAvailable
+              ? () => {
+                  setShowEvals(true);
+                  setShellView("chat");
+                  setSettings(null);
+                }
+              : undefined
+          }
           workspace={workspace}
           permMode={permMode}
           onPermMode={(m) => {

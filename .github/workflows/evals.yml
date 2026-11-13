@@ -23,8 +23,6 @@ jobs:
     env:
       SILENCE_API_KEY: ${{ secrets.SILENCE_API_KEY }}
       SILENCE_API_BASE: ${{ secrets.SILENCE_API_BASE }}
-      # Mặc định evals chạy qua Claude CLI; runner CI không có CLI đăng nhập nên dùng OpenRouter.
-      SILENCE_EVAL_SOURCE: company-gateway
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

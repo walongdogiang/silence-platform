@@ -240,6 +240,140 @@ pub fn render_summary(lines: &[HistoryLine]) -> String {
     s
 }
 
+/// One task result of a past run, from `runs.jsonl` or a `results/metrics-*.json` file
+/// (manual runs from Studio usually skip `--history`, so both count).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Observation {
+    pub run_id: String,
+    pub suite: String,
+    pub profile: String,
+    pub id: String,
+    pub kind: String,
+    pub model: String,
+    pub status: Status,
+    pub cost_usd: f64,
+}
+
+/// `results/metrics-<run>.json`, only the fields observations need.
+#[derive(Deserialize)]
+struct MetricsFile {
+    run_id: String,
+    #[serde(default)]
+    suite: String,
+    #[serde(default)]
+    profile: String,
+    #[serde(default)]
+    tasks: Vec<MetricsTask>,
+}
+
+#[derive(Deserialize)]
+struct MetricsTask {
+    id: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    model: String,
+    status: Status,
+    #[serde(default)]
+    cost_usd: f64,
+}
+
+/// Every observation from history and metrics files, newest run first, one per (run, task).
+pub fn load_observations(repo_root: &Path) -> Vec<Observation> {
+    let mut out: Vec<Observation> = Vec::new();
+    for l in load(repo_root).unwrap_or_default() {
+        for t in l.tasks {
+            out.push(Observation {
+                run_id: l.run_id.clone(),
+                suite: l.suite.clone(),
+                profile: l.profile.clone(),
+                id: t.id,
+                kind: t.kind,
+                model: t.model,
+                status: t.status,
+                cost_usd: t.cost_usd,
+            });
+        }
+    }
+    let results = repo_root.join("evals/results");
+    if let Ok(dir) = std::fs::read_dir(&results) {
+        for e in dir.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !(name.starts_with("metrics-") && name.ends_with(".json")) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
+            let Ok(m) = serde_json::from_str::<MetricsFile>(&text) else { continue };
+            for t in m.tasks {
+                out.push(Observation {
+                    run_id: m.run_id.clone(),
+                    suite: m.suite.clone(),
+                    profile: m.profile.clone(),
+                    id: t.id,
+                    kind: t.kind,
+                    model: t.model,
+                    status: t.status,
+                    cost_usd: t.cost_usd,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| b.run_id.cmp(&a.run_id));
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|o| seen.insert((o.run_id.clone(), o.id.clone())));
+    out
+}
+
+/// Latest non-skipped result of a task in a suite.
+pub fn last_result<'a>(obs: &'a [Observation], suite: &str, id: &str) -> Option<&'a Observation> {
+    obs.iter().find(|o| o.suite == suite && o.id == id && o.status != Status::Skip)
+}
+
+/// `claude-haiku@api` → `claude-haiku`: costs compare across sources of one model.
+fn family(model: &str) -> &str {
+    model.split('@').next().unwrap_or(model)
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TaskEstimate {
+    pub id: String,
+    pub model: String,
+    /// `None` = no past run to estimate from.
+    pub usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Estimate {
+    pub tasks: Vec<TaskEstimate>,
+    pub total_usd: f64,
+    /// Tasks without any estimate (not in `total_usd`).
+    pub unknown: usize,
+}
+
+/// Cost of running `tasks` (`(id, kind, model)`) `repeat` times: the mean of the task's last 3
+/// paid runs on the same model family (any model for `auto`), else the mean of its kind on that
+/// family (last 20), else unknown. Calibration ladders are left out.
+pub fn estimate(obs: &[Observation], tasks: &[(String, String, String)], repeat: u32) -> Estimate {
+    let usable = |o: &&Observation| o.profile != CALIBRATE_PROFILE && o.status != Status::Skip && o.cost_usd > 0.0;
+    let same = |o: &Observation, model: &str| model == "auto" || family(&o.model) == family(model);
+    let mean = |v: Vec<f64>| (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64);
+    let mut out = Vec::new();
+    let (mut total, mut unknown) = (0.0, 0);
+    for (id, kind, model) in tasks {
+        let own = mean(obs.iter().filter(usable).filter(|o| &o.id == id && same(o, model)).take(3).map(|o| o.cost_usd).collect());
+        let usd = own.or_else(|| {
+            mean(obs.iter().filter(usable).filter(|o| &o.kind == kind && same(o, model)).take(20).map(|o| o.cost_usd).collect())
+        });
+        let usd = usd.map(|u| u * repeat.max(1) as f64);
+        match usd {
+            Some(u) => total += u,
+            None => unknown += 1,
+        }
+        out.push(TaskEstimate { id: id.clone(), model: model.clone(), usd });
+    }
+    Estimate { tasks: out, total_usd: total, unknown }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,5 +438,33 @@ mod tests {
         let recent = md.split("lần chạy gần nhất").nth(1).unwrap();
         assert!(recent.find("20261113-110000").unwrap() < recent.find("20261030-100000").unwrap());
         assert_eq!(render_summary(&[]).contains("Chưa có lần chạy nào"), true);
+    }
+
+    #[test]
+    fn estimate_uses_task_then_kind_then_unknown() {
+        let o = |run: &str, id: &str, kind: &str, model: &str, usd: f64, profile: &str| Observation {
+            run_id: run.into(),
+            suite: "v0".into(),
+            profile: profile.into(),
+            id: id.into(),
+            kind: kind.into(),
+            model: model.into(),
+            status: Status::Pass,
+            cost_usd: usd,
+        };
+        let obs = vec![
+            o("3", "E01", "edit", "claude-haiku@api", 0.02, "manual"),
+            o("2", "E01", "edit", "claude-haiku", 0.04, "manual"),
+            o("2", "E02", "edit", "claude-haiku", 0.10, "manual"),
+            o("1", "E01", "edit", "claude-opus", 9.0, "manual"),
+            o("1", "B06", "bugfix", "claude-haiku", 5.0, CALIBRATE_PROFILE),
+        ];
+        let t = |id: &str, kind: &str, model: &str| (id.to_string(), kind.to_string(), model.to_string());
+        let e = estimate(&obs, &[t("E01", "edit", "claude-haiku"), t("E05", "edit", "claude-haiku"), t("B06", "bugfix", "claude-haiku")], 2);
+        assert!((e.tasks[0].usd.unwrap() - 0.06).abs() < 1e-9, "mean 0.03 of the haiku family × 2");
+        assert!((e.tasks[1].usd.unwrap() - 0.16 / 3.0 * 2.0).abs() < 1e-9, "kind mean");
+        assert_eq!(e.tasks[2].usd, None, "calibration runs do not count");
+        assert_eq!(e.unknown, 1);
+        assert_eq!(last_result(&obs, "v0", "E01").unwrap().run_id, "3");
     }
 }

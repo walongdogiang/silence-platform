@@ -58,6 +58,8 @@ export function SettingsDialog(props: {
   onPrefs: (next: Prefs) => void;
   chatCount: number;
   onClearHistory: () => Promise<number>;
+  /** Open the Evals page; omitted when the Engine has no evals (not a dev checkout). */
+  onOpenEvals?: () => void;
   workspace: string;
   permMode: UiPermMode;
   onPermMode: (m: UiPermMode) => void;
@@ -278,7 +280,7 @@ export function SettingsDialog(props: {
                   />
                 ) : null}
                 {section === "shortcuts" ? <ShortcutsSection /> : null}
-                {section === "about" ? <AboutSection /> : null}
+                {section === "about" ? <AboutSection onOpenEvals={props.onOpenEvals} /> : null}
               </>
             )}
           </div>

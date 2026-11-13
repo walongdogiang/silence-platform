@@ -58,9 +58,12 @@ enum Cmd {
         /// Label stored in history (manual, nightly, weekly…).
         #[arg(long, default_value = "manual")]
         profile: String,
-        /// Provider to run on (default: SILENCE_EVAL_SOURCE, else claude-cli).
+        /// Run on this source (provider id): same model family or tier there.
         #[arg(long)]
         source: Option<String>,
+        /// Effort for every task (low|medium|high|xhigh|max).
+        #[arg(long)]
+        effort: Option<String>,
     },
     /// Pin the cheapest passing model per task in <suite>/models.yaml.
     EvalsCalibrate {
@@ -83,9 +86,6 @@ enum Cmd {
         max_cost: f64,
         #[arg(long)]
         history: bool,
-        /// Provider to run on (default: SILENCE_EVAL_SOURCE, else claude-cli).
-        #[arg(long)]
-        source: Option<String>,
     },
     /// Regenerate evals/history/SUMMARY.md from runs.jsonl (no API calls).
     EvalsReport {
@@ -134,6 +134,7 @@ async fn main() -> Result<()> {
             history,
             profile,
             source,
+            effort,
         } => {
             let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
             let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
@@ -146,7 +147,8 @@ async fn main() -> Result<()> {
                 max_cost,
                 history,
                 profile,
-                source: silence_engine::eval_runner::source_or_default(source),
+                source,
+                effort,
             };
             let code = silence_engine::eval_runner::run(&dir, &cfg, &repo, &opts).await?;
             std::process::exit(code);
@@ -160,7 +162,6 @@ async fn main() -> Result<()> {
             repeat,
             max_cost,
             history,
-            source,
         } => {
             let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
             let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
@@ -170,7 +171,6 @@ async fn main() -> Result<()> {
                 repeat,
                 max_cost,
                 history,
-                source: silence_engine::eval_runner::source_or_default(source),
             };
             let code = silence_engine::eval_calibrate::calibrate(&dir, &cfg, &repo, &opts).await?;
             std::process::exit(code);
@@ -199,7 +199,10 @@ async fn serve(
     std::fs::create_dir_all(&data_dir)?;
     let audit = AuditLog::open(&data_dir)?;
     let ctx = Arc::new(AppCtx::new(catalog, audit));
-    let state = Arc::new(RpcState::new(ctx));
+    // Evals (`eval.*`) resolve against the working directory, like `silence-engine evals`.
+    let repo_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let config_abs = if config.is_absolute() { config.clone() } else { repo_root.join(&config) };
+    let state = Arc::new(RpcState::with_paths(ctx, repo_root, config_abs));
 
     if let Some(addr) = tcp {
         silence_engine::bind_policy::ensure_loopback_tcp_bind(&addr)?;

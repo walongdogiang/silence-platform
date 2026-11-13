@@ -145,6 +145,30 @@ impl Catalog {
         Ok(AutoPick { model_id: pick.id.clone(), slot, source: provider, reason })
     }
 
+    /// The same model on another source, for evals run "on source X": same family first (the
+    /// id before `@`: `claude-haiku` → `claude-haiku@api`), else the first non-opt-in model of
+    /// the same tier there. `auto` stays `auto` (the session gets the source instead).
+    pub fn same_model_on(&self, source: &str, id: &str) -> Result<String> {
+        self.provider(source)?;
+        if id == "auto" {
+            return Ok(id.to_string());
+        }
+        let m = self.resolve(id)?;
+        if m.provider == source {
+            return Ok(m.id);
+        }
+        let family = |x: &str| x.split('@').next().unwrap_or(x).to_string();
+        let fam = family(&m.id);
+        let on: Vec<&ModelEntry> = self.raw.models.iter().filter(|x| x.provider == source).collect();
+        if let Some(x) = on.iter().find(|x| family(&x.id) == fam) {
+            return Ok(x.id.clone());
+        }
+        on.iter()
+            .find(|x| !x.opt_in && x.tier == m.tier)
+            .map(|x| x.id.clone())
+            .ok_or_else(|| anyhow!("no {} model like {} on source {source}", m.tier, m.id))
+    }
+
     /// The source's strongest model (highest tier, then highest output price): the baseline
     /// for "saved vs. all-Opus". Opt-in models count only when nothing else exists.
     pub fn baseline_model(&self, source: &str) -> Option<&ModelEntry> {
@@ -275,6 +299,28 @@ models:
             .unwrap();
         assert_eq!(pick(&c, "cli", Slot::Frontier), "cli-fable");
         assert_eq!(c.baseline_model("cli").unwrap().id, "cli-opus", "baseline ignores opt-in");
+    }
+
+    #[test]
+    fn same_model_on_keeps_the_family_or_the_tier() {
+        let c = cat();
+        assert_eq!(c.same_model_on("cli", "gw-haiku").unwrap(), "cli-haiku", "same tier when no family match");
+        assert_eq!(c.same_model_on("gw", "gw-haiku").unwrap(), "gw-haiku");
+        assert_eq!(c.same_model_on("cli", "auto").unwrap(), "auto");
+        assert!(c.same_model_on("nope", "gw-haiku").is_err());
+        let y = r#"
+version: 1
+providers:
+  - { id: gw, kind: openai_compat, base_url: "http://x" }
+  - { id: api, kind: claude_api, base_url: "http://y" }
+models:
+  - { id: claude-haiku, provider: gw, api_model: h, tier: fast, context_window: 1 }
+  - { id: claude-sonnet, provider: gw, api_model: s, tier: mid, context_window: 1 }
+  - { id: claude-haiku@api, provider: api, api_model: h, tier: fast, context_window: 1 }
+"#;
+        let c = Catalog::from_yaml(y).unwrap();
+        assert_eq!(c.same_model_on("api", "claude-haiku").unwrap(), "claude-haiku@api");
+        assert!(c.same_model_on("api", "claude-sonnet").is_err(), "no mid model on api");
     }
 
     #[test]

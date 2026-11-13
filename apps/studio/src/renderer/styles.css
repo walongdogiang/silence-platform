@@ -3748,3 +3748,108 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .network-page.in-dialog { padding: 0; overflow: visible; min-height: 100%; }
 .network-page.in-dialog .net-status { margin-bottom: 10px; }
 .network-page.in-dialog .net-actions { margin: 0 -24px; }
+/* ── Evals page (EvalsPage.tsx) ── */
+.appear-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-ui);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.appear-link:hover { background: var(--surface-hover); }
+.evals-page { max-width: 1280px; }
+.evals-grid { display: grid; grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 980px) { .evals-grid { grid-template-columns: 1fr; } }
+.evals-muted { color: var(--text-muted); font-size: var(--font-size-sm); }
+.evals-warn { color: var(--warning); font-style: normal; font-size: var(--font-size-sm); }
+.evals-error { color: var(--error); font-size: var(--font-size-sm); }
+.evals-spacer { flex: 1; }
+.evals-page button:not(.eval-chip) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-ui);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.evals-page button:not(.eval-chip):hover:not(:disabled) { background: var(--surface-hover); }
+.evals-page button:disabled { opacity: 0.5; cursor: not-allowed; }
+.evals-page select,
+.evals-page input[type="number"],
+.evals-page input:not([type]) {
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 1px solid var(--border-ui);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  min-width: 0;
+}
+.evals-config, .evals-results { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.evals-setups { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.evals-setups > label { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.evals-setup-actions, .evals-naming { display: flex; flex-wrap: wrap; gap: 6px; }
+.evals-naming input { flex: 1; }
+.evals-reset { margin-left: auto; }
+.evals-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
+.evals-form > label { display: flex; flex-direction: column; gap: 3px; font-size: var(--font-size-xs); color: var(--text-muted); }
+.evals-form > label.evals-check { flex-direction: row; align-items: center; gap: 6px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.evals-form input[type="checkbox"], .evals-task-list input { accent-color: var(--accent); }
+.evals-tasks-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.evals-filters { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
+.evals-task-list { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.evals-task-list li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) auto; align-items: center; gap: 8px; padding: 5px 10px; font-size: var(--font-size-sm); }
+.evals-task-list li + li { border-top: 1px solid var(--border-subtle); }
+.evals-task-list li:not(.on) .evals-task-id { color: var(--text-muted); }
+.evals-task-list label { display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; }
+.evals-task-id { font-family: var(--mono); font-size: var(--font-size-xs); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evals-task-meta { color: var(--text-muted); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evals-task-last { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); color: var(--text-secondary); white-space: nowrap; }
+.evals-footer { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 10px 0; background: var(--workspace); }
+.evals-estimate { flex: 1; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.evals-page button.evals-run { background: var(--accent); color: var(--on-accent, #1b1b1b); border-color: var(--accent); }
+.evals-page button.evals-run:hover:not(:disabled) { background: var(--accent-hover); }
+.evals-results-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.evals-progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.evals-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.evals-table th { text-align: left; font-weight: var(--font-weight-medium); color: var(--text-muted); font-size: var(--font-size-xs); padding: 4px 6px; border-bottom: 1px solid var(--border-subtle); }
+.evals-table td { padding: 5px 6px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); white-space: nowrap; }
+.evals-table td:first-child { font-family: var(--mono); font-size: var(--font-size-xs); color: var(--text-primary); }
+.evals-table tr.clickable { cursor: pointer; }
+.evals-table tr.clickable:hover td { background: var(--surface-hover); }
+.eval-badge { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: var(--font-size-xs); border: 1px solid var(--border-subtle); color: var(--text-muted); }
+.eval-badge.eval-pass, .eval-chip.eval-pass { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.eval-badge.eval-fail, .eval-chip.eval-fail { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.eval-badge.eval-error, .eval-chip.eval-error { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.eval-badge.eval-run { color: var(--accent); border-color: var(--accent); }
+.evals-detail { border: 1px solid var(--border-ui); border-radius: var(--radius-md); background: var(--surface-1); }
+.evals-detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); font-size: var(--font-size-sm); }
+.evals-detail-head label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.evals-tabs { display: flex; gap: 4px; padding: 6px 10px 0; }
+.evals-page .evals-tabs button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: transparent; }
+.evals-page .evals-tabs button.on { background: var(--surface-2); border-bottom-color: var(--surface-2); }
+.evals-detail-body { max-height: 460px; overflow: auto; padding: 10px; border-top: 1px solid var(--border-subtle); }
+.evals-audit, .evals-file pre { margin: 0; padding: 8px; overflow: auto; max-height: 300px; font-family: var(--mono); font-size: var(--font-size-xs); background: var(--input-bg); border-radius: var(--radius-sm); white-space: pre; }
+.evals-file { margin-bottom: 8px; }
+.evals-file summary { cursor: pointer; font-size: var(--font-size-sm); }
+.evals-file-added { color: var(--success); }
+.evals-file-modified { color: var(--warning); }
+.evals-file-deleted { color: var(--error); }
+.evals-file-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.evals-file-sides small { color: var(--text-muted); }
+.evals-recent ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.evals-recent li { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.evals-run-id { font-family: var(--mono); font-size: var(--font-size-xs); color: var(--text-primary); }
+.evals-run-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.evals-run-tasks { display: flex; flex-wrap: wrap; gap: 3px; }
+.eval-chip { padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: transparent; color: var(--text-muted); font-family: var(--mono); font-size: 10px; cursor: pointer; }
