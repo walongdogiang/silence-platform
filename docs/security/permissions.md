@@ -27,7 +27,7 @@ Vấn đề cần giải: hỏi mọi thứ thì agent phải dừng liên tục
 | | Claude Code | Cursor | Codex | VS Code / Copilot | 5ilence |
 | --- | --- | --- | --- | --- | --- |
 | Phân tầng | auto mode: classifier xét từng hành động | Auto-review (mặc định): allowlist, sandbox, rồi classifier | sandbox mode + approval policy | mức duyệt: Default / Bypass / Autopilot | Luật cứng 4 tầng; classifier cho vùng xám là việc sau |
-| Sandbox | khuyên chạy bypass trong container/VM | chặn mạng mặc định, ghi trong workspace; macOS + Linux | `workspace-write`, tắt mạng mặc định; có Windows gốc | độc lập với mức duyệt; macOS, Linux, WSL2 | Windows gốc: user ẩn `silence-sbx` + token write-restricted, chỉ ghi workspace đã cấp (đã có, chưa nối vào agent); chặn mạng (Phase 3) |
+| Sandbox | khuyên chạy bypass trong container/VM | chặn mạng mặc định, ghi trong workspace; macOS + Linux | `workspace-write`, tắt mạng mặc định; có Windows gốc | độc lập với mức duyệt; macOS, Linux, WSL2 | Windows gốc: user ẩn `silence-sbx` + token deny-only, chỉ ghi workspace đã cấp; firewall + proxy allowlist (đã có, chưa nối vào agent) |
 | Nhớ quyền | theo mẫu `Bash(npm test:*)` | allowlist lệnh | — | auto-approve theo lệnh | theo mẫu lệnh (B3) |
 | Chặn cứng | deny rules, hook PreToolUse | file-deletion / external-file protection | — | — | Tầng 3 trong Engine |
 | Chế độ bỏ qua hết | `bypassPermissions`, công tắc "Allow bypass permissions mode"; admin tắt bằng `disableBypassPermissionsMode` | Run Everything (không sandbox, không classifier) | `--yolo` = `danger-full-access` + `never`, "not recommended" | Bypass Approvals / Autopilot | **Không có.** `yolo` chỉ dùng trong `eval_runner` |
@@ -157,25 +157,42 @@ B3 đã có: tiêu đề theo lý do chính, **lệnh thật** nguyên văn, dan
 Code: `crates/sandbox` (`src/win/`). Lý do thiết kế và số đo: `crates/sandbox/spike/README.md`.
 
 - **Cách chạy:**
-  - Lệnh chạy dưới user ẩn `silence-sbx` với token write-restricted, gồm SID tổng hợp của 5ilence + logon SID + Everyone.
+  - Lệnh chạy dưới user ẩn `silence-sbx`. Token của lệnh biến hai nhóm `Authenticated Users` và `INTERACTIVE` thành deny-only, cộng cờ `LUA_TOKEN | DISABLE_MAX_PRIVILEGE`. Kết quả: lệnh chỉ ghi được nơi có ACE ghi đích danh user sandbox, hoặc nơi nhóm `Users` được ghi.
   - Engine khởi động runner (`silence-engine sandbox-runner`) bằng `CreateProcessWithLogonW`. Runner tự hạ token của chính nó rồi chạy lệnh trong Job: kill-on-close, giới hạn 4 GB RAM và 64 process. Overhead khoảng 120 ms mỗi lệnh.
+  - Vì sao không dùng token write-restricted (restricting SID) như Phase 2: LSASS **không cấp credential Schannel** cho bất kỳ token nào có restricting SID (`SEC_E_NO_CREDENTIALS`, đã thử mọi tổ hợp, có đối chứng). Hệ quả là curl.exe, cargo và .NET mất TLS.
+- **Mạng:**
+  - Firewall rule (`5ilence sandbox: block outbound`) chặn mọi kết nối của `silence-sbx`, trừ loopback.
+  - Đường ra duy nhất là proxy của Engine trên `127.0.0.1` (`crates/sandbox/src/proxy.rs`):
+    - bắt buộc `Proxy-Authorization` theo session;
+    - chỉ cho host trong allowlist, cổng 443 và 80;
+    - HTTPS đi bằng `CONNECT` dạng tunnel, không giải mã TLS;
+    - không nối tới hostname phân giải ra địa chỉ local hoặc private;
+    - mỗi kết nối được cho qua hay bị chặn đều sinh một `NetEvent` (host, cổng, số byte) để audit.
+  - Allowlist mặc định **chỉ gồm registry**: npm, crates.io, PyPI, NuGet, rustup. Thêm host theo workspace ở `.silence/network.json` (`{"allow": ["github.com"]}`); chỉ Engine ghi được file này.
+  - Env của lệnh: bỏ mọi biến `*PROXY` của user, đặt `HTTP(S)_PROXY` và `npm_config_*proxy` trỏ vào proxy của 5ilence. Riêng `Invoke-WebRequest` không đọc các biến này nên vẫn bị chặn.
+  - Kiểm tra thu hồi chứng chỉ (CRL/OCSP) của Schannel kết nối thẳng nên bị firewall chặn. Sandbox cho nó soft-fail: curl dùng `$CURL_HOME/.curlrc` với `ssl-revoke-best-effort`; cargo dùng `CARGO_HTTP_CHECK_REVOKE=false`.
+  - `status()` báo **Degraded** khi thiếu rule, rule bị sửa (tắt, đổi Action, sai SID, sai dải địa chỉ), một profile firewall bị tắt (có tính Group Policy), hoặc dịch vụ `mpssvc` không chạy. Hàm này đọc registry, vì user thường gọi `Get-NetFirewallRule` bị "Access is denied".
 - **Cài đặt:**
-  - `silence-engine sandbox setup` hỏi UAC một lần, tạo user, mật khẩu ngẫu nhiên lưu DPAPI và `%ProgramData%\silence-sbx` có ACL chặt.
-  - `sandbox grant <ws>` không cần admin: cấp Modify cho user sandbox và SID 5ilence, chặn `.silence/`.
-  - `sandbox uninstall` gỡ hết, kể cả ACE trên mọi workspace đã cấp.
-- **Chặn được** (đã thử trên máy thật):
-  - ghi ngoài workspace, kể cả ổ cấp Modify cho Authenticated Users
-  - ghi `.silence/`
-  - đọc profile của user thật
-  - thấy `SILENCE_API_KEY` và các biến `*TOKEN*` / `*_KEY` (env được lọc)
-  - chạy quá timeout
+  - `silence-engine sandbox setup` hỏi UAC một lần. Nó tạo user, lưu mật khẩu ngẫu nhiên bằng DPAPI, tạo `%ProgramData%\silence-sbx` có ACL chặt, tạo firewall rule, và đặt deny ACE "tạo file/thư mục" cho user sandbox ở gốc `C:\ProgramData` và `C:\Windows\Temp`.
+  - `sandbox grant <ws>` không cần admin: cấp Modify cho user sandbox, chặn `.silence/`.
+  - `sandbox uninstall` gỡ hết: user, firewall rule, các deny ACE, và ACE trên mọi workspace đã cấp.
+- **Đã thử trên máy thật** (`crates/sandbox/scripts/try-sandbox.ps1` 13/13, `try-network.ps1` 8/8):
+  - **Chặn:**
+    - ghi ổ D: (Modify cho Authenticated Users), gốc `C:\`, `C:\Users\Public`, gốc `C:\ProgramData` và `C:\Windows\Temp`
+    - ghi `.silence/`, đọc profile của user thật
+    - thấy `SILENCE_API_KEY` và các biến `*TOKEN*` / `*_KEY`
+    - TCP thẳng ra internet, curl `--noproxy`, host ngoài allowlist
+    - chạy quá timeout
+  - **Qua được:** DNS, npm/curl/git qua proxy (git cần `--allow github.com`), PowerShell ở `FullLanguage`.
 - **Giới hạn** (phải hiểu trước khi bật Tự chủ):
   - **Chỉ bọc shell.** File tool (`write`/`edit`…) chạy trong Engine và dựa vào giới hạn đường dẫn của `Workspace`.
   - **Vẫn đọc được** những chỗ cấp quyền cho `Users`/`Authenticated Users`, ví dụ repo khác trên ổ D:. Chặn đọc triệt để ngoài workspace thì không làm được bằng cách này.
-  - **Ghi được** những chỗ `Everyone` có quyền ghi, vì `Everyone` buộc phải có trong restricting SID.
-  - **Chưa chặn mạng:** đó là Phase 3 (firewall theo user + proxy allowlist). Cho tới lúc đó, Tự chủ vẫn tắt.
+  - **Ghi được** những thư mục **con** mà nhóm `Users` có quyền ghi (một số thư mục của app dưới `C:\ProgramData`). Nhóm `Users` phải giữ lại để đọc được hệ thống. Đây cũng là mức mà mọi process chạy bằng user thường vốn đã có.
+  - **DNS không bị chặn.** Tra cứu DNS đi qua dịch vụ DNS Client của Windows, không chạy dưới user sandbox. Còn một kênh rò dữ liệu chậm qua truy vấn tên miền.
+  - **Host trong allowlist mà nhận upload** (github.com, các API…) là một đường gửi dữ liệu ra ngoài. Vì vậy mặc định chỉ có registry, và các lệnh `git push` / `*publish` vẫn ở tầng ask.
   - Lần cấp quyền đầu cho repo lớn chậm, vì ACL phải lan xuống mọi file (`target/`, `node_modules/`).
   - Toolchain nằm trong profile của user (ví dụ `~/.cargo`) thì sandbox không thấy; cần `sandbox grant --read`.
+  - **Chưa nối vào agent** (Phase 4): Tự chủ vẫn tắt.
 
 ## Chọn chế độ (Settings)
 

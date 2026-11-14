@@ -38,10 +38,6 @@ const ALLOW: &[&str] = &[
     "RUSTUP_HOME",
     "RUSTUP_TOOLCHAIN",
     "NODE_ENV",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "ALL_PROXY",
 ];
 
 /// Prefixes passed through (case-insensitive).
@@ -60,7 +56,11 @@ pub fn allowed(name: &OsStr) -> bool {
     if DENY.contains(&up.as_str()) || DENY_PART.iter().any(|p| up.contains(p)) || up.ends_with("_KEY") {
         return false;
     }
-    // `*_proxy` may embed credentials (`http://user:pass@host`); the sandbox sets its own.
+    // `*_PROXY` (and npm_config_*proxy) may embed credentials (`http://user:pass@host`) and would
+    // bypass the 5ilence proxy anyway; the sandbox sets its own (`ProxyCred::env`).
+    if up.ends_with("PROXY") {
+        return false;
+    }
     ALLOW.contains(&up.as_str()) || ALLOW_PREFIX.iter().any(|p| up.starts_with(p))
 }
 
@@ -108,6 +108,8 @@ mod tests {
             ("npm_config__authToken", "k"),
             ("GIT_CONFIG_PASSWORD", "k"),
             ("MY_SERVICE_KEY", "k"),
+            ("HTTPS_PROXY", "http://corp:pw@proxy:8080"),
+            ("npm_config_https_proxy", "http://corp:pw@proxy:8080"),
             ("RANDOM_THING", "x"),
         ]);
         assert!(kept.is_empty(), "leaked: {kept:?}");

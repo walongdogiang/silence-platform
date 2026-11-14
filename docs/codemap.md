@@ -60,7 +60,8 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | DACL chỉ cho user hiện tại (named pipe) | `crates/sandbox/src/owner_only.rs` |
 | Lọc env cho lệnh trong sandbox (chưa nối vào shell) | `crates/sandbox/src/env.rs` (`scrub`) |
 | Sandbox Windows: chạy lệnh dưới `silence-sbx` (runner, token, ACL, Job) | `crates/sandbox/src/win/` (`launch::run`, `runner`, `token`, `acl`, `job`); API `silence_sandbox::{run, status, grant_workspace}` |
-| Cài / gỡ sandbox, cấp quyền workspace | `crates/sandbox/src/win/setup.rs`; CLI `silence-engine sandbox …` (`crates/runtime/src/main.rs` `sandbox_cmd`) |
+| Cài / gỡ sandbox, cấp quyền workspace | `crates/sandbox/src/win/setup.rs`; CLI `silence-engine sandbox …` (`crates/runtime/src/main.rs` `sandbox_cmd`, `sandbox_exec`) |
+| Mạng của sandbox: firewall rule, proxy allowlist | `crates/sandbox/src/win/firewall.rs` (`install`, `check`); `crates/sandbox/src/proxy.rs` (`Proxy`, `Grant`, `NetEvent`, `workspace_allowlist`) |
 | MCP client/host | `crates/mcp/src/lib.rs` |
 
 ## Protocol (đổi cả hai)

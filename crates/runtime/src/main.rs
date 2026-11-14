@@ -131,12 +131,16 @@ enum SandboxCmd {
         #[arg(long)]
         read: bool,
     },
-    /// Run a PowerShell command in the sandbox, in a granted workspace. For manual testing.
+    /// Run a PowerShell command in the sandbox, in a granted workspace, with the network proxy
+    /// (registries + `.silence/network.json` + `--allow`). For manual testing.
     Exec {
         #[arg(long)]
         ws: PathBuf,
         #[arg(long, default_value_t = 120)]
         timeout_secs: u64,
+        /// Extra host pattern for this run (`example.com`, `*.example.com`). Repeatable.
+        #[arg(long)]
+        allow: Vec<String>,
         #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
@@ -226,12 +230,14 @@ async fn main() -> Result<()> {
         }
         Cmd::McpBridge { port, token } => silence_engine::agent::run_bridge(port, &token).await,
         Cmd::SandboxRunner => std::process::exit(silence_sandbox::runner_main()),
+        Cmd::Sandbox { action: SandboxCmd::Exec { ws, timeout_secs, allow, command } } => {
+            sandbox_exec(ws, timeout_secs, allow, command).await
+        }
         Cmd::Sandbox { action } => tokio::task::spawn_blocking(move || sandbox_cmd(action)).await?,
     }
 }
 
 fn sandbox_cmd(action: SandboxCmd) -> Result<()> {
-    use std::io::Write;
     let exe = std::env::current_exe()?;
     match action {
         SandboxCmd::Setup { elevated: true } => silence_sandbox::setup_elevated(),
@@ -252,30 +258,52 @@ fn sandbox_cmd(action: SandboxCmd) -> Result<()> {
             eprintln!("granted {} in {} ms", path.display(), took.as_millis());
             Ok(())
         }
-        SandboxCmd::Exec { ws, timeout_secs, command } => {
-            let script = command.join(" ");
-            let spec = silence_sandbox::RunSpec {
-                command_line: format!(
-                    "powershell.exe -NoProfile -NonInteractive -Command \"{}\"",
-                    script.replace('"', "\\\"")
-                ),
-                cwd: ws.clone(),
-                env: silence_sandbox::default_env(&ws),
-                limits: silence_sandbox::Limits::standard(),
-            };
-            let t = std::time::Instant::now();
-            let out = silence_sandbox::run(&spec, &exe, Some(std::time::Duration::from_secs(timeout_secs)))?;
-            std::io::stdout().write_all(&out.stdout)?;
-            std::io::stderr().write_all(&out.stderr)?;
-            eprintln!(
-                "[sandbox] exit={} timed_out={} {} ms",
-                out.code,
-                out.timed_out,
-                t.elapsed().as_millis()
-            );
-            std::process::exit(if out.timed_out { 124 } else { out.code });
-        }
+        SandboxCmd::Exec { .. } => unreachable!("handled in sandbox_exec"),
     }
+}
+
+/// `sandbox exec`: start the proxy for this run, give the command a credential for it, run it as
+/// the sandbox user, then print what the proxy allowed / refused.
+async fn sandbox_exec(ws: PathBuf, timeout_secs: u64, allow: Vec<String>, command: Vec<String>) -> Result<()> {
+    use silence_sandbox::proxy::{workspace_allowlist, Grant, Proxy, DEFAULT_PORTS};
+    use std::io::Write;
+    let exe = std::env::current_exe()?;
+    let (proxy, mut events) = Proxy::start().await?;
+    let mut hosts = workspace_allowlist(&ws);
+    hosts.extend(allow);
+    let cred = proxy.issue(Grant { session: "cli-exec".into(), allow: hosts, ports: DEFAULT_PORTS.to_vec() });
+    let mut env = silence_sandbox::default_env(&ws);
+    env.extend(cred.env());
+    let script = command.join(" ");
+    let spec = silence_sandbox::RunSpec {
+        command_line: format!("powershell.exe -NoProfile -NonInteractive -Command \"{}\"", script.replace('"', "\\\"")),
+        cwd: ws.clone(),
+        env,
+        limits: silence_sandbox::Limits::standard(),
+    };
+    let t = std::time::Instant::now();
+    let out = tokio::task::spawn_blocking(move || {
+        silence_sandbox::run(&spec, &exe, Some(std::time::Duration::from_secs(timeout_secs)))
+    })
+    .await??;
+    proxy.revoke(&cred);
+    std::io::stdout().write_all(&out.stdout)?;
+    std::io::stderr().write_all(&out.stderr)?;
+    // Connections finish just before the command exits; give their events a moment.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    while let Ok(ev) = events.try_recv() {
+        eprintln!(
+            "[sandbox] net {} {}:{} {}{}",
+            if ev.allowed { "allow" } else { "DENY" },
+            ev.host,
+            ev.port,
+            ev.reason.map(|r| format!("({r}) ")).unwrap_or_default(),
+            if ev.allowed { format!("up={} down={}", ev.bytes_up, ev.bytes_down) } else { String::new() }
+        );
+    }
+    proxy.shutdown();
+    eprintln!("[sandbox] exit={} timed_out={} {} ms", out.code, out.timed_out, t.elapsed().as_millis());
+    std::process::exit(if out.timed_out { 124 } else { out.code });
 }
 
 async fn serve(

@@ -4,7 +4,8 @@
 //! - Sandbox (Windows): commands run as a hidden local user with a write-restricted token, so
 //!   they can only write in granted workspaces and the sandbox's own temp/home. Design and
 //!   measurements: `crates/sandbox/spike/README.md`; plan phases in docs/security/backlog.md.
-//!   Network blocking (firewall + proxy) is Phase 3 and NOT in place yet.
+//!   Network: a firewall rule blocks the sandbox user's non-loopback traffic; allowed hosts go
+//!   through the loopback proxy in [`proxy`] (per-session credential, allowlist, audit events).
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -12,6 +13,7 @@ use std::time::Duration;
 
 pub mod env;
 pub mod owner_only;
+pub mod proxy;
 pub mod spec;
 #[cfg(windows)]
 mod win;

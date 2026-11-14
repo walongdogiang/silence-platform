@@ -37,6 +37,7 @@ Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
 | --- | --- | --- |
 | `PKG_INSTALL` | `npm install x`, `npm ci`, `pnpm add`, `pip install`, `uv add`, `cargo add/install`, `go get`, `winget`, `choco`, `scoop`, `Install-Module` | Mạng, chạy install script, sửa lock file và thư mục dependency |
 | `PKG_EXEC` | `npx …`, `pnpm dlx`, `bunx`, `uvx`, `npm exec` | Tải package rồi chạy ngay |
+| `PKG_PUBLISH` | `npm/pnpm/yarn/bun publish`, `cargo publish`, `twine upload`, `poetry/uv publish`, `dotnet nuget push`, `gem push` | Đẩy lên registry công khai, không thu hồi được hoàn toàn. Không bao giờ nhớ được (`never_remember`). Trong Tự chủ vẫn hỏi, kể cả khi domain registry có trong allowlist |
 | `NET_ACCESS` | `curl`, `Invoke-WebRequest`, `Invoke-RestMethod`, `ssh`, `scp`, `nc`, `ping`, `Test-NetConnection` | Kết nối ra ngoài máy |
 | `GIT_NETWORK` | `git push/pull/fetch/clone/submodule`, `npm publish` | Đổi hoặc lấy dữ liệu từ remote |
 | `GIT_COMMIT` | `git commit/merge/tag/cherry-pick/revert/config` | Ghi lịch sử. Repo yêu cầu hỏi trước khi commit |
