@@ -476,4 +476,14 @@ taint_codes: [NET_ACCESS, MCP_CALL, MCP_READ]
 # Programs whose first non-flag argument is part of the remembered pattern (`npm install *`).
 subcommand_programs: [git, npm, pnpm, yarn, bun, cargo, pip, pip3, uv, poetry, go, dotnet, winget, choco, scoop, docker, kubectl, npx, gh]
 # Workspace files only the Engine may write.
-policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml"]
+policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml", ".silence/network.json"]
+
+# --- Autonomous mode (sandbox Ready): who decides, see docs/security/permissions.md ---------
+# Codes a sandboxed run makes safe enough to skip the question. A call whose verdict has any
+# tier>=ask code outside this list (and outside never_escalate) still asks. NET_ACCESS only counts
+# when every host is allowlisted; FS_DELETE only when the turn has a git snapshot to undo from.
+sandbox_covers: [UNKNOWN_COMMAND, RUN_SCRIPT, BUILD_TEST, INLINE_CODE, DYNAMIC_EXEC, UNPARSED, PKG_EXEC, PKG_INSTALL, FS_DELETE, PROC_KILL, NET_ACCESS, TAINTED_CONTEXT]
+# Always ask, even in the sandbox: they act with the real user's identity or leave the machine.
+always_ask: [GIT_NETWORK, GIT_COMMIT, GIT_DESTRUCTIVE, PKG_PUBLISH, MCP_CALL, ENV_READ]
+# Blocked calls that the escalation card may never offer to run: the card only has "Dừng".
+never_escalate: [POLICY_TAMPER, SECRET_EXFIL, NET_DOWNLOAD_EXEC, ENCODED_COMMAND, FS_DELETE_SYSTEM]

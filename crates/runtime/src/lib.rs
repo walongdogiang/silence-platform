@@ -16,6 +16,7 @@ pub mod providers;
 pub mod pty;
 pub mod redact;
 pub mod risk;
+pub mod sandbox_host;
 pub mod rpc;
 pub mod rpc_auth;
 pub mod session;

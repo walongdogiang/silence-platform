@@ -16,6 +16,10 @@ export type PermissionRisk = {
   reasons: { code: string; title: string; detail: string }[];
   /** What "remember" stores, e.g. `npm install *`; absent = cannot be remembered. */
   pattern?: string;
+  /** Network hosts not allowlisted yet: the card offers to allow them. */
+  hosts?: string[];
+  /** Escalation card (repeated blocks); `stop_only` = only "Dừng" is offered. */
+  escalation?: { count: number; stop_only: boolean; blocked: string[] };
 };
 
 export type SessionEvent =

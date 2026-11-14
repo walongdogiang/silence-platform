@@ -855,6 +855,97 @@ async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     })
 }
 
+/// What `shell_sandboxed` needs from the Engine.
+pub struct SandboxRun {
+    /// The `silence-engine` binary (it doubles as the runner).
+    pub engine_exe: PathBuf,
+    /// The child's whole environment: `silence_sandbox::default_env` plus the proxy credential.
+    pub env: Vec<(String, String)>,
+}
+
+/// Result of a command that really ran inside the sandbox.
+pub struct SandboxShell {
+    pub out: ToolOutput,
+    pub exit_code: i32,
+}
+
+/// Quote one argument the way `CommandLineToArgvW` reads it back.
+fn quote_arg(a: &str) -> String {
+    const BS: char = '\u{5c}';
+    let mut out = String::from("\"");
+    let mut slashes = 0usize;
+    for c in a.chars() {
+        match c {
+            BS => slashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat(BS).take(slashes * 2 + 1));
+                out.push('"');
+                slashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat(BS).take(slashes));
+                out.push(c);
+                slashes = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat(BS).take(slashes * 2));
+    out.push('"');
+    out
+}
+
+/// Run a shell command as the sandbox user (see `silence_sandbox`). Same output shape as
+/// `shell`. An error means the command did NOT run (timeout aside): sandbox missing, broken or
+/// the runner failed; the caller must not fall back to an unsandboxed run on its own.
+pub async fn shell_sandboxed(ws: &Workspace, args: &Value, sb: SandboxRun) -> Result<SandboxShell> {
+    let command = args["command"].as_str().unwrap_or("");
+    if command.is_empty() {
+        return Err(anyhow!("empty command"));
+    }
+    let timeout = Duration::from_millis(args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(120_000));
+    let script = format!("{POWERSHELL_UTF8_PREAMBLE}
+{command}");
+    let spec = silence_sandbox::RunSpec {
+        command_line: format!("powershell.exe -NoProfile -NonInteractive -Command {}", quote_arg(&script)),
+        cwd: ws.root.clone(),
+        env: sb.env,
+        limits: silence_sandbox::Limits::standard(),
+    };
+    let exe = sb.engine_exe;
+    let out = tokio::task::spawn_blocking(move || silence_sandbox::run(&spec, &exe, Some(timeout))).await??;
+    if out.timed_out {
+        return Err(anyhow!("shell timed out"));
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    if out.code == silence_sandbox::RUNNER_FAILED && stderr.starts_with(silence_sandbox::RUNNER_PREFIX) {
+        return Err(anyhow!("sandbox could not run the command: {}", stderr.trim()));
+    }
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !stderr.is_empty() {
+        text.push_str("
+STDERR:
+");
+        text.push_str(&stderr);
+    }
+    Ok(SandboxShell {
+        out: ToolOutput { ok: out.code == 0, output: cap_output(text), diff: None },
+        exit_code: out.code,
+    })
+}
+
+#[cfg(test)]
+mod sandbox_quote_tests {
+    use super::quote_arg;
+
+    #[test]
+    fn quoting_round_trips_through_argv_rules() {
+        assert_eq!(quote_arg("a b"), "\"a b\"");
+        assert_eq!(quote_arg("say \"hi\""), "\"say \\\"hi\\\"\"");
+        assert_eq!(quote_arg("C:\\dir\\"), "\"C:\\dir\\\\\"");
+        assert_eq!(quote_arg("x\\\"y"), "\"x\\\\\\\"y\"");
+    }
+}
+
 async fn git(ws: &Workspace, args: &[&str]) -> Result<ToolOutput> {
     let mut cmd = Command::new("git");
     cmd.args(args)

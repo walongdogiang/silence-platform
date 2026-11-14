@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.14";
+export const PROTOCOL_VERSION = "0.1.15";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -115,7 +115,17 @@ export type SetPermissionParams = { session_id: string; permission: PermissionMo
 export type RiskTier = "auto" | "logged" | "ask" | "block";
 export type RiskReason = { code: string; title: string; detail: string };
 /** Why the Engine asks: tier + reason codes; `pattern` is what "remember" stores (e.g. `npm install *`). */
-export type PermissionRisk = { tier: RiskTier; reasons: RiskReason[]; pattern?: string };
+export type PermissionRisk = {
+  tier: RiskTier;
+  reasons: RiskReason[];
+  pattern?: string;
+  /** Network hosts not allowlisted yet: the card offers to allow them. */
+  hosts?: string[];
+  /** Set when the card is an escalation (repeated blocks), not a normal permission. */
+  escalation?: Escalation;
+};
+/** `stop_only`: the blocked action may never run, so the card only offers "Dừng". */
+export type Escalation = { count: number; stop_only: boolean; blocked: string[] };
 
 export type RpcRequest = {
   jsonrpc: "2.0";
@@ -397,3 +407,12 @@ export type EvalTaskDetail = {
   audit: string[];
   files: { path: string; status: "added" | "modified" | "deleted"; before: string; after: string; binary: boolean }[];
 };
+
+/** `sandbox.status` / `sandbox.setup` result (Engine `silence_sandbox::SandboxStatus`). Autonomous mode works only when `ready`. */
+export type SandboxStatus =
+  | { state: "unsupported" | "not_installed" | "ready" }
+  | { state: "degraded"; reason: string };
+/** `network.list`: built-in registries and the hosts the user added for the workspace. */
+export type NetworkList = { defaults: string[]; allow: string[] };
+/** `snapshot.list`: turns whose workspace snapshot can be restored with `snapshot.restore`. */
+export type SnapshotList = { turns: number[] };

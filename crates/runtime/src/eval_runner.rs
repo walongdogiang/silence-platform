@@ -83,6 +83,17 @@ pub(crate) struct Task {
     /// Env vars the task needs (e.g. `ANTHROPIC_API_KEY`); the task is skipped when one is unset.
     #[serde(default)]
     requires_env: Vec<String>,
+    /// Permission mode of the session (default `yolo`: evals never prompt). `autonomous` runs
+    /// the sandbox path: commands the sandbox contains run without asking, the rest asks.
+    #[serde(default)]
+    permission: Option<PermissionMode>,
+    /// The task is skipped (not failed) unless the command sandbox is installed and Ready.
+    #[serde(default)]
+    requires_sandbox: bool,
+    /// Answer to every permission card: `approve` or `deny` (default). Cards are recorded in
+    /// the audit as `eval.asked` with their codes, so `audit_matches` can require / forbid them.
+    #[serde(default)]
+    on_ask: Option<String>,
     pass_if: PassIf,
 }
 
@@ -367,7 +378,7 @@ impl Suite {
             &ws.to_string_lossy(),
             Some(model.to_string()),
             mode,
-            PermissionMode::Yolo,
+            task.permission.unwrap_or(PermissionMode::Yolo),
         )
         .await?;
         if model == "auto" {
@@ -393,7 +404,8 @@ impl Suite {
         agent::prompt(ctx.clone(), sid.clone(), task.prompt.clone()).await?;
         let mut report = String::new();
         let mut plan = String::new();
-        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics, &opts.cancel, &ctx, &sid).await;
+        let approve = task.on_ask.as_deref() == Some("approve");
+        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics, &opts.cancel, &ctx, &sid, approve).await;
         metrics.finish();
         let _ = std::fs::write(task_dir.join("report.md"), &report);
         if opts.cancel.load(Ordering::Relaxed) {
@@ -551,6 +563,13 @@ pub async fn run_with(
             skip_task(on, &mut rows, task, &model, format!("{missing} not set"));
             continue;
         }
+        if task.requires_sandbox {
+            let status = tokio::task::spawn_blocking(silence_sandbox::status).await.unwrap_or(silence_sandbox::SandboxStatus::Unsupported);
+            if status != silence_sandbox::SandboxStatus::Ready {
+                skip_task(on, &mut rows, task, &model, format!("sandbox not ready ({status:?})"));
+                continue;
+            }
+        }
         if stopped.is_none() && cancel.load(Ordering::Relaxed) {
             stopped = Some("cancelled".into());
         }
@@ -656,6 +675,7 @@ async fn wait_done(
     cancel: &CancelFlag,
     ctx: &Arc<AppCtx>,
     sid: &str,
+    approve: bool,
 ) -> bool {
     let deadline = tokio::time::Duration::from_secs(180);
     let start = tokio::time::Instant::now();
@@ -695,6 +715,30 @@ async fn wait_done(
             }
             // Marker so a task can require the event via `report_mentions: ["[event:mode_suggestion]"]`.
             Ok(Some(SessionEvent::ModeSuggestion { .. })) => report.push_str("\n[event:mode_suggestion]\n"),
+            Ok(Some(SessionEvent::Permission { request_id, name, input, risk, .. })) => {
+                // Eval sessions have no user: record the card, then answer it as the task says.
+                let codes: Vec<String> = risk
+                    .as_ref()
+                    .map(|r| r.reasons.iter().map(|x| x.code.clone()).collect())
+                    .unwrap_or_default();
+                let hosts = risk.as_ref().map(|r| r.hosts.clone()).unwrap_or_default();
+                let escalation = risk.as_ref().and_then(|r| r.escalation.as_ref()).is_some();
+                let _ = ctx
+                    .audit
+                    .append(crate::audit::now_event(
+                        sid,
+                        "eval.asked",
+                        "",
+                        &name,
+                        "",
+                        0,
+                        0,
+                        0.0,
+                        serde_json::json!({"codes": codes, "hosts": hosts, "escalation": escalation, "input": input, "approved": approve}),
+                    ))
+                    .await;
+                let _ = agent::decide_permission(ctx, sid, &request_id, approve, false).await;
+            }
             Ok(Some(SessionEvent::Done { .. })) => return true,
             Ok(Some(SessionEvent::Error { .. })) => return false,
             Ok(Some(_)) => {}

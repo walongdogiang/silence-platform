@@ -132,3 +132,11 @@ Giá model nằm trong `config/models.yaml`. Gọi model mà provider không tr�
 Task chạy Model Auto đặt `model: auto`. Thêm task `A0x` mới thì thêm id vào bước "Weekly Auto model" của `evals.yml`; task mode `M0x` mới thì thêm vào bước "Weekly modes" (hai bước dùng `--only` để trần chi không lẫn nhau). Kiểm slot bằng `audit_matches: ['"kind":"route".*"slot":"frontier"']`. Metrics của task có thêm `slots` (slot của các lượt chính), `escalated` và `usd_by_slot`. Xem các task `A0x` trong `modes/manifest.yaml`.
 
 Sửa vòng agent (`crates/runtime/src/agent/`) thì thêm hoặc sửa task tương ứng. Có key thì chạy các task liên quan; không có thì ghi rõ trong PR là chưa chạy.
+
+## Suite `sandbox` (chế độ Tự chủ)
+
+`evals/sandbox/manifest.yaml`, fixture `fixtures/node-mini`. Task đặt `permission: autonomous` và `requires_sandbox: true`: máy chưa cài sandbox (`silence-engine sandbox status` ≠ ready) thì task bị **SKIP**, không FAIL. Suite này không chạy trên CI (runner không có user sandbox): chạy tay trên máy đã cài. `on_ask: approve|deny` (mặc định deny) là câu trả lời cho mọi thẻ hỏi quyền; mỗi thẻ được ghi vào `audit.jsonl` thành dòng `"kind":"eval.asked"` kèm `codes`, `hosts`, `escalation`, nên `audit_matches` / `audit_absent` dùng được để bắt buộc hoặc cấm thẻ. Task `S01…S04`: `npm install && npm test` không hỏi; `git push` vẫn hỏi; domain lạ hỏi kèm host; bị sandbox chặn thì tự đổi cách mà không lên thẻ leo thang.
+
+```powershell
+cargo run -p silence-engine -- evals --dir evals/sandbox --repo-root . --history
+```
