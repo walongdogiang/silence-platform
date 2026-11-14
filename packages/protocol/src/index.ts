@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.13";
+export const PROTOCOL_VERSION = "0.1.14";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -60,6 +60,11 @@ export type SessionCreateParams = {
   style?: ResponseStyle;
 };
 /** Params of `session.prune`: delete chats whose last event is older than `older_than_days`. `keep` = ids never deleted (pinned). */
+/**
+ * Params of `auth.hello`: the first request on every connection. `token` = the
+ * `SILENCE_RPC_TOKEN` Studio gave the Engine at spawn. Wrong/missing → error -32001, connection closed.
+ */
+export type AuthHelloParams = { token: string };
 export type SessionPruneParams = { older_than_days: number; keep?: string[] };
 /** Params of `session.delete`. Audit log is kept. */
 export type SessionDeleteParams = { session_ids: string[] };

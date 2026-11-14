@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, safeStorage, shell } from "electron";
 import { doneNotice, noticeOpts, permissionNotice, shouldNotify, type Notice } from "./notify";
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import { CredentialStore, MAIN_ONLY_RPC, cleanKey, isKeyedProvider } from "./credentials";
 import net from "node:net";
@@ -260,6 +261,9 @@ async function spawnRuntime(): Promise<void> {
   if (!existsSync(bin)) {
     throw new Error(`Không thấy ${bin}. Chạy: .\\scripts\\cargo-msvc.bat build -p silence-engine`);
   }
+  // Mỗi lần spawn một token mới. Chỉ main giữ nó (không đưa cho renderer); Engine xoá biến này
+  // khỏi env của chính nó ngay khi đọc, nên lệnh shell/MCP không thừa hưởng được.
+  const token = randomBytes(32).toString("hex");
   const proc = spawn(
     liveBin(bin),
     ["serve", "--tcp", "127.0.0.1:0", "--config", path.join(repoRoot, "config/models.yaml")],
@@ -267,7 +271,7 @@ async function spawnRuntime(): Promise<void> {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: process.env,
+      env: { ...process.env, SILENCE_RPC_TOKEN: token },
     },
   );
   child = proc;
@@ -289,6 +293,8 @@ async function spawnRuntime(): Promise<void> {
       if (m) {
         clearTimeout(timer);
         connect(m[1])
+          // Engine đóng kết nối nếu request đầu tiên không phải auth.hello đúng token.
+          .then(() => rpc("auth.hello", { token }))
           .then(() => {
             connected = true;
             resolve();
