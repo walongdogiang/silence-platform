@@ -52,6 +52,8 @@ Sidecar TCP `127.0.0.1:0` khi Electron spawn; CLI:
 cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420
 ```
 
+Request đầu tiên trên mỗi kết nối phải là `auth.hello {"token": …}`. Chạy tay thì Engine tự sinh token và in ra stderr (`silence-engine rpc token=…`). Muốn tự chọn token thì đặt `SILENCE_RPC_TOKEN` (ít nhất 32 ký tự).
+
 Eval chạy thủ công ở local: `npm run evals` (mặc định qua Claude CLI; `npm run evals -- --help`, chi tiết ở `evals/README.md`).
 
 Copy `templates/silence` thành `.silence/` trong repo làm việc để bật skills/hooks.

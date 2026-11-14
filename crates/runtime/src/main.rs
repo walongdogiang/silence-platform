@@ -191,6 +191,8 @@ async fn serve(
     config: Option<PathBuf>,
     data_dir: Option<PathBuf>,
 ) -> Result<()> {
+    // First: take the RPC token out of our env before anything can spawn a child process.
+    let (token, generated) = silence_engine::rpc_auth::take_from_env();
     let config = config.unwrap_or_else(|| PathBuf::from("config/models.yaml"));
     let catalog = Catalog::load(&config).context("load model catalog")?;
     let data_dir = data_dir.unwrap_or_else(|| {
@@ -202,7 +204,12 @@ async fn serve(
     // Evals (`eval.*`) resolve against the working directory, like `silence-engine evals`.
     let repo_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let config_abs = if config.is_absolute() { config.clone() } else { repo_root.join(&config) };
-    let state = Arc::new(RpcState::with_paths(ctx, repo_root, config_abs));
+    let state = Arc::new(RpcState::with_paths(ctx, repo_root, config_abs).with_auth_token(token.clone()));
+    if generated {
+        // Manual runs (`npm run runtime`): nobody gave us a token, so show the one we made.
+        // Studio always passes SILENCE_RPC_TOKEN, so this line never appears there.
+        eprintln!("silence-engine rpc token={token} (first request: auth.hello)");
+    }
 
     if let Some(addr) = tcp {
         silence_engine::bind_policy::ensure_loopback_tcp_bind(&addr)?;
@@ -247,12 +254,18 @@ fn dirs_data() -> PathBuf {
 #[cfg(windows)]
 async fn serve_pipe(state: Arc<RpcState>, name: &str) -> Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
+    // Only this user and SYSTEM may open the pipe (the sandbox user is another account).
+    let owner_only = silence_sandbox::owner_only::OwnerOnly::new().context("pipe security descriptor")?;
     let mut first = true;
     loop {
-        let server = ServerOptions::new()
-            .first_pipe_instance(first)
-            .create(name)
-            .context("create named pipe")?;
+        // SAFETY: `owner_only` outlives every call; the pointer is a valid SECURITY_ATTRIBUTES.
+        let server = unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(first)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(name, owner_only.as_ptr())
+        }
+        .context("create named pipe")?;
         first = false;
         server.connect().await.context("pipe connect")?;
         let state = state.clone();

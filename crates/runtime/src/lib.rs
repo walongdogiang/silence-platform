@@ -17,5 +17,6 @@ pub mod pty;
 pub mod redact;
 pub mod risk;
 pub mod rpc;
+pub mod rpc_auth;
 pub mod session;
 pub mod title;

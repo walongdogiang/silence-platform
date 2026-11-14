@@ -1330,6 +1330,7 @@ dependencies = [
  "silence-mcp",
  "silence-protocol",
  "silence-router",
+ "silence-sandbox",
  "silence-tools",
  "tempfile",
  "tokio",

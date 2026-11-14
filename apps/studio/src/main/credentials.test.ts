@@ -48,5 +48,6 @@ describe("credential store", () => {
     expect(() => cleanKey("a\nb")).toThrow();
     expect(() => cleanKey(42)).toThrow();
     expect(MAIN_ONLY_RPC.has("providers.set_credential")).toBe(true);
+    expect(MAIN_ONLY_RPC.has("auth.hello")).toBe(true);
   });
 });

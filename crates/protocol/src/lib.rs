@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.13";
+pub const PROTOCOL_VERSION: &str = "0.1.14";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -525,6 +525,14 @@ pub struct SessionSummary {
 
 /// Params of `session.prune`: delete session logs whose last event is older than
 /// `older_than_days` (≥ 1). `keep` = ids never deleted (pinned chats). Result: `{deleted}`.
+/// `auth.hello`: must be the first request on every connection. `token` is the value the
+/// Engine got from `SILENCE_RPC_TOKEN` (Studio sets it when spawning). Wrong or missing →
+/// error `-32001` and the connection is closed. Result: `{ok, protocol}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthHelloParams {
+    pub token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionPruneParams {
     pub older_than_days: u32,

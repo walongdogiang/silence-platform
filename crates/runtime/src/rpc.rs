@@ -19,6 +19,9 @@ pub struct RpcState {
     pub terminals: Mutex<HashMap<String, Arc<TerminalSession>>>,
     /// `eval.*`: suites under `<repo_root>/evals`, one run at a time.
     pub evals: Arc<EvalHost>,
+    /// When set, every connection must open with `auth.hello {token}` (see `rpc_auth`).
+    /// `serve` always sets it; `None` only in in-process tests.
+    pub auth_token: Option<String>,
 }
 
 impl RpcState {
@@ -34,7 +37,13 @@ impl RpcState {
             ctx,
             terminals: Mutex::new(HashMap::new()),
             evals: Arc::new(EvalHost::new(repo_root, config_path)),
+            auth_token: None,
         }
+    }
+
+    pub fn with_auth_token(mut self, token: String) -> Self {
+        self.auth_token = Some(token);
+        self
     }
 }
 
@@ -47,6 +56,7 @@ where
 {
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(writer)));
     let mut lines = BufReader::new(reader).lines();
+    let mut authed = state.auth_token.is_none();
     while let Ok(Some(line)) = lines.next_line().await {
         let line = line.trim().to_string();
         if line.is_empty() {
@@ -56,9 +66,31 @@ where
             Ok(r) => r,
             Err(err) => {
                 tracing::warn!("bad rpc: {err}");
+                if !authed {
+                    return Ok(());
+                }
                 continue;
             }
         };
+        if !authed {
+            // First request must be `auth.hello` with the right token; anything else closes the
+            // connection after one error reply, without touching any other method.
+            let ok = req.method == "auth.hello"
+                && serde_json::from_value::<silence_protocol::AuthHelloParams>(req.params.clone())
+                    .map(|p| crate::rpc_auth::token_eq(&p.token, state.auth_token.as_deref().unwrap_or("")))
+                    .unwrap_or(false);
+            if !ok {
+                tracing::warn!("rpc: unauthenticated connection closed (method {})", req.method);
+                let resp = RpcResponse::err(
+                    req.id,
+                    crate::rpc_auth::UNAUTHORIZED,
+                    "unauthorized: send auth.hello with the Engine token first",
+                );
+                let _ = write_json(&writer, &serde_json::to_value(&resp)?).await;
+                return Ok(());
+            }
+            authed = true;
+        }
         match dispatch(state.clone(), writer.clone(), req).await {
             Ok(()) => {}
             Err(err) => tracing::warn!("rpc dispatch: {err}"),
@@ -91,6 +123,8 @@ async fn dispatch(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -
 async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> Result<Value> {
     match req.method.as_str() {
         "ping" => Ok(json!({"ok": true, "protocol": silence_protocol::PROTOCOL_VERSION})),
+        // Checked in `serve_connection` before dispatch; a repeat on an open connection is a no-op.
+        "auth.hello" => Ok(json!({"ok": true, "protocol": silence_protocol::PROTOCOL_VERSION})),
         "session.create" => session_create(state.clone(), writer.clone(), req.params).await,
         "session.list" => Ok(json!({"sessions": state.ctx.store.list()?})),
         // Settings → Dữ liệu. Only `events.jsonl` folders; the audit log is never deleted.
@@ -496,6 +530,77 @@ mod tests {
             .unwrap()
             .expect("connection closed without a reply");
         serde_json::from_str(&reply).unwrap()
+    }
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// Connection to an Engine that requires `TOKEN`. Sends `lines`, returns every reply line
+    /// until the Engine closes the connection (or 3 s pass).
+    async fn authed_session(lines: &[&str]) -> (Vec<Value>, bool) {
+        let data = tempfile::tempdir().unwrap();
+        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": []})).unwrap();
+        let ctx = Arc::new(AppCtx::new(Catalog::from_raw(raw), AuditLog::open(data.path()).unwrap()));
+        let state = Arc::new(RpcState::new(ctx).with_auth_token(TOKEN.into()));
+        let (client, server) = duplex(64 * 1024);
+        let (sr, sw) = split(server);
+        tokio::spawn(serve_connection(state, sr, sw));
+        let (cr, mut cw) = split(client);
+        for l in lines {
+            let _ = cw.write_all(format!("{l}\n").as_bytes()).await;
+        }
+        let mut reader = BufReader::new(cr).lines();
+        let mut out = Vec::new();
+        let closed = loop {
+            match tokio::time::timeout(Duration::from_secs(3), reader.next_line()).await {
+                Ok(Ok(Some(l))) => out.push(serde_json::from_str(&l).unwrap()),
+                Ok(_) => break true,
+                Err(_) => break false,
+            }
+            if out.len() == lines.len() {
+                // Everything answered: see whether the server closed right after.
+                break matches!(
+                    tokio::time::timeout(Duration::from_millis(200), reader.next_line()).await,
+                    Ok(Ok(None)) | Ok(Err(_))
+                );
+            }
+        };
+        (out, closed)
+    }
+
+    #[tokio::test]
+    async fn rpc_before_auth_is_rejected_and_connection_closed() {
+        let (out, closed) = authed_session(&[
+            r#"{"jsonrpc":"2.0","id":1,"method":"session.list","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"ping","params":{}}"#,
+        ])
+        .await;
+        assert_eq!(out.len(), 1, "only one error reply, then close: {out:?}");
+        assert_eq!(out[0]["error"]["code"], crate::rpc_auth::UNAUTHORIZED);
+        assert!(closed);
+    }
+
+    #[tokio::test]
+    async fn wrong_token_is_rejected() {
+        let (out, closed) = authed_session(&[
+            r#"{"jsonrpc":"2.0","id":1,"method":"auth.hello","params":{"token":"nope"}}"#,
+        ])
+        .await;
+        assert_eq!(out[0]["error"]["code"], crate::rpc_auth::UNAUTHORIZED);
+        assert!(closed);
+    }
+
+    #[tokio::test]
+    async fn right_token_opens_the_connection() {
+        let hello = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"auth.hello","params":{{"token":"{TOKEN}"}}}}"#);
+        let (out, closed) = authed_session(&[
+            &hello,
+            r#"{"jsonrpc":"2.0","id":2,"method":"ping","params":{}}"#,
+        ])
+        .await;
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0]["result"]["ok"], true);
+        assert_eq!(out[1]["result"]["ok"], true);
+        assert!(!closed);
     }
 
     #[tokio::test]

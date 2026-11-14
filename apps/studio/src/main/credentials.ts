@@ -9,7 +9,7 @@ export const KEYED_PROVIDERS = ["company-gateway", "claude-api"] as const;
 export type KeyedProvider = (typeof KEYED_PROVIDERS)[number];
 
 /** Engine RPC methods the renderer may not call directly (they carry secrets). */
-export const MAIN_ONLY_RPC = new Set(["providers.set_credential"]);
+export const MAIN_ONLY_RPC = new Set(["providers.set_credential", "auth.hello"]);
 
 export type Cipher = {
   available(): boolean;

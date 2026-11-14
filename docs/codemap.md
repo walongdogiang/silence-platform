@@ -56,6 +56,9 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Tool `read`/`write`/`edit`/`glob`/`grep`/`shell`/`git_*`, jail workspace | `crates/tools/src/lib.rs` (`specs`, `Workspace`) |
 | Ảnh: đọc ảnh workspace (`read_image`, `view_image` spec), ảnh user dán (validate, content parts, strip cho model không vision) | `crates/tools/src/image.rs`, `crates/runtime/src/images.rs`; tool `view_image` ở `agent/mod.rs` (`view_image`, `builtin_tools`) |
 | Job Object, timeout process | `crates/sandbox/src/lib.rs` |
+| Xác thực kết nối RPC (`auth.hello`, `SILENCE_RPC_TOKEN`) | `crates/runtime/src/rpc_auth.rs`, `rpc.rs` (`serve_connection`); Studio: `apps/studio/src/main/index.ts` (`spawnRuntime`) |
+| DACL chỉ cho user hiện tại (named pipe) | `crates/sandbox/src/owner_only.rs` |
+| Lọc env cho lệnh trong sandbox (chưa nối vào shell) | `crates/sandbox/src/env.rs` (`scrub`) |
 | MCP client/host | `crates/mcp/src/lib.rs` |
 
 ## Protocol (đổi cả hai)
