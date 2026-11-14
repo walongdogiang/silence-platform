@@ -12,13 +12,18 @@
 //! (`SEC_E_NO_CREDENTIALS`, verified with every flag/SID combination), which breaks TLS for
 //! curl.exe, cargo and .NET. Deny-only groups keep Schannel working.
 
-use super::sid::OwnedSid;
+use super::sid::{self, OwnedSid};
 use anyhow::{Context, Result};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use std::ffi::c_void;
 use windows::Win32::Security::{
-    CreateRestrictedToken, CREATE_RESTRICTED_TOKEN_FLAGS, DISABLE_MAX_PRIVILEGE, LUA_TOKEN, SID_AND_ATTRIBUTES,
-    TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY,
+    AddAccessAllowedAce, CreateRestrictedToken, GetLengthSid, GetTokenInformation, InitializeAcl, SetTokenInformation,
+    TokenDefaultDacl, TokenUser, ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, CREATE_RESTRICTED_TOKEN_FLAGS,
+    DISABLE_MAX_PRIVILEGE, LUA_TOKEN, PSID, SID_AND_ATTRIBUTES, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY,
+    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
 };
+
+const GENERIC_ALL: u32 = 0x1000_0000;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 /// Groups turned deny-only in the sandbox token.
@@ -49,7 +54,48 @@ pub(crate) fn deny_only(base: HANDLE, flags: CREATE_RESTRICTED_TOKEN_FLAGS, disa
     unsafe {
         CreateRestrictedToken(base, flags, Some(&list), None, None, &mut out).context("CreateRestrictedToken")?;
     }
-    Ok(Token(out))
+    let token = Token(out);
+    set_default_dacl(base, token.0)?;
+    Ok(token)
+}
+
+/// Default DACL for objects the new process creates (its own process/thread objects included):
+/// GENERIC_ALL to the token's user and SYSTEM. An admin token's default DACL grants only
+/// Administrators, which may be deny-only in the derived token; the child then cannot open its
+/// own objects and dies at DLL init (0xC0000142).
+fn set_default_dacl(base: HANDLE, token: HANDLE) -> Result<()> {
+    unsafe {
+        let mut len = 0u32;
+        let _ = GetTokenInformation(base, TokenUser, None, 0, &mut len);
+        // u64-aligned buffer for TOKEN_USER (holds a pointer).
+        let mut ubuf = vec![0u64; (len as usize + 7) / 8];
+        GetTokenInformation(base, TokenUser, Some(ubuf.as_mut_ptr() as *mut c_void), len, &mut len)
+            .context("GetTokenInformation(TokenUser)")?;
+        let user = (*(ubuf.as_ptr() as *const TOKEN_USER)).User.Sid;
+        let system = OwnedSid::parse(sid::SYSTEM)?;
+        let sids: [PSID; 2] = [user, system.psid()];
+
+        let mut size = std::mem::size_of::<ACL>() as u32;
+        for &s in &sids {
+            size += std::mem::size_of::<ACCESS_ALLOWED_ACE>() as u32 + GetLengthSid(s) - 4;
+        }
+        let mut abuf = vec![0u32; (size as usize + 3) / 4];
+        let acl = abuf.as_mut_ptr() as *mut ACL;
+        InitializeAcl(acl, size, ACL_REVISION).context("InitializeAcl")?;
+        for &s in &sids {
+            AddAccessAllowedAce(acl, ACL_REVISION, GENERIC_ALL, s).context("AddAccessAllowedAce")?;
+        }
+        let dd = TOKEN_DEFAULT_DACL { DefaultDacl: acl };
+        SetTokenInformation(
+            token,
+            TokenDefaultDacl,
+            &dd as *const _ as *const c_void,
+            std::mem::size_of::<TOKEN_DEFAULT_DACL>() as u32,
+        )
+        .context("SetTokenInformation(TokenDefaultDacl)")?;
+        // The token copies the ACL; the buffers may go.
+    }
+    Ok(())
 }
 
 pub(crate) fn own_token() -> Result<Token> {
