@@ -27,7 +27,7 @@ Vấn đề cần giải: hỏi mọi thứ thì agent phải dừng liên tục
 | | Claude Code | Cursor | Codex | VS Code / Copilot | 5ilence |
 | --- | --- | --- | --- | --- | --- |
 | Phân tầng | auto mode: classifier xét từng hành động | Auto-review (mặc định): allowlist, sandbox, rồi classifier | sandbox mode + approval policy | mức duyệt: Default / Bypass / Autopilot | Luật cứng 4 tầng; classifier cho vùng xám là việc sau |
-| Sandbox | khuyên chạy bypass trong container/VM | chặn mạng mặc định, ghi trong workspace; macOS + Linux | `workspace-write`, tắt mạng mặc định; có Windows gốc | độc lập với mức duyệt; macOS, Linux, WSL2 | Job Object (đã có); chặn mạng (sau) |
+| Sandbox | khuyên chạy bypass trong container/VM | chặn mạng mặc định, ghi trong workspace; macOS + Linux | `workspace-write`, tắt mạng mặc định; có Windows gốc | độc lập với mức duyệt; macOS, Linux, WSL2 | Windows gốc: user ẩn `silence-sbx` + token write-restricted, chỉ ghi workspace đã cấp (đã có, chưa nối vào agent); chặn mạng (Phase 3) |
 | Nhớ quyền | theo mẫu `Bash(npm test:*)` | allowlist lệnh | — | auto-approve theo lệnh | theo mẫu lệnh (B3) |
 | Chặn cứng | deny rules, hook PreToolUse | file-deletion / external-file protection | — | — | Tầng 3 trong Engine |
 | Chế độ bỏ qua hết | `bypassPermissions`, công tắc "Allow bypass permissions mode"; admin tắt bằng `disableBypassPermissionsMode` | Run Everything (không sandbox, không classifier) | `--yolo` = `danger-full-access` + `never`, "not recommended" | Bypass Approvals / Autopilot | **Không có.** `yolo` chỉ dùng trong `eval_runner` |
@@ -151,6 +151,31 @@ B3 đã có: tiêu đề theo lý do chính, **lệnh thật** nguyên văn, dan
 - Thêm từ Studio: hiện nguyên dòng lệnh và hỏi xác nhận trước khi lưu và chạy. Bật lại server từ file = cho phép.
 - `mcp.list` không bao giờ trả giá trị env (chỉ tên biến). Giá trị `${VAR}` lấy từ môi trường của Engine lúc khởi động server, để secret không nằm trong file.
 - Mỗi lần gọi tool MCP vẫn qua Risk Engine (`MCP_CALL` / `MCP_READ`) và gây taint như trước.
+
+## Sandbox Windows (đang làm)
+
+Code: `crates/sandbox` (`src/win/`). Lý do thiết kế và số đo: `crates/sandbox/spike/README.md`.
+
+- **Cách chạy:**
+  - Lệnh chạy dưới user ẩn `silence-sbx` với token write-restricted, gồm SID tổng hợp của 5ilence + logon SID + Everyone.
+  - Engine khởi động runner (`silence-engine sandbox-runner`) bằng `CreateProcessWithLogonW`. Runner tự hạ token của chính nó rồi chạy lệnh trong Job: kill-on-close, giới hạn 4 GB RAM và 64 process. Overhead khoảng 120 ms mỗi lệnh.
+- **Cài đặt:**
+  - `silence-engine sandbox setup` hỏi UAC một lần, tạo user, mật khẩu ngẫu nhiên lưu DPAPI và `%ProgramData%\silence-sbx` có ACL chặt.
+  - `sandbox grant <ws>` không cần admin: cấp Modify cho user sandbox và SID 5ilence, chặn `.silence/`.
+  - `sandbox uninstall` gỡ hết, kể cả ACE trên mọi workspace đã cấp.
+- **Chặn được** (đã thử trên máy thật):
+  - ghi ngoài workspace, kể cả ổ cấp Modify cho Authenticated Users
+  - ghi `.silence/`
+  - đọc profile của user thật
+  - thấy `SILENCE_API_KEY` và các biến `*TOKEN*` / `*_KEY` (env được lọc)
+  - chạy quá timeout
+- **Giới hạn** (phải hiểu trước khi bật Tự chủ):
+  - **Chỉ bọc shell.** File tool (`write`/`edit`…) chạy trong Engine và dựa vào giới hạn đường dẫn của `Workspace`.
+  - **Vẫn đọc được** những chỗ cấp quyền cho `Users`/`Authenticated Users`, ví dụ repo khác trên ổ D:. Chặn đọc triệt để ngoài workspace thì không làm được bằng cách này.
+  - **Ghi được** những chỗ `Everyone` có quyền ghi, vì `Everyone` buộc phải có trong restricting SID.
+  - **Chưa chặn mạng:** đó là Phase 3 (firewall theo user + proxy allowlist). Cho tới lúc đó, Tự chủ vẫn tắt.
+  - Lần cấp quyền đầu cho repo lớn chậm, vì ACL phải lan xuống mọi file (`target/`, `node_modules/`).
+  - Toolchain nằm trong profile của user (ví dụ `~/.cargo`) thì sandbox không thấy; cần `sandbox grant --read`.
 
 ## Chọn chế độ (Settings)
 

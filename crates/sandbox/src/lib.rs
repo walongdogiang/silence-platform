@@ -1,8 +1,185 @@
+//! Process isolation for agent commands.
+//!
+//! - `wrap_pid`: Job Object (kill-on-close) for ordinary, unsandboxed children.
+//! - Sandbox (Windows): commands run as a hidden local user with a write-restricted token, so
+//!   they can only write in granted workspaces and the sandbox's own temp/home. Design and
+//!   measurements: `crates/sandbox/spike/README.md`; plan phases in docs/security/backlog.md.
+//!   Network blocking (firewall + proxy) is Phase 3 and NOT in place yet.
+
 use anyhow::{Context, Result};
+use std::path::Path;
 use std::time::Duration;
 
 pub mod env;
 pub mod owner_only;
+pub mod spec;
+#[cfg(windows)]
+mod win;
+
+pub use spec::{Limits, RunOutput, RunSpec, SandboxStatus, RUNNER_FAILED, RUNNER_PREFIX};
+
+/// Arguments `silence-engine` must accept to run the elevated half of setup / uninstall.
+pub const ELEVATED_SETUP_ARGS: &str = "sandbox setup --elevated";
+pub const ELEVATED_UNINSTALL_ARGS: &str = "sandbox uninstall --elevated";
+/// Subcommand of `silence-engine` that runs [`runner_main`] (as the sandbox user).
+pub const RUNNER_ARG: &str = "sandbox-runner";
+
+pub fn status() -> SandboxStatus {
+    #[cfg(windows)]
+    {
+        win::setup::status()
+    }
+    #[cfg(not(windows))]
+    {
+        SandboxStatus::Unsupported
+    }
+}
+
+pub fn is_elevated() -> bool {
+    #[cfg(windows)]
+    {
+        win::setup::is_elevated()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Install (or repair) the sandbox. Shows one UAC prompt unless already elevated; the elevated
+/// half is `engine_exe ELEVATED_SETUP_ARGS` → [`setup_elevated`].
+pub fn setup(engine_exe: &Path) -> Result<()> {
+    elevate_or_run(engine_exe, ELEVATED_SETUP_ARGS, setup_elevated, "setup")
+}
+
+pub fn uninstall(engine_exe: &Path) -> Result<()> {
+    elevate_or_run(engine_exe, ELEVATED_UNINSTALL_ARGS, uninstall_elevated, "uninstall")
+}
+
+#[allow(unused_variables)]
+fn elevate_or_run(engine_exe: &Path, args: &str, direct: fn() -> Result<()>, what: &str) -> Result<()> {
+    #[cfg(windows)]
+    {
+        if is_elevated() {
+            return direct();
+        }
+        let code = win::setup::run_elevated(engine_exe, args)?;
+        if code != 0 {
+            let log = std::fs::read_to_string(win::state::setup_log()).unwrap_or_default();
+            let last = log.lines().last().unwrap_or("").to_string();
+            anyhow::bail!("sandbox {what} failed (exit {code}): {last}");
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("sandbox {what}: not supported on this OS yet")
+    }
+}
+
+pub fn setup_elevated() -> Result<()> {
+    #[cfg(windows)]
+    {
+        win::setup::setup_elevated()
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("not supported on this OS")
+    }
+}
+
+pub fn uninstall_elevated() -> Result<()> {
+    #[cfg(windows)]
+    {
+        win::setup::uninstall_elevated()
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("not supported on this OS")
+    }
+}
+
+/// Let the sandbox write in `ws`. Returns how long the ACL propagation took.
+#[allow(unused_variables)]
+pub fn grant_workspace(ws: &Path) -> Result<Duration> {
+    #[cfg(windows)]
+    {
+        win::setup::grant_workspace(ws)
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("not supported on this OS")
+    }
+}
+
+/// Let the sandbox read (not write) `path`, e.g. a toolchain in the real user's profile.
+#[allow(unused_variables)]
+pub fn grant_read(path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        win::setup::grant_read(path)
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("not supported on this OS")
+    }
+}
+
+/// Child environment for `ws`: allowlisted vars from the Engine's env, TEMP/profile redirected.
+#[allow(unused_variables)]
+pub fn default_env(ws: &Path) -> Vec<(String, String)> {
+    #[cfg(windows)]
+    {
+        win::setup::default_env(ws, std::env::vars_os())
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// Run `spec` as the sandbox user (blocking; call from `spawn_blocking`). `engine_exe` is the
+/// `silence-engine` binary, which doubles as the runner.
+#[allow(unused_variables)]
+pub fn run(spec: &RunSpec, engine_exe: &Path, timeout: Option<Duration>) -> Result<RunOutput> {
+    #[cfg(windows)]
+    {
+        win::launch::run(spec, engine_exe, timeout)
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("not supported on this OS")
+    }
+}
+
+/// Run `spec` as the CURRENT user with the write-restricted token (no sandbox user, no setup).
+/// Blocks writes outside granted dirs only; reads and network are not limited. Used by tests;
+/// never a substitute for `run` in `autonomous` mode.
+#[allow(unused_variables)]
+pub fn run_local_restricted(spec: &RunSpec, timeout: Option<Duration>) -> Result<RunOutput> {
+    #[cfg(windows)]
+    {
+        let token = win::token::restricted_own_token()?;
+        win::proc::run_with_token(token.0, spec, timeout)
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("not supported on this OS")
+    }
+}
+
+/// Entry point of `silence-engine sandbox-runner`. Returns the process exit code.
+pub fn runner_main() -> i32 {
+    #[cfg(windows)]
+    {
+        win::runner::runner_main()
+    }
+    #[cfg(not(windows))]
+    {
+        eprintln!("{RUNNER_PREFIX} not supported on this OS");
+        RUNNER_FAILED
+    }
+}
 
 pub struct JobGuard {
     inner: Inner,
