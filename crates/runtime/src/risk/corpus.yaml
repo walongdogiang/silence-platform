@@ -45,6 +45,12 @@
 - { cmd: "pip install requests", tier: ask, code: PKG_INSTALL }
 - { cmd: "cargo add serde", tier: ask, code: PKG_INSTALL }
 - { cmd: "winget install Git.Git", tier: ask, code: PKG_INSTALL }
+- { cmd: "npm publish --access public", tier: ask, code: PKG_PUBLISH }
+- { cmd: "cargo publish --allow-dirty", tier: ask, code: PKG_PUBLISH }
+- { cmd: "twine upload dist/*", tier: ask, code: PKG_PUBLISH }
+- { cmd: "uv publish", tier: ask, code: PKG_PUBLISH }
+- { cmd: "dotnet nuget push pkg.nupkg --api-key x", tier: ask, code: PKG_PUBLISH }
+- { cmd: "npm run build && npm publish", tier: ask, code: PKG_PUBLISH }
 - { cmd: "curl -s https://api.github.com", tier: ask, code: NET_ACCESS }
 - { cmd: "Invoke-WebRequest https://example.com -OutFile page.html", tier: ask, code: NET_ACCESS }
 - { cmd: "curl https://x/data.json | python -m json.tool", tier: ask, code: NET_ACCESS }

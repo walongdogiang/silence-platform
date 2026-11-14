@@ -27,6 +27,8 @@ Code thử nghiệm để quyết go/no-go cho sandbox (xem plan Phase 0). Engin
 | UTF-8 | ✅ con xuất byte UTF-8 đúng. Chữ hiển thị lỗi chỉ do console của `run.ps1` dùng OEM codepage |
 | Overhead logon + runner + `cmd` | 113–136 ms (mục tiêu < 150 ms). PowerShell khởi động thêm 300–600 ms, giống hiện nay |
 
+> **Cập nhật Phase 3:** token write-restricted ở trên (SID tổng hợp + logon + Everyone) làm Schannel trả `SEC_E_NO_CREDENTIALS`, nên curl.exe, cargo và .NET mất TLS. Hiện sandbox dùng token **deny-only** (`Authenticated Users`, `INTERACTIVE`); xem `src/win/token.rs` và docs/security/permissions.md.
+
 Ghi chú khi cài:
 - `icacls` từ chối SID không ánh xạ tới tài khoản nào. Dùng `Set-Acl` với `SecurityIdentifier`, hoặc Win32 `SetEntriesInAclW`.
 - Vì `Everyone` nằm trong restricting SID, mọi chỗ mà `Everyone` có quyền ghi thì sandbox cũng ghi được. `status()` nên kiểm các thư mục phổ biến và ghi rõ giới hạn này trong docs.

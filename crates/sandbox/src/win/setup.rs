@@ -99,6 +99,7 @@ fn setup_inner() -> Result<()> {
     account::create_or_reset(USER, &password).context("create sandbox user")?;
     account::hide(USER).context("hide sandbox user")?;
     let sbx_sid = sid::account_sid(USER)?;
+    super::firewall::install(&sbx_sid)?;
 
     std::fs::create_dir_all(state::user_dir())?;
     std::fs::write(state::cred_path(), account::protect(password.as_bytes())?).context("write cred.bin")?;
@@ -122,6 +123,10 @@ fn setup_inner() -> Result<()> {
     for d in [state::home_dir(), state::tmp_root()] {
         acl::apply(&d, &sandbox_write(&sbx_sid))?;
     }
+    for root in shared_roots() {
+        acl::apply(&root, &[Entry { sid: &sbx_sid, mode: Mode::Deny, mask: DENY_CREATE, inherit: Inherit::None }])
+            .with_context(|| format!("deny sandbox in {}", root.display()))?;
+    }
 
     let mut st = State::load().ok().flatten().unwrap_or(State {
         version: STATE_VERSION,
@@ -134,11 +139,26 @@ fn setup_inner() -> Result<()> {
     st.save()
 }
 
-fn sandbox_write(sbx_sid: &str) -> [Entry<'_>; 2] {
-    [
-        Entry { sid: sbx_sid, mode: Mode::Grant, mask: MODIFY, inherit: Inherit::Tree },
-        Entry { sid: sid::SYN_SID, mode: Mode::Grant, mask: MODIFY, inherit: Inherit::Tree },
-    ]
+/// The sandbox token keeps the user SID, so an ACE for it is what makes a folder writable.
+fn sandbox_write(sbx_sid: &str) -> [Entry<'_>; 1] {
+    [Entry { sid: sbx_sid, mode: Mode::Grant, mask: MODIFY, inherit: Inherit::Tree }]
+}
+
+/// FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY: "create files / folders" on a directory.
+pub const DENY_CREATE: u32 = 0x2 | 0x4;
+
+/// Roots where the `Users` group may create files (the sandbox token keeps `Users`, it is needed
+/// to read the system). Setup denies the sandbox user there; other Users-writable folders deeper
+/// down stay writable (documented limit).
+fn shared_roots() -> Vec<PathBuf> {
+    let mut v = vec![];
+    if let Some(p) = std::env::var_os("ProgramData") {
+        v.push(PathBuf::from(p));
+    }
+    if let Some(w) = std::env::var_os("SystemRoot") {
+        v.push(PathBuf::from(w).join("Temp"));
+    }
+    v
 }
 
 /// Remove everything setup and grants created. Must run elevated.
@@ -159,10 +179,19 @@ pub fn uninstall_elevated() -> Result<()> {
         }
     }
     if let Some(sbx) = &sbx_sid {
+        for root in shared_roots() {
+            // Revoke removes every ACE (allow or deny) for the SID on that object only.
+            if let Err(e) = acl::apply(&root, &[Entry { sid: sbx, mode: Mode::Revoke, mask: 0, inherit: Inherit::None }]) {
+                errors.push(format!("{}: {e:#}", root.display()));
+            }
+        }
         let w = wide(sbx);
         unsafe {
             let _ = DeleteProfileW(PCWSTR(w.as_ptr()), PCWSTR::null(), PCWSTR::null());
         }
+    }
+    if let Err(e) = super::firewall::remove() {
+        errors.push(format!("firewall rule: {e:#}"));
     }
     if let Err(e) = account::delete(USER) {
         errors.push(format!("delete user: {e:#}"));
@@ -209,11 +238,15 @@ pub fn status() -> SandboxStatus {
             return SandboxStatus::Degraded(format!("missing {}", d.display()));
         }
     }
+    // Without the firewall rule the sandbox could reach the network directly, bypassing the proxy.
+    if let Err(reason) = super::firewall::check(&st.user_sid) {
+        return SandboxStatus::Degraded(reason);
+    }
     SandboxStatus::Ready
 }
 
-/// Let the sandbox write in `ws` (both its user SID and the 5ilence SID, inherited by everything
-/// below), deny it `.silence/`, and create its temp dir. No admin needed: the user owns `ws`.
+/// Let the sandbox user write in `ws` (inherited by everything below), deny it `.silence/`, and
+/// create its temp dir. No admin needed: the user owns `ws`.
 /// The first grant of a big tree is slow (ACL propagation walks every file).
 pub fn grant_workspace(ws: &Path) -> Result<Duration> {
     let mut st = State::load()?.ok_or_else(|| anyhow!("sandbox is not installed"))?;
@@ -249,7 +282,13 @@ where
 {
     let tmp = state::tmp_for(&canonical(ws).unwrap_or_else(|_| ws.to_path_buf()));
     let home = state::home_dir();
-    let overrides: [(&str, PathBuf); 7] = [
+    let overrides: [(&str, PathBuf); 9] = [
+        // Schannel checks certificate revocation (CRL/OCSP) by connecting directly, which the
+        // firewall blocks → CRYPT_E_REVOCATION_OFFLINE. Soft-fail instead, like browsers:
+        // curl reads `ssl-revoke-best-effort` from $CURL_HOME/.curlrc (see `ensure_tool_config`),
+        // cargo has no best-effort mode, only on/off.
+        ("CURL_HOME", home.clone()),
+        ("CARGO_HTTP_CHECK_REVOKE", PathBuf::from("false")),
         ("TEMP", tmp.clone()),
         ("TMP", tmp),
         ("USERPROFILE", home.clone()),
@@ -267,6 +306,17 @@ where
         env.push((k.to_string(), v.to_string_lossy().into_owned()));
     }
     env
+}
+
+/// Tool config files in the sandbox home that `default_env` relies on. Idempotent; the installing
+/// user can write the home folder (setup grants Modify on %ProgramData%\silence-sbx).
+pub fn ensure_tool_config() -> Result<()> {
+    let curlrc = state::home_dir().join(".curlrc");
+    if !curlrc.exists() {
+        std::fs::write(&curlrc, "# 5ilence sandbox: revocation servers are unreachable (firewall), soft-fail.\nssl-revoke-best-effort\n")
+            .with_context(|| format!("write {}", curlrc.display()))?;
+    }
+    Ok(())
 }
 
 fn canonical(p: &Path) -> Result<PathBuf> {

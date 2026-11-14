@@ -30,6 +30,9 @@ pub fn run(spec: &RunSpec, engine_exe: &Path, timeout: Option<Duration>) -> Resu
     let password = String::from_utf8(account::unprotect(&std::fs::read(state::cred_path()).context("read cred.bin")?)?)
         .context("password is not UTF-8")?;
     let runner = stage_runner(engine_exe)?;
+    if let Err(e) = super::setup::ensure_tool_config() {
+        tracing::warn!("sandbox: tool config: {e:#}");
+    }
 
     let (in_r, in_w) = pipe(true, false)?;
     let (out_r, out_w) = pipe(false, true)?;

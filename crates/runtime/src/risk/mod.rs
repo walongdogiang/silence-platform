@@ -531,7 +531,7 @@ pub fn classify_command(cmd: &str, ws: &Path, v: &mut Verdict) {
             None if first.contains('/') || first.contains('\\') => "RUN_SCRIPT".to_string(),
             None => "UNKNOWN_COMMAND".to_string(),
         };
-        if code == "NET_ACCESS" || code == "GIT_NETWORK" || code == "PKG_INSTALL" || code == "PKG_EXEC" {
+        if matches!(code.as_str(), "NET_ACCESS" | "GIT_NETWORK" | "PKG_INSTALL" | "PKG_EXEC" | "PKG_PUBLISH") {
             has_network = true;
         }
         if p.downloaders.contains(&prog) {

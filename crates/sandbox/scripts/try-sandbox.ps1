@@ -26,6 +26,10 @@ $checks = @(
   @{ n = 'ghi thu muc khac tren D:'; ok = $false; c = "Set-Content -LiteralPath '$other\x.txt' 'x'" },
   @{ n = 'ghi .silence trong workspace'; ok = $false; c = "Set-Content -LiteralPath '$ws\.silence\x.txt' 'x'" },
   @{ n = 'doc profile user that'; ok = $false; c = "Get-ChildItem -LiteralPath '$env:USERPROFILE' -Force | Out-Null" },
+  @{ n = 'tao file o goc C:\ProgramData'; ok = $false; c = "Set-Content -LiteralPath 'C:\ProgramData\5ilence-sbx-probe.txt' 'x'" },
+  @{ n = 'tao file o goc C:\Windows\Temp'; ok = $false; c = "Set-Content -LiteralPath 'C:\Windows\Temp\5ilence-sbx-probe.txt' 'x'" },
+  @{ n = 'tao file o C:\Users\Public'; ok = $false; c = "Set-Content -LiteralPath 'C:\Users\Public\5ilence-sbx-probe.txt' 'x'" },
+  @{ n = 'tao thu muc o goc C:\'; ok = $false; c = "New-Item -ItemType Directory 'C:\5ilence-sbx-probe' | Out-Null" },
   @{ n = 'env khong lo SILENCE_API_KEY'; ok = $true; c = "if (`$env:SILENCE_API_KEY) { throw 'leaked' }" },
   @{ n = 'git/node chay duoc'; ok = $true; c = "git --version; if (!`$?) { throw 'git' }; node --version; if (!`$?) { throw 'node' }" }
 )

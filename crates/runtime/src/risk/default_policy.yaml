@@ -98,6 +98,11 @@ codes:
     title: Tải và chạy package tạm
     detail: npx/pnpm dlx/uvx tải package từ mạng rồi chạy ngay.
     hint: Downloads and runs a package; ask the user.
+  PKG_PUBLISH:
+    tier: ask
+    title: Phát hành package
+    detail: Đẩy package lên registry công khai (npm, crates.io, PyPI, NuGet). Không thu hồi được hoàn toàn.
+    hint: Publishing uploads to a public registry and cannot be undone; ask the user.
   GIT_NETWORK:
     tier: ask
     title: Git qua mạng
@@ -304,7 +309,18 @@ commands:
   - { match: [npm, ci], code: PKG_INSTALL }
   - { match: [npm, add], code: PKG_INSTALL }
   - { match: [npm, update], code: PKG_INSTALL }
-  - { match: [npm, publish], code: GIT_NETWORK }
+  - { match: [npm, publish], code: PKG_PUBLISH }
+  - { match: [pnpm, publish], code: PKG_PUBLISH }
+  - { match: [yarn, publish], code: PKG_PUBLISH }
+  - { match: [yarn, npm], code: PKG_PUBLISH }
+  - { match: [bun, publish], code: PKG_PUBLISH }
+  - { match: [cargo, publish], code: PKG_PUBLISH }
+  - { match: [twine, upload], code: PKG_PUBLISH }
+  - { match: [poetry, publish], code: PKG_PUBLISH }
+  - { match: [uv, publish], code: PKG_PUBLISH }
+  - { match: [dotnet, nuget], code: PKG_PUBLISH }
+  - { match: [nuget, push], code: PKG_PUBLISH }
+  - { match: [gem, push], code: PKG_PUBLISH }
   - { match: [npm, exec], code: PKG_EXEC }
   - { match: [pnpm, install], code: PKG_INSTALL }
   - { match: [pnpm, i], code: PKG_INSTALL }
@@ -453,7 +469,7 @@ upload_flags: ["-d", "--data", "--data-binary", "-f", "--form", "-t", "--upload-
 # Secret path patterns (case-insensitive, matched on path basename or any segment).
 secret_patterns: [".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12", "id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", ".ssh", ".aws", ".npmrc", ".pypirc", ".git-credentials", ".netrc", "credentials", "credentials.json", "secrets.*"]
 # Codes that always re-ask: "remember" is ignored for a verdict containing any of them.
-never_remember: [GIT_DESTRUCTIVE, FS_DELETE, FS_OUTSIDE_WS, SECRET_READ, ENV_READ, UNPARSED, DYNAMIC_EXEC, INLINE_CODE, TAINTED_CONTEXT, UNKNOWN_TOOL]
+never_remember: [PKG_PUBLISH, GIT_DESTRUCTIVE, FS_DELETE, FS_OUTSIDE_WS, SECRET_READ, ENV_READ, UNPARSED, DYNAMIC_EXEC, INLINE_CODE, TAINTED_CONTEXT, UNKNOWN_TOOL]
 # Codes whose approved run feeds arbitrary outside text to the model (sets session taint).
 # Package/git logs are not included: their output is tool chatter, not fetched content.
 taint_codes: [NET_ACCESS, MCP_CALL, MCP_READ]

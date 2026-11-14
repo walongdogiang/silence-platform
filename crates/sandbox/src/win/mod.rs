@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod acl;
+pub mod firewall;
 pub mod job;
 pub mod launch;
 pub mod proc;
