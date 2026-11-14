@@ -101,10 +101,53 @@ enum Cmd {
         #[arg(long)]
         token: String,
     },
+    /// Sandbox for agent commands (Windows). `setup` asks for admin (UAC) once.
+    Sandbox {
+        #[command(subcommand)]
+        action: SandboxCmd,
+    },
+    /// Internal: runs one sandboxed command as the sandbox user (spec on stdin).
+    #[command(hide = true)]
+    SandboxRunner,
+}
+
+#[derive(Subcommand)]
+enum SandboxCmd {
+    /// Create the hidden sandbox user, its folders and encrypted password (one UAC prompt).
+    Setup {
+        #[arg(long, hide = true)]
+        elevated: bool,
+    },
+    /// Remove the sandbox user, folders, and every ACE it got on workspaces (one UAC prompt).
+    Uninstall {
+        #[arg(long, hide = true)]
+        elevated: bool,
+    },
+    /// Print the sandbox state as JSON.
+    Status,
+    /// Let the sandbox write in a workspace (or only read it, with --read).
+    Grant {
+        path: PathBuf,
+        #[arg(long)]
+        read: bool,
+    },
+    /// Run a PowerShell command in the sandbox, in a granted workspace. For manual testing.
+    Exec {
+        #[arg(long)]
+        ws: PathBuf,
+        #[arg(long, default_value_t = 120)]
+        timeout_secs: u64,
+        #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // The runner's stdout/stderr ARE the sandboxed command's output: no logging, no clap help.
+    if std::env::args().nth(1).as_deref() == Some(silence_sandbox::RUNNER_ARG) {
+        std::process::exit(silence_sandbox::runner_main());
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -182,6 +225,56 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Cmd::McpBridge { port, token } => silence_engine::agent::run_bridge(port, &token).await,
+        Cmd::SandboxRunner => std::process::exit(silence_sandbox::runner_main()),
+        Cmd::Sandbox { action } => tokio::task::spawn_blocking(move || sandbox_cmd(action)).await?,
+    }
+}
+
+fn sandbox_cmd(action: SandboxCmd) -> Result<()> {
+    use std::io::Write;
+    let exe = std::env::current_exe()?;
+    match action {
+        SandboxCmd::Setup { elevated: true } => silence_sandbox::setup_elevated(),
+        SandboxCmd::Setup { elevated: false } => {
+            silence_sandbox::setup(&exe)?;
+            println!("{}", serde_json::to_string(&silence_sandbox::status())?);
+            Ok(())
+        }
+        SandboxCmd::Uninstall { elevated: true } => silence_sandbox::uninstall_elevated(),
+        SandboxCmd::Uninstall { elevated: false } => silence_sandbox::uninstall(&exe),
+        SandboxCmd::Status => {
+            println!("{}", serde_json::to_string(&silence_sandbox::status())?);
+            Ok(())
+        }
+        SandboxCmd::Grant { path, read: true } => silence_sandbox::grant_read(&path),
+        SandboxCmd::Grant { path, read: false } => {
+            let took = silence_sandbox::grant_workspace(&path)?;
+            eprintln!("granted {} in {} ms", path.display(), took.as_millis());
+            Ok(())
+        }
+        SandboxCmd::Exec { ws, timeout_secs, command } => {
+            let script = command.join(" ");
+            let spec = silence_sandbox::RunSpec {
+                command_line: format!(
+                    "powershell.exe -NoProfile -NonInteractive -Command \"{}\"",
+                    script.replace('"', "\\\"")
+                ),
+                cwd: ws.clone(),
+                env: silence_sandbox::default_env(&ws),
+                limits: silence_sandbox::Limits::standard(),
+            };
+            let t = std::time::Instant::now();
+            let out = silence_sandbox::run(&spec, &exe, Some(std::time::Duration::from_secs(timeout_secs)))?;
+            std::io::stdout().write_all(&out.stdout)?;
+            std::io::stderr().write_all(&out.stderr)?;
+            eprintln!(
+                "[sandbox] exit={} timed_out={} {} ms",
+                out.code,
+                out.timed_out,
+                t.elapsed().as_millis()
+            );
+            std::process::exit(if out.timed_out { 124 } else { out.code });
+        }
     }
 }
 
