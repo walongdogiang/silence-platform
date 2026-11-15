@@ -1,11 +1,10 @@
 name: ci
 
-# Chạy trên mọi PR vào main và mỗi lần push main. Không gọi model, không cần secret.
+# Chạy trên mọi PR (base bất kỳ, kể cả PR xếp chồng) và mỗi lần push main. Không gọi model, không cần secret.
 # Eval tốn API nên chỉ chạy ở workflow nightly-evals (evals.yml).
 
 on:
   pull_request:
-    branches: [main]
     paths-ignore:
       - "docs/**"
       - "**/*.md"

@@ -4,10 +4,10 @@ name: docs-check
 # - rule đôi .claude/rules/*.md ↔ .cursor/rules/*.mdc phải khớp (thân + path);
 # - mọi docs/**/*.md (trừ archive/) có frontmatter hợp lệ và có trong mục lục.
 # Tách khỏi ci.yml vì ci.yml bỏ qua thay đổi chỉ chạm **/*.md. Không cần npm install.
+# Chạy trên mọi PR (base bất kỳ, kể cả PR xếp chồng) và mỗi lần push main.
 
 on:
   pull_request:
-    branches: [main]
     paths:
       - ".claude/rules/**"
       - ".cursor/rules/**"
