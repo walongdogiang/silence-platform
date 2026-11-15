@@ -71,6 +71,8 @@ pub(super) async fn run_subagent(
                 usd,
                 slot: pick.slot_str(),
                 baseline_usd: baseline_usd(&ctx.catalog, &pick, &result, usd),
+                cache_read_tokens: result.cache_read_tokens,
+                cache_write_tokens: result.cache_write_tokens,
             },
         );
         if result.tool_calls.is_empty() {

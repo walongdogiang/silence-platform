@@ -55,6 +55,27 @@ tasks:
     pass_if:
       test: test_mul
 
+  # Khối "Runtime environment" (crates/runtime/src/agent/env.rs): agent trả lời câu hỏi về chính
+  # nó từ dữ kiện harness đưa, không đoán. Model biết tên mình từ lúc huấn luyện, nên check phân
+  # biệt là effort `low` (chỉ có trong khối env) và cách hỏi khác lối.
+  - id: M06-ask-runtime-env
+    kind: explore
+    mode: ask
+    model: claude-haiku
+    effort: low
+    prompt: "Cho tôi biết bạn đang chạy model gì, qua nguồn nào, và effort đang để mức nào. Trả lời ngắn."
+    pass_if:
+      unchanged:
+        - src/calc.py
+      report_mentions:
+        - Haiku
+        - low
+      max_report_chars: 800
+    # Chặn tốn kém: trả lời từ khối env trong một lần gọi; đi đọc file hay lặp là hồi quy dù
+    # câu trả lời đúng. Cũng kiểm khối env vẫn tới được model sau khi tách khỏi system tĩnh.
+    budget:
+      max_turns: 3
+
   # Model Auto: chọn slot theo mode + mục đích, không đọc prompt (crates/runtime/src/agent/auto.rs).
   # Kiểm slot qua dòng `route` trong audit (`detail.slot`). Metrics ghi `slots`, `escalated`, `usd_by_slot`.
   - id: A01-auto-plan-frontier
@@ -101,6 +122,21 @@ tasks:
       audit_matches:
         - '"kind":"route".*"slot":"strong"'
 
+  - id: A04-auto-knows-route
+    kind: explore
+    mode: ask
+    model: auto
+    # Hỏi gián tiếp: agent phải nói được model do Auto chọn (không phải user) và slot hiện tại.
+    prompt: "Ai chọn model cho câu trả lời này, tôi hay app? Nếu là app thì đang ở mức (slot) nào?"
+    pass_if:
+      unchanged:
+        - src/calc.py
+      report_mentions:
+        - Auto
+        - strong
+      audit_matches:
+        - '"kind":"route".*"slot":"strong"'
+
   - id: S01-style-concise
     kind: explore
     mode: ask
@@ -115,3 +151,66 @@ tasks:
         - mean
         - ZeroDivisionError
       max_report_chars: 600
+
+  # Ngôn ngữ trả lời do Engine quyết (crates/runtime/src/lang.rs → dòng "Reply language" trong
+  # <turn_context>). L01: một câu tiếng Việt ngắn kèm traceback tiếng Anh dài — trước đây model dễ
+  # trả lời theo phần log. L02: câu tiếng Anh thì vẫn trả lời tiếng Anh (không ép tiếng Việt).
+  - id: L01-reply-lang-vi-with-english-log
+    kind: explore
+    mode: ask
+    prompt: |
+      lỗi gì đây?
+      Traceback (most recent call last):
+        File "tests/runner.py", line 12, in <module>
+          print(mean([]))
+        File "src/stats.py", line 5, in mean
+          return sum(values) / len(values)
+      ZeroDivisionError: division by zero
+    pass_if:
+      unchanged:
+        - src/stats.py
+      report_mentions:
+        - mean
+      report_lang: vi
+    budget:
+      max_turns: 4
+
+  - id: L02-reply-lang-en
+    kind: explore
+    mode: ask
+    prompt: "Why does mean() in src/stats.py crash on an empty list? Answer briefly."
+    pass_if:
+      unchanged:
+        - src/stats.py
+      report_mentions:
+        - ZeroDivisionError
+      report_lang: en
+    budget:
+      max_turns: 4
+
+  # Chỉ dẫn workspace (crates/runtime/src/org.rs). I01: vendor/AGENTS.md lồng nhau chỉ tới với
+  # kết quả read/edit đầu tiên trong vendor/ (không có trong system prompt), agent phải theo nó.
+  # I02: system chỉ liệt kê tên + mô tả skill; mã RN-7 chỉ có trong thân skill, nên report có
+  # RN-7 nghĩa là agent đã gọi tool `skill`.
+  - id: I01-nested-agents-md
+    kind: edit
+    mode: agent
+    prompt: "Thêm hàm report_total(rows) vào vendor/legacy_report.py: trả tổng row.get(\"v1\", 0) của mọi row."
+    pass_if:
+      grep:
+        - path: vendor/legacy_report.py
+          pattern: '# patched-by-agent\s+def report_total'
+      unchanged:
+        - src/calc.py
+
+  - id: I02-skill-on-demand
+    kind: explore
+    mode: ask
+    prompt: "Viết release notes cho thay đổi: mul() trong src/calc.py giờ nhân đúng thay vì cộng."
+    pass_if:
+      unchanged:
+        - src/calc.py
+      report_mentions:
+        - RN-7
+    budget:
+      max_turns: 4

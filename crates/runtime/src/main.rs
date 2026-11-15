@@ -64,6 +64,13 @@ enum Cmd {
         /// Effort for every task (low|medium|high|xhigh|max).
         #[arg(long)]
         effort: Option<String>,
+        /// Least recently run tasks first (history), so a capped run rotates through the suite.
+        #[arg(long)]
+        rotate: bool,
+        /// Only tasks a change since this commit can affect (evals/affects.yaml); none = exit 0
+        /// without calling a model.
+        #[arg(long)]
+        affected_since: Option<String>,
     },
     /// Pin the cheapest passing model per task in <suite>/models.yaml.
     EvalsCalibrate {
@@ -86,6 +93,32 @@ enum Cmd {
         max_cost: f64,
         #[arg(long)]
         history: bool,
+        /// Run the ladder on this source (default: `source` in evals/config.yaml). Pins keep the
+        /// base ids (`claude-haiku`…), so they work for every source.
+        #[arg(long)]
+        source: Option<String>,
+    },
+    /// Run a profile (smoke | nightly | weekly) on the source of evals/config.yaml. Same steps on
+    /// a dev PC (`npm run evals:smoke`) and in CI (`--ci`).
+    EvalsProfile {
+        #[arg(long)]
+        profile: String,
+        /// Provider id or `per-task`; default: evals/config.yaml (`ci.source` with --ci).
+        #[arg(long)]
+        source: Option<String>,
+        /// CI run: use `ci.source`, do nothing while CI is off.
+        #[arg(long)]
+        ci: bool,
+        /// Only tasks a change since this commit can affect (evals/affects.yaml).
+        #[arg(long)]
+        affected_since: Option<String>,
+        /// Check the settings and the source only; print `skip=true|false`.
+        #[arg(long)]
+        check: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        repo_root: Option<PathBuf>,
     },
     /// Regenerate evals/history/SUMMARY.md from runs.jsonl (no API calls).
     EvalsReport {
@@ -182,9 +215,14 @@ async fn main() -> Result<()> {
             profile,
             source,
             effort,
+            rotate,
+            affected_since,
         } => {
             let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
             let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
+            // No --source: the local default of evals/config.yaml (`per-task` = pinned models).
+            let settings = silence_engine::eval_config::load(&repo)?;
+            let source = silence_engine::eval_config::resolve_source(source.as_deref(), &settings.source);
             let opts = silence_engine::eval_runner::RunOptions {
                 model,
                 only,
@@ -196,6 +234,8 @@ async fn main() -> Result<()> {
                 profile,
                 source,
                 effort,
+                rotate,
+                affected_since,
             };
             let code = silence_engine::eval_runner::run(&dir, &cfg, &repo, &opts).await?;
             std::process::exit(code);
@@ -209,15 +249,18 @@ async fn main() -> Result<()> {
             repeat,
             max_cost,
             history,
+            source,
         } => {
             let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
             let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
+            let settings = silence_engine::eval_config::load(&repo)?;
             let opts = silence_engine::eval_calibrate::CalibrateOptions {
                 only,
                 all,
                 repeat,
                 max_cost,
                 history,
+                source: silence_engine::eval_config::resolve_source(source.as_deref(), &settings.source),
             };
             let code = silence_engine::eval_calibrate::calibrate(&dir, &cfg, &repo, &opts).await?;
             std::process::exit(code);
@@ -227,6 +270,13 @@ async fn main() -> Result<()> {
             let path = silence_engine::eval_history::write_summary(&repo)?;
             println!("{}", path.display());
             Ok(())
+        }
+        Cmd::EvalsProfile { profile, source, ci, affected_since, check, config, repo_root } => {
+            let repo = repo_root.unwrap_or_else(|| PathBuf::from("."));
+            let cfg = config.unwrap_or_else(|| repo.join("config/models.yaml"));
+            let o = silence_engine::eval_profile::ProfileOptions { profile, source, ci, affected_since, check };
+            let code = silence_engine::eval_profile::run_profile(&repo, &cfg, &o).await?;
+            std::process::exit(code);
         }
         Cmd::McpBridge { port, token } => silence_engine::agent::run_bridge(port, &token).await,
         Cmd::SandboxRunner => std::process::exit(silence_sandbox::runner_main()),

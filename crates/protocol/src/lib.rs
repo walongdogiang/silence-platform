@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.18";
+pub const PROTOCOL_VERSION: &str = "0.1.19";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -346,6 +346,10 @@ pub struct PromptParams {
     /// Images pasted into the composer, as `data:image/<png|jpeg|gif|webp>;base64,...` URLs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
+    /// Studio UI language (`vi` | `en`, 0.1.19). The Engine names a reply language in the turn
+    /// context from the user's own words; this fills in when they are unclear ("ok", a log).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_lang: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -466,6 +470,12 @@ pub enum SessionEvent {
         /// Same tokens priced on the source's strongest model (the "all Opus" baseline).
         #[serde(default)]
         baseline_usd: f64,
+        /// Part of `input_tokens` read from the provider's prompt cache (0 when unknown).
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        cache_read_tokens: u32,
+        /// Part of `input_tokens` written to the prompt cache.
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        cache_write_tokens: u32,
     },
     Terminal {
         data: String,
@@ -629,7 +639,8 @@ pub struct SessionResumeResult {
 }
 
 /// Lỗi lượt đã chuẩn hóa. `code`: PROVIDER_CREDITS | PROVIDER_AUTH | PROVIDER_RATE |
-/// PROVIDER_UNAVAILABLE | NETWORK | TIMEOUT | UNKNOWN. `detail` đã lọc secret + cắt ngắn.
+/// PROVIDER_UNAVAILABLE | NETWORK | TIMEOUT | PROVIDER_REFUSAL | CLI_NOT_FOUND | CLI_AUTH |
+/// CLI_LIMIT | UNKNOWN. `detail` đã lọc secret + cắt ngắn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorInfo {
     pub code: String,
@@ -846,4 +857,8 @@ mod tests {
         assert_eq!(v["error"]["status"], 402);
         assert_eq!(v["error"]["retryable"], false);
     }
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }

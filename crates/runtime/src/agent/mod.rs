@@ -1,6 +1,10 @@
 use crate::audit::{now_event, AuditLog};
-use crate::compact::{compact_if_needed, estimate_tokens, messages_tokens};
+use crate::compact::{
+    compact_if_needed, compact_with_summary, estimate_tokens, messages_tokens, needs_compaction,
+    summarize_span,
+};
 use crate::gateway::{self, ToolCall};
+use crate::lang::{self, ReplyLang};
 use crate::org::{self, OrgContext};
 use crate::permissions;
 use crate::provider_error::{sanitize, ErrorCode, ProviderError};
@@ -24,6 +28,7 @@ mod auto;
 mod browser;
 mod changes;
 mod cli;
+mod env;
 mod history;
 mod modes;
 mod plan;
@@ -55,6 +60,7 @@ pub(crate) const DENIED_BY_USER: &str = "permission denied by user";
 
 use auto::*;
 use changes::*;
+use env::*;
 use modes::*;
 use policy::*;
 use subagent::*;
@@ -83,6 +89,10 @@ pub struct Session {
     /// Answer style (`default` | `concise` | `explanatory`). Memory only: the UI re-sends it
     /// before each turn (`session.set_style`), like the effort.
     pub style: String,
+    /// Language the next reply should use (`lang::decide`), named in the turn context. Updated
+    /// on every prompt; `None` leaves it to the model. Memory only: the UI re-sends its language
+    /// with each prompt, which covers a resumed session.
+    pub reply_lang: Option<ReplyLang>,
     /// Claude CLI conversation id (`--resume`) while the session stays on a CLI model.
     /// Memory only; cleared when the model changes.
     pub cli_session: Option<String>,
@@ -193,6 +203,7 @@ pub async fn create_session(
         model,
         effort: "auto".into(),
         style: "default".into(),
+        reply_lang: None,
         cli_session: None,
         messages: vec![json!({"role":"system","content": system})],
         logged_len: 0,
@@ -270,16 +281,18 @@ fn emit(tx: &Option<mpsc::UnboundedSender<SessionEvent>>, ev: SessionEvent) {
 }
 
 pub async fn prompt(ctx: Arc<AppCtx>, session_id: String, text: String) -> Result<()> {
-    prompt_with_images(ctx, session_id, text, Vec::new()).await
+    prompt_with_images(ctx, session_id, text, Vec::new(), None).await
 }
 
 /// Like `prompt`, with images pasted in the composer (`data:` URLs, checked by
-/// `images::validate`). Refuses up front when the user picked a model without vision.
+/// `images::validate`) and the UI language (fallback for the reply language). Refuses up front
+/// when the user picked a model without vision.
 pub async fn prompt_with_images(
     ctx: Arc<AppCtx>,
     session_id: String,
     text: String,
     images: Vec<String>,
+    ui_lang: Option<ReplyLang>,
 ) -> Result<()> {
     let session_arc = ctx
         .sessions
@@ -288,6 +301,13 @@ pub async fn prompt_with_images(
         .get(&session_id)
         .cloned()
         .ok_or_else(|| anyhow!("unknown session"))?;
+    // One Unicode form in history: Vietnamese pasted as NFD (base letter + combining marks)
+    // looks the same but searches and tokenizes differently from what the model writes.
+    let text = silence_tools::unicode::nfc(&text);
+    {
+        let mut s = session_arc.lock().await;
+        s.reply_lang = lang::decide(&text, s.reply_lang, ui_lang);
+    }
     if !images.is_empty() {
         let requested = session_arc.lock().await.model.clone();
         if requested != "auto" && !requested.is_empty() {
@@ -460,21 +480,54 @@ async fn run_turn(
                 .await;
         }
 
-        let (messages, tools) = {
+        // Compaction with a summary of the dropped turns (cheap model). The summary call runs on
+        // a copy without the session lock: `record_aux_cost` locks the session again.
+        let pending = {
+            let s = session_arc.lock().await;
+            needs_compaction(&s.messages, context_window).then(|| (s.messages.clone(), s.id.clone()))
+        };
+        if let Some((mut working, sid)) = pending {
+            let (len_before, last_before) = (working.len(), working.last().cloned());
+            compact_with_summary(&mut working, context_window, |span: Vec<Value>| {
+                let (ctx, sid) = (&ctx, &sid);
+                async move {
+                    match summarize_span(ctx, sid, &span).await {
+                        Ok(text) => Some(text),
+                        Err(err) => {
+                            tracing::warn!("compaction summary failed, dropping turns without it: {err}");
+                            None
+                        }
+                    }
+                }
+            })
+            .await;
             let mut s = session_arc.lock().await;
-            if compact_if_needed(&mut s.messages, context_window) {
-                let snapshot = s.messages.clone();
-                let id = s.id.clone();
-                log_append(&ctx, &id, LogBody::MessagesReplaced { messages: snapshot }).await;
-                s.logged_len = s.messages.len();
+            if s.messages.len() == len_before && s.messages.last() == last_before.as_ref() {
+                s.messages = working;
+            } else {
+                // History moved while the summary was being written: plain compaction.
+                compact_if_needed(&mut s.messages, context_window);
             }
+            let snapshot = s.messages.clone();
+            log_append(&ctx, &sid, LogBody::MessagesReplaced { messages: snapshot }).await;
+            s.logged_len = s.messages.len();
+        }
+
+        let (messages, tools) = {
+            let s = session_arc.lock().await;
             let prof = profile(s.mode);
             debug_assert_eq!(prof.read_only, read_only);
-            let mut tools = builtin_tools(s.mode);
+            let mut tools = session_tools(&s);
             if let Some(arr) = tools.as_array_mut() {
                 arr.extend(mcp_tools(&ctx, read_only).await);
             }
-            (with_mode_system(&s.messages, &turn_system(prof.system, &s.style)), tools)
+            let model = ctx.catalog.resolve(&model_id)?;
+            let sent_effort = (!model.efforts.is_empty()).then_some(effort.as_str());
+            let env = RuntimeEnv::new(&ctx.catalog, &s, &model, &pick, sent_effort);
+            // Stored history as is, then mode + style + env as the last message: see `env.rs`
+            // for the prompt-cache layout.
+            let block = turn_context(&turn_system(prof.system, &s.style), &env);
+            (with_turn_context(&s.messages, block), tools)
         };
 
         let mut token_buf = String::new();
@@ -579,6 +632,8 @@ async fn run_turn(
                 usd,
                 slot: pick.slot_str(),
                 baseline_usd: baseline_usd(&ctx.catalog, &pick, &result, usd),
+                cache_read_tokens: result.cache_read_tokens,
+                cache_write_tokens: result.cache_write_tokens,
             },
         );
         let sid = {
@@ -647,6 +702,8 @@ async fn run_turn(
         // message right after this round's tool results (tool results must follow the call).
         let mut viewed: Vec<(String, String)> = Vec::new();
         for tc in result.tool_calls {
+            // History keeps the grouped call as the model sent it; dispatch uses the op name.
+            let tc = expand_grouped_call(tc);
             let output = if tc.name == "view_image" {
                 view_image(&session_arc, &tx, &tc).await.map(|(text, img)| {
                     viewed.extend(img);
@@ -757,6 +814,30 @@ fn preview_model(catalog: &Catalog, requested: &str, mode: SessionMode, source: 
     Ok(catalog.route_auto(source, mode_slot(catalog, source, mode), false)?.model_id)
 }
 
+/// `proc` / `browser` calls (one schema per family, see `procs::spec`, `browser::spec`) →
+/// the per-op tool (`proc_start`, `browser_open`…) that dispatch, risk rules, audit, UI and evals
+/// know. `op` is removed from the arguments; the call id is kept. Other calls pass through.
+pub(super) fn expand_grouped_call(tc: ToolCall) -> ToolCall {
+    let prefix = match tc.name.as_str() {
+        procs::TOOL => "proc_",
+        browser::TOOL => "browser_",
+        _ => return tc,
+    };
+    let mut args: Value = serde_json::from_str(&tc.arguments).unwrap_or_else(|_| json!({}));
+    let op = args
+        .as_object_mut()
+        .and_then(|o| o.remove("op"))
+        .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
+        .unwrap_or_default();
+    // A missing or bad op lands on an unknown tool name, which dispatch reports to the model.
+    let name = if op.is_empty() || !op.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+        format!("{}(op?)", tc.name)
+    } else {
+        format!("{prefix}{op}")
+    };
+    ToolCall { id: tc.id, name, arguments: args.to_string() }
+}
+
 /// Built-in tool definitions for a mode (no MCP): workspace tools, mode tools, `task`.
 fn builtin_tools(mode: SessionMode) -> Value {
     let prof = profile(mode);
@@ -794,8 +875,8 @@ fn builtin_tools(mode: SessionMode) -> Value {
         }));
     }
     arr_extend_task(&mut tools, prof.read_only);
-    tools.as_array_mut().unwrap().extend(browser::specs(prof.read_only));
-    tools.as_array_mut().unwrap().extend(procs::specs(prof.read_only));
+    tools.as_array_mut().unwrap().push(procs::spec(prof.read_only));
+    tools.as_array_mut().unwrap().push(browser::spec(prof.read_only));
     // Read-only, so every mode gets it. Not given to sub-agents (their loop has no image path).
     let view = silence_tools::image::spec_view_image();
     tools.as_array_mut().unwrap().push(json!({
@@ -803,6 +884,45 @@ fn builtin_tools(mode: SessionMode) -> Value {
         "function": {"name": view.name, "description": view.description, "parameters": view.parameters}
     }));
     tools
+}
+
+/// [`builtin_tools`] plus `skill` when the workspace has skills (fixed per session: the tool
+/// list is part of the cached prompt prefix).
+fn session_tools(s: &Session) -> Value {
+    let mut tools = builtin_tools(s.mode);
+    if !s.org.skills.is_empty() {
+        tools.as_array_mut().unwrap().push(skill_spec());
+    }
+    tools
+}
+
+/// `skill`: return one workspace skill's instructions (`org::skill_text`). Read-only.
+fn skill_spec() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "skill",
+            "description": "Load the full instructions of a workspace skill listed under # Skills in the system prompt. Call it before doing a task that matches the skill's description, then follow what it returns.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Skill name exactly as listed."}},
+                "required": ["name"]
+            }
+        }
+    })
+}
+
+/// Instruction files of subdirectories (`org::OrgContext::nested_for`) for the file a
+/// successful `read`/`outline`/`write`/`edit` touched, to append to the model's tool result.
+async fn nested_note(session_arc: &Arc<Mutex<Session>>, tool: &str, args: &Value) -> Option<String> {
+    if !matches!(tool, "read" | "outline" | "write" | "edit") {
+        return None;
+    }
+    let rel = args.get("path").and_then(Value::as_str)?;
+    let mut s = session_arc.lock().await;
+    let path = s.workspace.resolve(rel).ok()?;
+    let root = s.workspace.root.clone();
+    s.org.nested_for(&root, &path)
 }
 
 /// Marks the user message that carries `view_image` results, so history views can skip it.
@@ -1027,6 +1147,11 @@ async fn dispatch_tool(
     if browser::NAMES.contains(&tc.name.as_str()) {
         return browser::dispatch(ctx, session_arc, tx, tc, &args).await;
     }
+    // A grouped call whose `op` is missing or unknown (see `expand_grouped_call`): tell the model
+    // instead of reaching the Risk Engine with a tool name that does not exist.
+    if tc.name.starts_with("proc_") || tc.name.starts_with("browser_") || tc.name.ends_with("(op?)") {
+        return Ok(refuse(tx, tc, "is not a valid `op` for this tool; see the `op` enum in its schema"));
+    }
     if let Some(rest) = tc.name.strip_prefix("mcp__") {
         let mut parts = rest.splitn(2, "__");
         let server = parts.next().unwrap_or("");
@@ -1103,6 +1228,24 @@ async fn dispatch_tool(
     };
     let (verdict, sandbox_hosts) = verdict;
     let is_test = verdict.codes.iter().any(|c| c == "BUILD_TEST");
+    if tc.name == "skill" {
+        let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let res = org::skill_text(&session_arc.lock().await.org, name);
+        let (ok, out) = match res {
+            Ok(t) => (true, t),
+            Err(t) => (false, t),
+        };
+        emit(
+            tx,
+            SessionEvent::ToolEnd {
+                call_id: tc.id.clone(),
+                name: tc.name.clone(),
+                ok,
+                output: out.clone(),
+            },
+        );
+        return Ok(out);
+    }
     if tc.name == "shell" {
         let payload = args.to_string();
         let org = session_arc.lock().await.org.clone();
@@ -1118,7 +1261,10 @@ async fn dispatch_tool(
         let r = stage_file_tool(ctx, session_arc, tx, tc, &args).await;
         // Staged, not written: a red test after it says nothing about the edit yet.
         record_outcome(session_arc, tc, r.is_ok(), false, false).await;
-        return r;
+        return match r {
+            Ok(text) => Ok(text + &nested_note(session_arc, &tc.name, &args).await.unwrap_or_default()),
+            Err(e) => Err(e),
+        };
     }
 
     let ws = session_arc.lock().await.workspace.clone();
@@ -1177,7 +1323,9 @@ async fn dispatch_tool(
                     output: out.output.clone(),
                 },
             );
-            Ok(out.output)
+            // After ToolEnd: the UI shows the tool's own output; only the model gets the note.
+            let note = if out.ok { nested_note(session_arc, &tc.name, &args).await } else { None };
+            Ok(out.output + &note.unwrap_or_default())
         }
         Err(err) => {
             emit(
@@ -1884,6 +2032,8 @@ mod permission_tests {
     #[test]
     fn system_prompt_has_language_and_path_rules() {
         assert!(SYSTEM.contains("language of the user's latest message"));
+        assert!(SYSTEM.contains("\"Reply language\""));
+        assert!(SYSTEM.contains("<turn_context>"));
         assert!(SYSTEM.contains("`path:line`"));
     }
 
@@ -2026,4 +2176,121 @@ mod permission_tests {
         .expect("CLI turn hung (session lock deadlock?)");
         assert_eq!(done.unwrap(), "stop");
     }
+
+    fn tc(name: &str, args: Value) -> ToolCall {
+        ToolCall { id: "c1".into(), name: name.into(), arguments: args.to_string() }
+    }
+
+    #[tokio::test]
+    async fn skills_are_listed_and_loaded_with_the_skill_tool() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let dir = ws.path().join(".silence/skills/release-notes");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "---
+description: Write release notes
+---
+Use heading RN-42.").unwrap();
+        let ctx = test_ctx(data.path());
+        let (_, s) = new_session(&ctx, ws.path()).await;
+        {
+            let g = s.lock().await;
+            let system = g.messages[0]["content"].as_str().unwrap();
+            assert!(system.contains("- release-notes: Write release notes"), "{system}");
+            assert!(!system.contains("RN-42"), "skill body must not be in the system prompt");
+            let names: Vec<String> = session_tools(&g).as_array().unwrap().iter()
+                .map(|t| t["function"]["name"].as_str().unwrap().to_string()).collect();
+            assert!(names.iter().any(|n| n == "skill"), "{names:?}");
+        }
+        let out = dispatch_tool(&ctx, &s, &None, &tc("skill", json!({"name": "release-notes"}))).await.unwrap();
+        assert!(out.contains("RN-42"), "{out}");
+        let out = dispatch_tool(&ctx, &s, &None, &tc("skill", json!({"name": "nope"}))).await.unwrap();
+        assert!(out.contains("available: release-notes"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn no_skill_tool_without_skills() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(data.path());
+        let (_, s) = new_session(&ctx, ws.path()).await;
+        let tools = session_tools(&*s.lock().await);
+        assert!(!tools.as_array().unwrap().iter().any(|t| t["function"]["name"] == "skill"));
+    }
+
+    #[tokio::test]
+    async fn nested_agents_md_arrives_with_the_first_read_in_its_directory() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        std::fs::write(ws.path().join("AGENTS.md"), "ROOT-RULE").unwrap();
+        std::fs::create_dir_all(ws.path().join("pkg")).unwrap();
+        std::fs::write(ws.path().join("pkg/AGENTS.md"), "PKG-RULE").unwrap();
+        std::fs::write(ws.path().join("pkg/a.py"), "x = 1
+").unwrap();
+        std::fs::write(ws.path().join("pkg/b.py"), "y = 2
+").unwrap();
+        let ctx = test_ctx(data.path());
+        let (_, s) = new_session(&ctx, ws.path()).await;
+        let system = s.lock().await.messages[0]["content"].as_str().unwrap().to_string();
+        assert!(system.contains("ROOT-RULE") && !system.contains("PKG-RULE"), "{system}");
+        let out = dispatch_tool(&ctx, &s, &None, &tc("read", json!({"path": "pkg/a.py"}))).await.unwrap();
+        assert!(out.contains("x = 1") && out.contains("PKG-RULE"), "{out}");
+        assert!(out.contains("path=\"pkg/AGENTS.md\""), "{out}");
+        let out = dispatch_tool(&ctx, &s, &None, &tc("read", json!({"path": "pkg/b.py"}))).await.unwrap();
+        assert!(!out.contains("PKG-RULE"), "shown once per session: {out}");
+        // The static system prompt never changes (prompt cache).
+        assert_eq!(s.lock().await.messages[0]["content"].as_str().unwrap(), system);
+    }
 }
+
+#[cfg(test)]
+mod grouped_tool_tests {
+    use super::*;
+
+    fn call(name: &str, args: Value) -> ToolCall {
+        ToolCall { id: "c1".into(), name: name.into(), arguments: args.to_string() }
+    }
+
+    #[test]
+    fn grouped_calls_expand_to_the_per_op_tool() {
+        let tc = expand_grouped_call(call("proc", json!({"op": "start", "command": "npm run dev"})));
+        assert_eq!(tc.name, "proc_start");
+        assert_eq!(tc.id, "c1");
+        assert_eq!(serde_json::from_str::<Value>(&tc.arguments).unwrap(), json!({"command": "npm run dev"}));
+        // `action` of browser act is its own argument, not the op.
+        let tc = expand_grouped_call(call("browser", json!({"op": "act", "ref": "e3", "action": "click"})));
+        assert_eq!(tc.name, "browser_act");
+        assert_eq!(serde_json::from_str::<Value>(&tc.arguments).unwrap()["action"], "click");
+        assert_eq!(expand_grouped_call(call("browser", json!({"op": "screenshot"}))).name, "browser_screenshot");
+        // Other tools pass through untouched.
+        let read = call("read", json!({"path": "a.rs", "op": "x"}));
+        assert_eq!(expand_grouped_call(read.clone()).arguments, read.arguments);
+        // Missing / odd op: a name dispatch refuses with a hint.
+        assert_eq!(expand_grouped_call(call("proc", json!({}))).name, "proc(op?)");
+        assert_eq!(expand_grouped_call(call("proc", json!({"op": "../x"}))).name, "proc(op?)");
+    }
+
+    #[test]
+    fn grouped_schemas_are_one_tool_per_family() {
+        for mode in [SessionMode::Agent, SessionMode::Ask, SessionMode::Plan] {
+            let tools = builtin_tools(mode);
+            let names: Vec<&str> = tools.as_array().unwrap().iter().filter_map(|t| t["function"]["name"].as_str()).collect();
+            assert!(names.contains(&"proc") && names.contains(&"browser"), "{mode:?}: {names:?}");
+            assert!(!names.iter().any(|n| n.starts_with("proc_") || n.starts_with("browser_")), "{names:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_op_is_refused_with_a_hint() {
+        let data = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let raw = serde_json::from_value(json!({"version": 1, "providers": [], "models": []})).unwrap();
+        let c = AppCtx::new(Catalog::from_raw(raw), AuditLog::open(data.path()).unwrap());
+        let sid = create_session(&c, ws.path().to_str().unwrap(), None, SessionMode::Agent, PermissionMode::Yolo).await.unwrap();
+        let s = c.sessions.lock().await.get(&sid).cloned().unwrap();
+        let tc = expand_grouped_call(call("proc", json!({"op": "restart", "id": "p1"})));
+        let out = dispatch_tool(&c, &s, &None, &tc).await.unwrap();
+        assert!(out.contains("not a valid `op`"), "{out}");
+    }
+}
+

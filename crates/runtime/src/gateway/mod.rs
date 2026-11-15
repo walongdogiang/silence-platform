@@ -13,6 +13,16 @@ pub const KIND_OPENAI: &str = "openai_compat";
 pub const KIND_CLAUDE_API: &str = "claude_api";
 pub const KIND_CLAUDE_CLI: &str = "claude_cli";
 
+/// Opening tag of the per-call tail message (`agent/env.rs::turn_context`).
+pub const TURN_CONTEXT_TAG: &str = "<turn_context>";
+
+/// The per-call `<turn_context>` message the agent loop appends after the history. It changes
+/// every call and is never stored, so the history cache breakpoint goes on the message before it.
+pub fn is_turn_context(m: &Value) -> bool {
+    m.get("role").and_then(Value::as_str) == Some("user")
+        && m.get("content").and_then(Value::as_str).is_some_and(|t| t.starts_with(TURN_CONTEXT_TAG))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatResult {
     pub content: String,
@@ -159,8 +169,14 @@ async fn chat_inner(
             other => other.clone(),
         })
         .collect();
+    let api_model = expand_api_model(&model.api_model);
+    let messages = if wants_cache_breakpoints(&api_model) {
+        with_cache_breakpoints(messages)
+    } else {
+        messages
+    };
     let mut body = json!({
-        "model": expand_api_model(&model.api_model),
+        "model": api_model,
         "messages": messages,
         "stream": true,
         "stream_options": {"include_usage": true},
@@ -254,6 +270,16 @@ fn ingest(
             .get("completion_tokens")
             .and_then(|x| x.as_u64())
             .unwrap_or(result.output_tokens as u64) as u32;
+        // OpenRouter / OpenAI: cached part of `prompt_tokens` (already included in it).
+        if let Some(d) = usage.get("prompt_tokens_details") {
+            let n = |k: &str| d.get(k).and_then(|x| x.as_u64());
+            if let Some(r) = n("cached_tokens") {
+                result.cache_read_tokens = r as u32;
+            }
+            if let Some(w) = n("cache_write_tokens") {
+                result.cache_write_tokens = w as u32;
+            }
+        }
     }
     let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
         return;
@@ -342,6 +368,73 @@ fn push_thinking(delta: &Value, result: &mut ChatResult, on_thinking: &mut impl 
     }
 }
 
+/// Anthropic models behind an OpenAI-compatible router (OpenRouter `anthropic/...`) only cache
+/// with explicit `cache_control` breakpoints; OpenAI / Gemini / DeepSeek cache by prefix on
+/// their own and must not get the field.
+fn wants_cache_breakpoints(api_model: &str) -> bool {
+    api_model.starts_with("anthropic/")
+}
+
+/// Breakpoints like `claude_api::build_request`: the end of the first system message (static
+/// prompt; tools come before it in the cached prefix), the end of the last leading system
+/// message (compaction note, if any) and the last history message — not the `<turn_context>`
+/// tail, which changes every call; the next call then reads the history from cache. At most 3
+/// of the 4 allowed. String contents become one text part carrying `cache_control`; empty texts
+/// are skipped (the API rejects empty cached blocks).
+fn with_cache_breakpoints(mut messages: Vec<Value>) -> Vec<Value> {
+    let lead = messages
+        .iter()
+        .take_while(|m| m.get("role").and_then(Value::as_str) == Some("system"))
+        .count();
+    let mut marks: Vec<usize> = Vec::new();
+    if lead > 0 {
+        marks.push(0);
+        marks.push(lead - 1);
+    }
+    let end = match messages.last() {
+        Some(m) if is_turn_context(m) => messages.len() - 1,
+        _ => messages.len(),
+    };
+    if let Some(i) = (lead..end).rev().find(|&i| has_text(&messages[i])) {
+        marks.push(i);
+    }
+    marks.dedup();
+    for i in marks {
+        mark_message(&mut messages[i]);
+    }
+    messages
+}
+
+fn has_text(m: &Value) -> bool {
+    match m.get("content") {
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(parts)) => parts.iter().any(|p| p.get("type").and_then(Value::as_str) == Some("text")),
+        _ => false,
+    }
+}
+
+fn mark_message(m: &mut Value) {
+    let cache = json!({"type": "ephemeral"});
+    match m.get_mut("content") {
+        Some(c @ Value::String(_)) => {
+            let text = c.as_str().unwrap_or_default().to_string();
+            if !text.is_empty() {
+                *c = json!([{"type": "text", "text": text, "cache_control": cache}]);
+            }
+        }
+        Some(Value::Array(parts)) => {
+            if let Some(p) = parts
+                .iter_mut()
+                .rev()
+                .find(|p| p.get("type").and_then(Value::as_str) == Some("text"))
+            {
+                p["cache_control"] = cache;
+            }
+        }
+        _ => {}
+    }
+}
+
 fn expand_api_model(s: &str) -> String {
     if let Some(rest) = s.strip_prefix("${") {
         return rest
@@ -398,6 +491,65 @@ mod tests {
         assert_eq!(thinking, "Step one. ");
         assert_eq!(result.reasoning, "Step one. ");
         assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn ingest_reads_openrouter_cache_usage() {
+        let mut result = ChatResult::default();
+        let v = json!({"usage": {"prompt_tokens": 1000, "completion_tokens": 20,
+            "prompt_tokens_details": {"cached_tokens": 800, "cache_write_tokens": 150}}});
+        ingest(&v, &mut result, &mut Vec::new(), &mut |_| {}, &mut |_| {});
+        assert_eq!(result.input_tokens, 1000);
+        assert_eq!(result.cache_read_tokens, 800);
+        assert_eq!(result.cache_write_tokens, 150);
+    }
+
+    #[test]
+    fn cache_breakpoints_only_for_anthropic_models() {
+        assert!(wants_cache_breakpoints("anthropic/claude-haiku-5.5"));
+        assert!(!wants_cache_breakpoints("openai/gpt-5"));
+        assert!(!wants_cache_breakpoints("google/gemini-3-pro"));
+    }
+
+    #[test]
+    fn cache_breakpoints_on_static_env_and_last_message() {
+        let out = with_cache_breakpoints(vec![
+            json!({"role": "system", "content": "STATIC"}),
+            json!({"role": "system", "content": "## Runtime environment"}),
+            json!({"role": "user", "content": "fix it"}),
+            json!({"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]}),
+            json!({"role": "tool", "tool_call_id": "1", "content": "ok"}),
+        ]);
+        let cached = |i: usize| out[i]["content"][0]["cache_control"]["type"] == "ephemeral";
+        assert!(cached(0) && cached(1) && cached(4));
+        assert_eq!(out[0]["content"][0]["text"], "STATIC");
+        // Untouched: the prompt (not last) and the empty assistant message.
+        assert_eq!(out[2]["content"], "fix it");
+        assert_eq!(out[3]["content"], "");
+    }
+
+    #[test]
+    fn cache_breakpoint_skips_the_turn_context_tail() {
+        let out = with_cache_breakpoints(vec![
+            json!({"role": "system", "content": "STATIC"}),
+            json!({"role": "user", "content": "fix it"}),
+            json!({"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]}),
+            json!({"role": "tool", "tool_call_id": "1", "content": "ok"}),
+            json!({"role": "user", "content": "<turn_context>\n## Mode: Ask\n</turn_context>"}),
+        ]);
+        let cached = |i: usize| out[i]["content"][0]["cache_control"]["type"] == "ephemeral";
+        assert!(cached(0) && cached(3));
+        assert!(out[4]["content"].is_string(), "the tail changes every call: never a breakpoint");
+    }
+
+    #[test]
+    fn cache_breakpoint_skips_trailing_empty_message() {
+        let out = with_cache_breakpoints(vec![
+            json!({"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "image_url", "image_url": {}}]}),
+            json!({"role": "assistant", "content": ""}),
+        ]);
+        assert_eq!(out[0]["content"][0]["cache_control"]["type"], "ephemeral");
+        assert!(out[1]["content"].is_string());
     }
 
     #[test]

@@ -289,10 +289,12 @@ async function spawnRuntime(): Promise<void> {
       process.stderr.write(s);
       if (connected) return;
       ready += s;
-      const m = ready.match(/tcp=([^\s]+)/);
+      // Chờ đủ cả dòng (có xuống dòng): stderr có thể bị cắt giữa chừng ("tcp=127.0.0.1" chưa tới ":cổng"),
+      // khi đó Number(undefined) = NaN → "Port should be >= 0 and < 65536".
+      const m = ready.match(/tcp=(\S+):(\d+)\r?\n/);
       if (m) {
         clearTimeout(timer);
-        connect(m[1])
+        connect(`${m[1]}:${m[2]}`)
           // Engine đóng kết nối nếu request đầu tiên không phải auth.hello đúng token.
           .then(() => rpc("auth.hello", { token }))
           .then(() => {

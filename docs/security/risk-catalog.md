@@ -73,7 +73,7 @@ Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
 
 | Mã | Ví dụ |
 | --- | --- |
-| `READ_WS` | Tool `read`, `outline`, `glob`, `grep`, `view_image`, `git_status`, `git_diff` trong workspace |
+| `READ_WS` | Tool `read`, `outline`, `glob`, `grep`, `view_image`, `git_status`, `git_diff`, `skill` (đọc SKILL.md của workspace) trong workspace |
 | `READ_CMD` | `ls`, `dir`, `Get-ChildItem`, `cat`, `type`, `Get-Content`, `rg`, `grep`, `find`, `Select-String`, `Select-Object`, `Measure-Object`, `head`, `tail`, `wc`, `echo`, `Test-Path`, `cd`/`Set-Location` trong workspace |
 | `VERSION` | `python --version`, `node -v`, `cargo --version` |
 | `GIT_READ` | `git status/diff/log/show/blame/rev-parse/ls-files/branch/remote` |

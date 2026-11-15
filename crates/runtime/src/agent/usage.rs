@@ -58,7 +58,11 @@ pub(super) fn estimate_parts(s: &Session, mode: SessionMode) -> ContextParts {
             conversation += crate::images::message_tokens(m) as u32;
         }
     }
-    let tools = builtin_tools(mode)
+    let mut all = builtin_tools(mode);
+    if !s.org.skills.is_empty() {
+        all.as_array_mut().unwrap().push(skill_spec());
+    }
+    let tools = all
         .as_array()
         .map(|a| a.iter().map(|t| estimate_tokens(&t.to_string()) as u32).sum())
         .unwrap_or(0);

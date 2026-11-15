@@ -23,55 +23,51 @@ pub(crate) async fn table(ctx: &AppCtx, session_id: &str) -> Arc<Table> {
     ctx.procs.lock().await.entry(session_id.to_string()).or_default().clone()
 }
 
-fn func(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+/// Model-facing name of the grouped tool. Calls are dispatched as `proc_<op>` (see
+/// `expand_grouped_call`), so risk rules, audit, events and evals keep the per-op names.
+pub(super) const TOOL: &str = "proc";
+
+/// One schema for the whole family (fewer prompt tokens than four tools; the tool list is part of
+/// the cached prefix). Read-only modes get only `logs` and `list`.
+pub(super) fn spec(read_only: bool) -> Value {
+    let (ops, desc): (Vec<&str>, &str) = if read_only {
+        (
+            vec!["logs", "list"],
+            "Background processes of this session. \
+             op=logs: output of `id`; `since` = last line number you saw (only new lines), `grep` = regex filter, \
+             `tail` = max lines (default 80, max 400). op=list: processes with status and URLs.",
+        )
+    } else {
+        (
+            vec!["start", "logs", "stop", "list"],
+            "Background processes: dev servers, watchers, anything long-running (`shell` blocks until exit). \
+             op=start: run `command` in the background and wait until `ready` (regex) matches an output line, \
+             or else until a localhost URL is printed, the process exits, or `timeout_s` passes (default 20, max 120); \
+             returns id, status, URLs and the last lines. \
+             op=logs: output of `id`; `since` = last line number you saw (only new lines), `grep` = regex filter, \
+             `tail` = max lines (default 80, max 400). \
+             op=stop: stop `id` and its child processes. op=list: processes with status and URLs. \
+             Stop what you started when you are done.",
+        )
+    };
+    let mut props = json!({"op": {"type": "string", "enum": ops}});
+    if !read_only {
+        props["command"] = json!({"type": "string"});
+        props["ready"] = json!({"type": "string"});
+        props["timeout_s"] = json!({"type": "integer"});
+    }
+    props["id"] = json!({"type": "string"});
+    props["since"] = json!({"type": "integer"});
+    props["grep"] = json!({"type": "string"});
+    props["tail"] = json!({"type": "integer"});
     json!({
         "type": "function",
         "function": {
-            "name": name,
-            "description": description,
-            "parameters": {"type": "object", "properties": properties, "required": required}
+            "name": TOOL,
+            "description": desc,
+            "parameters": {"type": "object", "properties": props, "required": ["op"]}
         }
     })
-}
-
-/// Schemas. Read-only modes get only `proc_logs` and `proc_list`.
-pub(super) fn specs(read_only: bool) -> Vec<Value> {
-    let mut v = Vec::new();
-    if !read_only {
-        v.push(func(
-            "proc_start",
-            "Start a long-running command in the background (dev server, watcher) instead of `shell`, which blocks until exit. \
-             Waits until `ready` matches an output line, or (without `ready`) until a localhost URL is printed, the process exits, or `timeout_s` passes. \
-             Returns the process id, status, detected URLs and the last output lines. Stop it with proc_stop when you are done.",
-            json!({
-                "command": {"type": "string"},
-                "ready": {"type": "string", "description": "Regex for an output line that means ready (e.g. \"ready in|Listening on\"). Optional."},
-                "timeout_s": {"type": "integer", "description": "Seconds to wait for readiness (default 20, max 120)."}
-            }),
-            &["command"],
-        ));
-    }
-    v.push(func(
-        "proc_logs",
-        "Read output of a background process. Use `since` (the last line number you saw) to get only new lines, `grep` (regex) to filter, e.g. errors.",
-        json!({
-            "id": {"type": "string"},
-            "since": {"type": "integer"},
-            "grep": {"type": "string"},
-            "tail": {"type": "integer", "description": "Max lines (default 80, max 400)."}
-        }),
-        &["id"],
-    ));
-    if !read_only {
-        v.push(func(
-            "proc_stop",
-            "Stop a background process you started (and its child processes).",
-            json!({"id": {"type": "string"}}),
-            &["id"],
-        ));
-    }
-    v.push(func("proc_list", "List background processes of this session with status and URLs.", json!({}), &[]));
-    v
 }
 
 pub(super) fn event(info: &Info) -> SessionEvent {
@@ -253,11 +249,14 @@ mod tests {
 
     #[test]
     fn read_only_modes_cannot_start_or_stop() {
-        let names = |ro| -> Vec<String> {
-            specs(ro).iter().map(|v| v["function"]["name"].as_str().unwrap().to_string()).collect()
-        };
-        assert_eq!(names(true), vec!["proc_logs", "proc_list"]);
-        assert_eq!(names(false), vec!["proc_start", "proc_logs", "proc_stop", "proc_list"]);
+        let ops = |ro: bool| spec(ro)["function"]["parameters"]["properties"]["op"]["enum"].clone();
+        assert_eq!(ops(true), json!(["logs", "list"]));
+        assert_eq!(ops(false), json!(["start", "logs", "stop", "list"]));
+        assert!(spec(true)["function"]["parameters"]["properties"].get("command").is_none());
+        // Every op maps to a dispatched name.
+        for op in ["start", "logs", "stop", "list"] {
+            assert!(NAMES.contains(&format!("proc_{op}").as_str()));
+        }
     }
 
     #[tokio::test]
@@ -339,6 +338,19 @@ mod tests {
         assert!(!s.lock().await.tainted, "loopback checks never taint");
     }
 
+    #[tokio::test]
+    async fn blocked_command_never_starts() {
+        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let c = ctx(data.path());
+        let sid = create_session(&c, ws.path().to_str().unwrap(), None, SessionMode::Agent, PermissionMode::Yolo)
+            .await
+            .unwrap();
+        let s = c.sessions.lock().await.get(&sid).cloned().unwrap();
+        let out = dispatch_tool(&c, &s, &None, &call("proc_start", json!({"command": "format c:"}))).await.unwrap();
+        assert!(out.contains("SYSTEM_CHANGE"), "{out}");
+        assert!(table(&c, &sid).await.list().is_empty());
+    }
+
     /// Autonomous + ready sandbox: `shell` runs contained, but a background process is not wrapped
     /// yet, so `proc_start` must refuse instead of starting it as the real user.
     #[tokio::test]
@@ -353,18 +365,5 @@ mod tests {
         let out = dispatch_tool(&c, &s, &None, &call("proc_start", json!({"command": "echo hi"}))).await.unwrap();
         assert!(out.contains("Autonomous-mode sandbox"), "{out}");
         assert!(table(&c, &sid).await.list().is_empty(), "nothing was started");
-    }
-
-    #[tokio::test]
-    async fn blocked_command_never_starts() {
-        let (ws, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let c = ctx(data.path());
-        let sid = create_session(&c, ws.path().to_str().unwrap(), None, SessionMode::Agent, PermissionMode::Yolo)
-            .await
-            .unwrap();
-        let s = c.sessions.lock().await.get(&sid).cloned().unwrap();
-        let out = dispatch_tool(&c, &s, &None, &call("proc_start", json!({"command": "format c:"}))).await.unwrap();
-        assert!(out.contains("SYSTEM_CHANGE"), "{out}");
-        assert!(table(&c, &sid).await.list().is_empty());
     }
 }

@@ -201,6 +201,9 @@ impl McpHost {
                 }
             }
         }
+        // `servers` is a HashMap: without a stable order the tool list (part of the cached
+        // prompt prefix) would change between calls and miss the prompt cache.
+        out.sort_by(|a, b| (a.0.as_str(), a.1.name.as_str()).cmp(&(b.0.as_str(), b.1.name.as_str())));
         out
     }
 }

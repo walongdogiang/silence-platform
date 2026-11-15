@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.18";
+export const PROTOCOL_VERSION = "0.1.19";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -20,7 +20,8 @@ export type SessionMode = "agent" | "plan" | "ask" | "debug" | "review" | "multi
  * Params of `session.prompt`. `context`: extra text the UI attaches (e.g. Output tail in Debug).
  * `images`: pasted images as `data:image/<png|jpeg|gif|webp>;base64,...` URLs (max 4, 5 MB each).
  */
-export type PromptParams = { session_id: string; text: string; context?: string; images?: string[] };
+/** `ui_lang` (0.1.19): Studio UI language, the Engine's fallback for the reply language. */
+export type PromptParams = { session_id: string; text: string; context?: string; images?: string[]; ui_lang?: "vi" | "en" };
 /** Params of `fs.read_image`: an image (png, jpg, gif, webp, svg; max 5 MB) inside `workspace`. */
 export type FsReadImageParams = { workspace: string; path: string };
 /** Result of `fs.read_image`. `data_url` = `data:<mime>;base64,...`. */
@@ -155,7 +156,7 @@ export type SessionEvent =
   /** `slot` is set on Auto (`frontier|strong|small`); `escalated` when Auto moved up on trouble. */
   | { type: "route"; task_class: string; model_id: string; reason: string; slot?: AutoSlot | ""; escalated?: boolean }
   /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
-  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: AutoSlot | ""; baseline_usd?: number }
+  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: AutoSlot | ""; baseline_usd?: number; cache_read_tokens?: number; cache_write_tokens?: number }
   | { type: "terminal"; data: string }
   /** Background process (`proc_start`) started, printed a localhost URL, or ended (0.1.17). `status`: running | stopped | exited <code> | exited. */
   | { type: "proc"; id: string; command: string; status: string; urls: string[] }
@@ -224,6 +225,7 @@ export type ErrorCode =
   | "PROVIDER_REFUSAL"
   | "CLI_NOT_FOUND"
   | "CLI_AUTH"
+  | "CLI_LIMIT"
   | "UNKNOWN";
 
 /** Lỗi lượt đã chuẩn hóa ở Engine. `detail` đã lọc secret + cắt ngắn. */
@@ -423,6 +425,10 @@ export type EvalTaskDetail = {
   report: string;
   audit: string[];
   files: { path: string; status: "added" | "modified" | "deleted"; before: string; after: string; binary: boolean }[];
+  /** `checks.json`: one row per `pass_if` check; null for attempts from before it existed. */
+  checks?: EvalCheck[] | null;
+  /** `trace.jsonl`: session events of the attempt (capped, redacted); empty for old attempts. */
+  trace?: EvalTraceLine[];
 };
 
 /** `sandbox.status` / `sandbox.setup` result (Engine `silence_sandbox::SandboxStatus`). Autonomous mode works only when `ready`. */
@@ -433,3 +439,7 @@ export type SandboxStatus =
 export type NetworkList = { defaults: string[]; allow: string[] };
 /** `snapshot.list`: turns whose workspace snapshot can be restored with `snapshot.restore`. */
 export type SnapshotList = { turns: number[] };
+/** One `pass_if` check of an attempt and why it failed. */
+export type EvalCheck = { kind: string; target: string; ok: boolean; detail?: string };
+/** One line of `trace.jsonl`: a `SessionEvent` (`type` tag) plus `t_ms`; tokens merged into `text`. */
+export type EvalTraceLine = { type: string; t_ms: number; [field: string]: unknown };

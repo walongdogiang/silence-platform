@@ -21,6 +21,9 @@ pub enum ErrorCode {
     CliNotFound,
     /// `claude` CLI is installed but not signed in.
     CliAuth,
+    /// Subscription usage window exhausted (e.g. "You've hit your 5-hour limit · resets 12pm").
+    /// Not transient: retrying before the reset only fails again.
+    CliLimit,
     Unknown,
 }
 
@@ -36,6 +39,7 @@ impl ErrorCode {
             ErrorCode::ProviderRefusal => "PROVIDER_REFUSAL",
             ErrorCode::CliNotFound => "CLI_NOT_FOUND",
             ErrorCode::CliAuth => "CLI_AUTH",
+            ErrorCode::CliLimit => "CLI_LIMIT",
             ErrorCode::Unknown => "UNKNOWN",
         }
     }

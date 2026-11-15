@@ -18,79 +18,56 @@ pub(super) const NAMES: [&str; 7] = [
     "browser_close",
 ];
 
-fn func(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+/// Model-facing name of the grouped tool; dispatched as `browser_<op>` (see `expand_grouped_call`).
+pub(super) const TOOL: &str = "browser";
+
+/// One schema for the whole family. Read-only modes can look (open, snapshot, console, network,
+/// screenshot, export_test) but not act.
+pub(super) fn spec(read_only: bool) -> Value {
+    let mut ops = vec!["open", "snapshot"];
+    if !read_only {
+        ops.push("act");
+    }
+    ops.extend(["console", "network", "screenshot", "export_test", "close"]);
+    let act = if read_only {
+        ""
+    } else {
+        "op=act: `action` click|fill|select|press|hover on `ref` from the last snapshot, `value` = text for fill, \
+         option for select, key for press (Enter, Tab, Escape…; ref optional); returns what changed. "
+    };
+    let desc = format!(
+        "Headless browser for apps on this machine (localhost, 127.0.0.1, ::1); use after http_check when you need the \
+         rendered page, client-side JavaScript or a click flow. Pages come back as text with interactive elements as \
+         [ref=eN], plus new console errors and failed requests. \
+         op=open `url`. op=snapshot: what changed since the last snapshot (`full` = whole page). {act}\
+         op=console: exceptions with stack, console.error/warn (`level` error|warning|all, default error; `since`). \
+         op=network: failed requests, status >= 400 or network error (`since`). \
+         op=screenshot: the page as an image (`ref` = one element, `full_page`); costs far more than a snapshot, \
+         only for visual questions. op=export_test: the flow checked since open as a Playwright test source \
+         (`title`); writes nothing, save it with write. op=close."
+    );
+    let mut props = json!({
+        "op": {"type": "string", "enum": ops},
+        "url": {"type": "string"},
+        "full": {"type": "boolean"},
+        "ref": {"type": "string"},
+    });
+    if !read_only {
+        props["action"] = json!({"type": "string", "enum": ["click", "fill", "select", "press", "hover"]});
+        props["value"] = json!({"type": "string"});
+    }
+    props["since"] = json!({"type": "integer"});
+    props["level"] = json!({"type": "string", "enum": ["error", "warning", "all"]});
+    props["full_page"] = json!({"type": "boolean"});
+    props["title"] = json!({"type": "string"});
     json!({
         "type": "function",
         "function": {
-            "name": name,
-            "description": description,
-            "parameters": {"type": "object", "properties": properties, "required": required}
+            "name": TOOL,
+            "description": desc,
+            "parameters": {"type": "object", "properties": props, "required": ["op"]}
         }
     })
-}
-
-/// Schemas. Read-only modes can look (open, snapshot, console, network, screenshot, export_test) but not act.
-pub(super) fn specs(read_only: bool) -> Vec<Value> {
-    let mut v = vec![func(
-        "browser_open",
-        "Open a page of an app running on this machine (localhost, 127.0.0.1, ::1) in a headless browser and get it as text: \
-         headings, text and interactive elements with [ref=eN]. Also reports new console errors and failed requests. \
-         Use after http_check when you need the rendered page, client-side JavaScript, or to click through a flow.",
-        json!({"url": {"type": "string"}}),
-        &["url"],
-    )];
-    v.push(func(
-        "browser_snapshot",
-        "Page text again. By default only what changed since the last snapshot; `full` for the whole page.",
-        json!({"full": {"type": "boolean"}}),
-        &[],
-    ));
-    if !read_only {
-        v.push(func(
-            "browser_act",
-            "Act on an element by its ref from the last snapshot like a user would: click, fill (replace the text of an input), \
-             select (an option of a <select>, by value or label), press (a key such as Enter, Tab, Escape, ArrowDown; ref optional), hover. \
-             Returns what changed on the page and new console errors.",
-            json!({
-                "ref": {"type": "string", "description": "e.g. e12"},
-                "action": {"type": "string", "enum": ["click", "fill", "select", "press", "hover"]},
-                "value": {"type": "string", "description": "Text for fill, option for select, key for press."}
-            }),
-            &["action"],
-        ));
-    }
-    v.push(func(
-        "browser_console",
-        "Console messages of the page: uncaught exceptions with stack, console.error/warn. `since` = last number you saw.",
-        json!({
-            "since": {"type": "integer"},
-            "level": {"type": "string", "enum": ["error", "warning", "all"], "description": "Default error."}
-        }),
-        &[],
-    ));
-    v.push(func(
-        "browser_network",
-        "Failed requests of the page (HTTP status >= 400 or network error) with method and URL. `since` = last number you saw.",
-        json!({"since": {"type": "integer"}}),
-        &[],
-    ));
-    v.push(func(
-        "browser_screenshot",
-        "Look at the page as an image (layout, colors, overlap, what text cannot tell). Costs far more than browser_snapshot: \
-         use it only when the question is visual. `ref` shoots one element, `full_page` the whole page (up to 8000 px tall).",
-        json!({"ref": {"type": "string"}, "full_page": {"type": "boolean"}}),
-        &[],
-    ));
-    v.push(func(
-        "browser_export_test",
-        "Turn the flow you just checked in the browser (since the last browser_open: page, fills, clicks, text that appeared) \
-         into a Playwright test for this project. Returns the test source, where the project keeps tests and a file name; \
-         it writes nothing. Review it, then save it with write.",
-        json!({"title": {"type": "string", "description": "Test title, e.g. \"adds an item to the cart\"."}}),
-        &[],
-    ));
-    v.push(func("browser_close", "Close the browser of this session.", json!({}), &[]));
-    v
 }
 
 fn end(tx: &Option<mpsc::UnboundedSender<SessionEvent>>, tc: &ToolCall, ok: bool, out: String) -> String {
@@ -318,14 +295,19 @@ mod tests {
 
     #[test]
     fn read_only_modes_cannot_act() {
-        let names = |ro| -> Vec<String> {
-            specs(ro).iter().map(|v| v["function"]["name"].as_str().unwrap().to_string()).collect()
+        let ops = |ro: bool| -> Vec<String> {
+            serde_json::from_value(spec(ro)["function"]["parameters"]["properties"]["op"]["enum"].clone()).unwrap()
         };
-        assert!(!names(true).contains(&"browser_act".to_string()));
-        assert!(names(true).contains(&"browser_open".to_string()));
-        assert_eq!(names(false).len(), NAMES.len() + 1, "browser_screenshot runs from the turn loop");
-        assert!(names(true).contains(&"browser_screenshot".to_string()));
-        assert!(names(true).contains(&"browser_export_test".to_string()), "writes nothing: fine in read-only modes");
+        assert!(!ops(true).contains(&"act".to_string()));
+        assert!(ops(true).contains(&"open".to_string()));
+        assert!(ops(true).contains(&"export_test".to_string()), "writes nothing: fine in read-only modes");
+        assert!(ops(true).contains(&"screenshot".to_string()));
+        // Every op is dispatched: NAMES, plus screenshot from the turn loop.
+        assert_eq!(ops(false).len(), NAMES.len() + 1, "browser_screenshot runs from the turn loop");
+        for op in ops(false) {
+            let name = format!("browser_{op}");
+            assert!(NAMES.contains(&name.as_str()) || name == "browser_screenshot", "{name}");
+        }
     }
 
     #[test]
