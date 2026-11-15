@@ -1,8 +1,10 @@
-# 5ilence — hướng dẫn Cursor (build repo này)
+# 5ilence — hướng dẫn cho agent (Cursor, Claude Code, …) khi build repo này
 
 Repo monorepo xây nền tảng 5ilence (Electron Studio + Rust Engine).
 
 Danh mục tài liệu: [`docs/README.md`](docs/README.md) — đọc mục lục đó rồi mới mở file docs cần thiết. Brand ↔ code: mục **Tên sản phẩm** trong file đó.
+
+Tìm code: [`docs/codemap.md`](docs/codemap.md) (câu hỏi → file + hàm) trước khi grep rộng.
 
 Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sửa trừ khi task yêu cầu rõ.
 
@@ -13,35 +15,41 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 - Protocol: `packages/protocol` (TS) và `crates/protocol` (Rust) — đổi cả hai.
 - Shell: PowerShell. Rust khi thiếu SDK: `.\scripts\cargo-msvc.bat <cargo-args>`.
 - Chạy UI: `npm install` rồi `npm run studio` (`npm run desktop` vẫn alias). Live watch (UI HMR + Engine tự build/restart khi sửa `crates/`): `npm run studio:watch` (README → Live watch). Engine CLI: `npm run runtime`.
-- Test crate: `cargo test -p <crate>` (hoặc qua `cargo-msvc.bat`).
-- Evals: `npm run evals` cần `SILENCE_API_BASE` / `SILENCE_API_KEY`.
+
+## Ràng buộc
+
+- Renderer không gọi model; không fs/shell/MCP trực tiếp; không napi-rs làm IPC chính.
+- Không fork VS Code trong phạm vi năm 1 của [`docs/PRD.md`](docs/PRD.md).
+- Sản phẩm: diff + audit; permission mặc định **Cân bằng** (an toàn/đảo ngược được thì tự chạy có hiển thị; rủi ro thì hỏi kèm giải thích; nguy hiểm thì chặn — `docs/security/permissions.md`); không silent YOLO; không bind LAN.
+- Nói với user tiếng Việt.
+
+## Sửa X thì đụng đâu
+
+- Harness / agent loop: thêm hoặc sửa eval task; chạy eval nếu có key, không thì ghi rõ chưa chạy. Không full 20 eval cho mọi PR.
+- UI: đọc spec `docs/frontend/` và rule `.cursor/rules/frontend-*.mdc` trước khi sửa; đổi hành vi thì cập nhật spec + rule.
+- Câu trả lời agent trong app (Markdown user-facing): sửa `SYSTEM` trong `crates/runtime/src/agent/modes.rs`; hợp đồng UI/Copy: `docs/frontend/chat.md`; việc chưa làm: `docs/frontend/chat-markdown-roadmap.md`.
+- Rule agent: `.cursor/rules/*.mdc` và bản port `.claude/rules/*.md` phải khớp nhau — sửa cả hai rồi `npm run check:rules`.
+- Docs: mỗi file trong `docs/` có `description` ở frontmatter; sửa docs thì `npm run check:docs`.
+
+## Test theo phạm vi
+
+- `crates/**`: `cargo test -p <crate>` liên quan (hoặc qua `cargo-msvc.bat`). Chỉ chạy cả workspace khi đổi nhiều crate.
+- `apps/studio/**`: `npx tsc --noEmit -p apps/studio` và `npm test --workspace @silence/studio` (vitest). UI thuần không bắt eval; kiểm theo spec frontend.
+- `docs/**`, rule: `npm run check:docs` / `npm run check:rules`.
+- `evals/**` hoặc vòng agent: `npm run evals` khi có key (`SILENCE_API_BASE` / `SILENCE_API_KEY`). Ngoài trường hợp này không chạy eval (tốn API).
 
 ## Tự chủ
 
 - Được: sửa code, chạy build/test, đọc log (không in API key).
-- Hỏi trước: `git commit`, push, tag, amend, force. Ngoại lệ: `/gsd-execute-phase` — `.cursor/rules/gsd-commit.mdc`.
+- Hỏi user trước: `git commit`, push, tag, amend, force.
 - Không commit `.env`, secrets, `node_modules/`.
 
 ## Quy trình Git
 
 - Không push thẳng `main`. Mỗi việc một nhánh ngắn từ `origin/main`: `feat/…`, `fix/…`, `chore/…`, `docs/…`.
-- Commit theo Conventional Commits. Xong việc thì mở PR vào `main`, đợi CI xanh (`.github/workflows/ci.yml`), **squash merge**, xoá nhánh.
-- CI chạy `cargo test --workspace`, `tsc` và `vitest` của Studio. Không chạy eval (tốn API): eval chạy hằng đêm ở `evals.yml`.
+- Commit theo Conventional Commits. Xong việc thì mở PR vào `main`, đợi CI xanh, **squash merge**, xoá nhánh.
+- CI trên PR:
+  - `ci.yml`: `cargo test --workspace`, `tsc` và `vitest` của Studio.
+  - `docs-check.yml`: rule `.cursor` ↔ `.claude` khớp nhau, frontmatter docs hợp lệ.
+  - `evals.yml` không chạy trên PR: chạy hằng đêm và lượt Tuần (cuối tuần) theo lịch.
 - Test RED chờ plan sau phải có `#[ignore = "RED until Plan …"]` kèm lý do; bỏ `#[ignore]` khi làm plan đó. Không để CI đỏ kéo dài.
-- Commit/push vẫn phải hỏi user trước (trừ GSD execute ở Cursor).
-
-## Bắt buộc
-
-- Renderer không gọi model; không fs/shell/MCP trực tiếp; không napi-rs làm IPC chính; không fork VS Code năm 1.
-- Sản phẩm: diff + audit; permission mặc định **Cân bằng** (an toàn/đảo ngược được thì tự chạy có hiển thị; rủi ro thì hỏi kèm giải thích; nguy hiểm thì chặn — `docs/security/permissions.md`); không silent YOLO; không bind LAN.
-- Đổi harness/agent loop: thêm hoặc sửa eval task; chạy eval nếu có key, không thì ghi rõ chưa chạy. Không full 20 eval cho mọi PR.
-- Đổi UI: `docs/frontend/` + `.cursor/rules/frontend-*.mdc`.
-- Câu trả lời agent trong app (Markdown user-facing): sửa `SYSTEM` trong `crates/runtime/src/agent/modes.rs`; hợp đồng UI/Copy: `docs/frontend/chat.md`; việc chưa làm: `docs/frontend/chat-markdown-roadmap.md`.
-- Plan GSD: `/gsd-plan-phase --prd docs/PRD.md`. Không `/gsd-new-project` đè PRD.
-- Nói với user tiếng Việt.
-
-## Test theo phạm vi
-
-- `crates/**`: `cargo test -p <crate>` liên quan.
-- UI thuần: không bắt eval; kiểm theo spec frontend.
-- `evals/**` hoặc vòng agent: `npm run evals` khi có key.

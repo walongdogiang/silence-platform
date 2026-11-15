@@ -58,8 +58,6 @@ Eval chạy thủ công ở local: `npm run evals` (chọn nguồn bằng `--sou
 
 Copy `templates/silence` thành `.silence/` trong repo làm việc để bật skills/hooks.
 
-GSD (Cursor, local): `/gsd-discuss-phase`, `/gsd-plan-phase --prd docs/PRD.md`, `/gsd-execute-phase`. Không `/gsd-new-project` đè PRD. Execute được commit atomic.
-
 ## Tài liệu
 
 - [docs/README.md](docs/README.md) — mục lục (mục đích + khi nào đọc)

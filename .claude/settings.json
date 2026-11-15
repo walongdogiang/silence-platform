@@ -39,9 +39,6 @@
       "Read(./**/package-lock.json)",
       "Read(./apps/studio/out/**)",
       "Read(./docs/archive/**)",
-      "Read(./.cursor/agents/**)",
-      "Read(./.cursor/skills/**)",
-      "Read(./.cursor/gsd-core/**)",
       "Read(./.env)",
       "Read(./.env.*)"
     ]

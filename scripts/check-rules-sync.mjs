@@ -10,8 +10,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const claudeDir = path.join(root, ".claude", "rules");
 const cursorDir = path.join(root, ".cursor", "rules");
 
-// Rule chỉ có ở Cursor, có chủ đích (GSD chỉ chạy trong Cursor).
-const CURSOR_ONLY = new Set(["gsd-commit"]);
+// Rule chỉ có ở Cursor, có chủ đích (hiện chưa có rule nào).
+const CURSOR_ONLY = new Set([]);
 
 /** Tách frontmatter `---` đầu file; trả về { front, body } đã chuẩn hoá xuống dòng. */
 export function splitFrontmatter(text) {

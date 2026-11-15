@@ -52,7 +52,7 @@ Họ crate phụ vẫn `silence-*` (protocol, tools, …). Không đổi sang t�
 
 | File | Mục đích | Khi nào đọc |
 | --- | --- | --- |
-| [PRD.md](PRD.md) | Yêu cầu năm 1, persona, 6 job lõi, backlog | Plan GSD, đổi phạm vi sản phẩm |
+| [PRD.md](PRD.md) | Yêu cầu năm 1, persona, 6 job lõi, backlog | Lập kế hoạch, đổi phạm vi sản phẩm |
 | [adr/0001-architecture.md](adr/0001-architecture.md) | Quyết định Electron + Rust sidecar, JSON-RPC, Monaco | Đổi kiến trúc / IPC / editor |
 | [adr/0002-harness-architecture.md](adr/0002-harness-architecture.md) | Kiến trúc đích harness — event log, kernel, tool registry, store task, lộ trình | Đổi agent loop, session, tool, hook, lưu trữ |
 | [threat-model.md](threat-model.md) | Tài sản, trust boundary, giảm thiểu đe dọa local agent | Đổi permission, sandbox, MCP, mạng |
@@ -77,15 +77,6 @@ Mục lục chi tiết UI: [frontend/README.md](frontend/README.md).
 
 Đổi UI: đọc spec tương ứng rồi `.cursor/rules/frontend-*.mdc`.
 
-## Trạng thái planning (GSD)
-
-| File | Mục đích | Khi nào đọc |
-| --- | --- | --- |
-| [../.planning/STATE.md](../.planning/STATE.md) | Vị trí phase / blocker hiện tại | Trước discuss / plan / execute |
-| [../.planning/PROJECT.md](../.planning/PROJECT.md) | Bối cảnh dự án cho GSD | Khởi động milestone / đồng bộ PROJECT |
-
-Plan: `/gsd-plan-phase --prd docs/PRD.md`. Không `/gsd-new-project` đè PRD. GSD (`.cursor/`, `.planning/`) chỉ cho Cursor — không ship vào UI app.
-
 ## Cấu hình / eval (ngoài `docs/`)
 
 | File | Mục đích | Khi nào đọc |
@@ -101,8 +92,7 @@ Plan: `/gsd-plan-phase --prd docs/PRD.md`. Không `/gsd-new-project` đè PRD. G
 | --- | --- | --- |
 | [../templates/silence/AGENTS.md](../templates/silence/AGENTS.md) | Luật agent trong app | Chỉ khi task đụng kit Silence / hành vi agent workspace |
 
-Không sửa `templates/silence/` trừ khi task yêu cầu rõ. Không liệt kê skills GSD (`.cursor/skills/`) ở đây.
-
+Không sửa `templates/silence/` trừ khi task yêu cầu rõ.
 ## Không còn đúng
 
 | File | Ghi chú |

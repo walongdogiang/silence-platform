@@ -140,7 +140,7 @@ Mỗi bước một PR, không đổi hành vi ngoài phạm vi bước, eval kh
 6. `silence-store` + `task.*` RPC + nạp vào context; UI danh sách task.
 7. Eval replay từ `events.jsonl`.
 
-Bước 1–3 nên chèn sau Phase 1 của `.planning/ROADMAP.md`.
+Bước 1–3 nên chèn sau Phase 1 (Trusted edit loop) của roadmap.
 
 ## Consequences
 
