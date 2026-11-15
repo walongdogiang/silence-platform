@@ -8,6 +8,7 @@ const GROUPS: { title: MsgKey; items: { keys: string[][]; label: MsgKey }[] }[] 
     items: [
       { keys: [["Ctrl", "J"]], label: "kb.panel" },
       { keys: [["Ctrl", "Alt", "U"]], label: "kb.history" },
+      { keys: [["Ctrl", "Shift", "E"]], label: "kb.evals" },
       { keys: [["Esc"]], label: "kb.closeDialog" },
     ],
   },

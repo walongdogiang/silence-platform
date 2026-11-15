@@ -10,7 +10,7 @@ Studio Electron + React/TypeScript (`apps/studio`). Lõi harness Rust (`silence-
 - Ít nhất một nguồn model (nhập key ở Settings → Model sources, lưu mã hoá trên máy; chọn nguồn đang dùng ở dòng Source trong menu model):
   - **OpenRouter** / endpoint OpenAI-compatible: `SILENCE_API_BASE`, `SILENCE_API_KEY`
   - **Claude API** trực tiếp: `ANTHROPIC_API_KEY` (tuỳ chọn `ANTHROPIC_BASE_URL`)
-  - **Claude CLI** (thử nghiệm, chỉ dùng cá nhân / nội bộ; **nguồn mặc định** của Studio và evals): lệnh `claude` đã đăng nhập; đổi đường dẫn bằng `SILENCE_CLAUDE_CLI`. Auto ở nguồn này chọn trong các model `@cli`; tool vẫn chạy trong Engine qua MCP bridge.
+  - **Claude CLI** (thử nghiệm, chỉ dùng cá nhân / nội bộ; **nguồn mặc định** của Studio): lệnh `claude` đã đăng nhập; đổi đường dẫn bằng `SILENCE_CLAUDE_CLI`. Auto ở nguồn này chọn trong các model `@cli`; tool vẫn chạy trong Engine qua MCP bridge.
 - Nguồn mặc định của Studio đặt ở Settings → Model sources → **Nguồn mặc định**. Studio không tự đổi sang nguồn khác khi nguồn mặc định không dùng được. Dòng Source trong menu model chỉ đổi cho lần chạy hiện tại.
 - Effort (Low → Max) chọn trong menu model của Composer; Chưa chọn mức nào thì Engine gửi mức Recommended của model (Medium cho mọi model Claude).
 
@@ -54,7 +54,7 @@ cargo run -p silence-engine -- serve --tcp 127.0.0.1:7420
 
 Request đầu tiên trên mỗi kết nối phải là `auth.hello {"token": …}`. Chạy tay thì Engine tự sinh token và in ra stderr (`silence-engine rpc token=…`). Muốn tự chọn token thì đặt `SILENCE_RPC_TOKEN` (ít nhất 32 ký tự).
 
-Eval chạy thủ công ở local: `npm run evals` (mặc định qua Claude CLI; `npm run evals -- --help`, chi tiết ở `evals/README.md`).
+Eval chạy thủ công ở local: `npm run evals` (chọn nguồn bằng `--source claude-cli|claude-api|company-gateway`, bỏ trống thì mỗi task chạy theo model ghim; `npm run evals -- --help`, chi tiết ở `evals/README.md`).
 
 Copy `templates/silence` thành `.silence/` trong repo làm việc để bật skills/hooks.
 

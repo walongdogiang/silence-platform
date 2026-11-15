@@ -240,6 +240,8 @@ body.soft-scroll-dragging {
   color: var(--text-primary);
 }
 .chrome-icon:disabled { opacity: 0.35; cursor: default; }
+.chrome-evals.running { width: auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--accent); }
+.chrome-evals-chip { font-size: var(--font-size-xs, 11px); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chrome-title {
   position: absolute;
   left: 50%;
@@ -3763,6 +3765,9 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 }
 .appear-link:hover { background: var(--surface-hover); }
 .evals-page { max-width: 1280px; }
+.evals-head { display: flex; align-items: flex-start; gap: 12px; }
+.evals-head > div { flex: 1; }
+.evals-page button.evals-close { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; }
 .evals-grid { display: grid; grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 980px) { .evals-grid { grid-template-columns: 1fr; } }
 .evals-muted { color: var(--text-muted); font-size: var(--font-size-sm); }

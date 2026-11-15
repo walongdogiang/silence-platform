@@ -43,6 +43,7 @@ import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMod
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import { EvalsPage } from "./components/EvalsPage";
+import { liveProgress, useEvalLive } from "./evalLive";
 import {
   loadDefaultSource,
   loadPick,
@@ -254,9 +255,27 @@ export function App() {
   /** Settings dialog: open on `section`; `n` changes on every request so it can re-target. */
   const [settings, setSettings] = useState<{ section: SettingsSection; n: number } | null>(null);
   const openSettings = (section: SettingsSection = loadSettingsSection()) => setSettings({ section, n: Date.now() });
-  /** Settings → Giới thiệu → Evals full page (dev: only when the Engine sees an `evals/` folder). */
+  /** Evals full page (TitleBar button, View → Evals, Ctrl+Shift+E, Settings → Giới thiệu). Dev only:
+   *  shown when the Engine sees an `evals/` folder. */
   const [showEvals, setShowEvals] = useState(false);
   const [evalsAvailable, setEvalsAvailable] = useState(false);
+  // Run state lives here, not in the page: closing the page or reloading keeps the progress.
+  const evals = useEvalLive((live) => {
+    const np = prefsRef.current;
+    if (!np.notifyDone && !np.flashTaskbar) return;
+    const c = live.summary?.counts;
+    const result = c
+      ? t("evals.total", { pass: c.pass, fail: c.fail, error: c.error, skip: c.skip, usd: fmtUsd(live.summary!.total_cost_usd) })
+      : t("evals.failed", { message: live.failed ?? "" });
+    void window.silence
+      .notifyDone?.(t("evals.notifyTitle", { suite: live.suite, result }), { notify: np.notifyDone, flash: np.flashTaskbar })
+      .catch(() => undefined);
+  });
+  const openEvals = () => {
+    setShowEvals(true);
+    setShellView("chat");
+  };
+  const toggleEvals = () => (showEvals && shellView === "chat" ? setShowEvals(false) : openEvals());
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
   const [focusModel, setFocusModel] = useState<{ id: string; n: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
@@ -867,11 +886,17 @@ export function App() {
       if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === "KeyJ") {
         e.preventDefault();
         setPanelOpen((v) => !v);
+        return;
+      }
+      if (evalsAvailable && e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyE") {
+        e.preventDefault();
+        toggleEvals();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shellView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shellView, showEvals, evalsAvailable]);
 
   async function refreshCost() {
     const r = (await window.silence.rpc("cost.summary")) as {
@@ -1721,6 +1746,19 @@ export function App() {
         onToggleChatWorkspace={() => setShellView((v) => (v === "chat" ? "hidden" : "chat"))}
         onToggleHistory={toggleHistory}
         onSettings={() => openSettings()}
+        evals={
+          evalsAvailable
+            ? (() => {
+                const p = liveProgress(evals.live);
+                return {
+                  open: showEvals && !chatHidden,
+                  running: Boolean(evals.live?.running),
+                  progress: t("evals.running", { done: p.done, total: p.total, usd: fmtUsd(p.usd) }),
+                  onToggle: toggleEvals,
+                };
+              })()
+            : undefined
+        }
         onOpenWorkspace={() => void openWorkspace()}
         onQuit={() => void window.silence?.window.close()}
       />
@@ -1739,7 +1777,17 @@ export function App() {
             />
           ) : null}
           <div className="work-body">
-            {chatHidden ? null : showEvals ? <EvalsPage models={models} /> : chatMain}
+            {chatHidden ? null : showEvals ? (
+              <EvalsPage
+                models={models}
+                live={evals.live}
+                ended={evals.ended}
+                onStopping={evals.markStopping}
+                onClose={() => setShowEvals(false)}
+              />
+            ) : (
+              chatMain
+            )}
           </div>
           <BottomPanel
             open={panelOpen}
@@ -1785,8 +1833,7 @@ export function App() {
           onOpenEvals={
             evalsAvailable
               ? () => {
-                  setShowEvals(true);
-                  setShellView("chat");
+                  openEvals();
                   setSettings(null);
                 }
               : undefined

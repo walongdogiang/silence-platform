@@ -29,6 +29,9 @@ pub struct EvalHost {
     pub repo_root: PathBuf,
     pub config_path: PathBuf,
     running: Mutex<Option<CancelFlag>>,
+    /// Progress of the current run, or of the last one until the next `start`. `eval.status`
+    /// returns it so a Studio window that closed the page or reloaded can rebuild the view.
+    events: Mutex<Vec<EvalProgress>>,
 }
 
 /// `eval.estimate` / `eval.start` params.
@@ -60,7 +63,7 @@ fn one() -> u32 {
 
 impl EvalHost {
     pub fn new(repo_root: PathBuf, config_path: PathBuf) -> Self {
-        Self { repo_root, config_path, running: Mutex::new(None) }
+        Self { repo_root, config_path, running: Mutex::new(None), events: Mutex::new(Vec::new()) }
     }
 
     fn evals_dir(&self) -> PathBuf {
@@ -91,6 +94,18 @@ impl EvalHost {
 
     pub fn is_running(&self) -> bool {
         self.running.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    /// Keep one progress event for `eval.status`.
+    fn record(&self, p: &EvalProgress) {
+        self.events.lock().unwrap_or_else(|e| e.into_inner()).push(p.clone());
+    }
+
+    /// `eval.status`: whether a run is going, and every progress event of the current (or last)
+    /// run in order. The client replays them through the same reducer as `eval.progress`.
+    pub fn status(&self) -> Value {
+        let events = self.events.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        json!({"running": self.is_running(), "events": events})
     }
 
     /// `eval.catalog`: suites with their tasks and last results, plus the sources.
@@ -209,6 +224,7 @@ impl EvalHost {
             }
             *running = Some(cancel.clone());
         }
+        self.events.lock().unwrap_or_else(|e| e.into_inner()).clear();
         let (tx, rx) = mpsc::unbounded_channel();
         let opts = Self::options(cfg);
         let repo_root = self.repo_root.clone();
@@ -216,7 +232,9 @@ impl EvalHost {
         tokio::spawn(async move {
             let mut on = {
                 let tx = tx.clone();
+                let host = Arc::clone(&host);
                 move |p: EvalProgress| {
+                    host.record(&p);
                     let _ = tx.send(p);
                 }
             };
@@ -224,7 +242,9 @@ impl EvalHost {
             match result.and_then(|summary| eval_runner::save_run(&summary, &repo_root, opts.history)) {
                 Ok(_) => {}
                 Err(e) => {
-                    let _ = tx.send(EvalProgress::Failed { message: format!("{e:#}") });
+                    let p = EvalProgress::Failed { message: format!("{e:#}") };
+                    host.record(&p);
+                    let _ = tx.send(p);
                 }
             }
             *host.running.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -434,6 +454,24 @@ mod tests {
         let names: Vec<&str> = v["suites"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"v0") && names.contains(&"modes"), "{names:?}");
         assert!(v["sources"].as_array().unwrap().len() >= 3);
+    }
+
+    #[test]
+    fn status_replays_the_current_run_until_the_next_start() {
+        let h = Arc::new(host(Path::new(".")));
+        assert_eq!(h.status(), json!({"running": false, "events": []}));
+        h.record(&EvalProgress::Started { run_id: "r1".into(), suite: "v0".into(), tasks: vec!["A".into()] });
+        h.record(&EvalProgress::TaskStarted { id: "A".into(), model: "claude-haiku".into(), attempt: 1 });
+        let v = h.status();
+        assert_eq!(v["running"], false);
+        let kinds: Vec<&str> = v["events"].as_array().unwrap().iter().map(|e| e["type"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["started", "task_started"]);
+        assert_eq!(v["events"][0]["run_id"], "r1");
+
+        // A refused start (bad config) keeps the last run's events.
+        let catalog = Catalog::load(&h.config_path).unwrap();
+        assert!(h.start(&cfg("v0", &["NOPE"]), &catalog).is_err());
+        assert_eq!(h.status()["events"].as_array().unwrap().len(), 2);
     }
 
     #[test]
