@@ -56,6 +56,11 @@ codes:
     title: Gọi app trên máy này
     detail: http_check gửi một request tới localhost / 127.0.0.1 (app của chính bạn); redirect ra ngoài bị chặn.
     hint: One HTTP request to an app on this machine.
+  LOCAL_BROWSER:
+    tier: logged
+    title: Trình duyệt trên app của bạn
+    detail: Mở trang localhost trong trình duyệt headless (profile tạm, không cookie của bạn) và bấm / gõ trên đó như người dùng.
+    hint: Headless browser on an app running on this machine.
   MCP_READ:
     tier: logged
     title: MCP chỉ đọc
@@ -195,6 +200,11 @@ codes:
     title: http_check ra ngoài máy
     detail: http_check chỉ gọi được localhost, 127.0.0.1 hoặc ::1; không dùng nó để truy cập Internet hay máy khác.
     hint: http_check only reaches this machine (localhost, 127.0.0.1, ::1). Do not use it for other hosts.
+  BROWSER_NOT_LOCAL:
+    tier: block
+    title: Mở trang ngoài máy bằng browser_open
+    detail: browser_open chỉ mở localhost, 127.0.0.1 hoặc ::1. Trình duyệt của agent không dùng để lướt Internet.
+    hint: The browser tool only opens pages on this machine (localhost, 127.0.0.1, ::1).
   POLICY_TAMPER:
     tier: block
     title: Sửa quyền của 5ilence

@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.17";
+export const PROTOCOL_VERSION = "0.1.18";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -159,6 +159,8 @@ export type SessionEvent =
   | { type: "terminal"; data: string }
   /** Background process (`proc_start`) started, printed a localhost URL, or ended (0.1.17). `status`: running | stopped | exited <code> | exited. */
   | { type: "proc"; id: string; command: string; status: string; urls: string[] }
+  /** Agent's headless browser (0.1.18): address, title, small JPEG `frame` (data URL), totals of console errors / failed requests. Empty `url` = closed. Not logged. */
+  | { type: "browser"; url: string; title: string; frame?: string; errors: number; failed: number }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };
 

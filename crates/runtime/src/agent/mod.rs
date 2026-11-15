@@ -21,6 +21,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
 mod auto;
+mod browser;
 mod changes;
 mod cli;
 mod history;
@@ -138,6 +139,8 @@ pub struct AppCtx {
     pub sandbox: crate::sandbox_host::SandboxHost,
     /// Background processes per session (`proc_*` tools). Dropping a table stops its processes.
     pub procs: Mutex<HashMap<String, Arc<silence_tools::procs::Table>>>,
+    /// Headless browser per session (`browser_*` tools), started on first `browser_open`.
+    pub browsers: Mutex<HashMap<String, Arc<silence_tools::browser::Browser>>>,
 }
 
 impl AppCtx {
@@ -152,6 +155,7 @@ impl AppCtx {
             events: Mutex::new(HashMap::new()),
             sandbox: crate::sandbox_host::SandboxHost::new(),
             procs: Mutex::new(HashMap::new()),
+            browsers: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -648,6 +652,11 @@ async fn run_turn(
                     viewed.extend(img);
                     text
                 })
+            } else if tc.name == "browser_screenshot" {
+                browser::screenshot(&ctx, &session_arc, &tx, &tc).await.map(|(text, img)| {
+                    viewed.extend(img);
+                    text
+                })
             } else {
                 dispatch_tool(&ctx, &session_arc, &tx, &tc).await
             };
@@ -785,6 +794,7 @@ fn builtin_tools(mode: SessionMode) -> Value {
         }));
     }
     arr_extend_task(&mut tools, prof.read_only);
+    tools.as_array_mut().unwrap().extend(browser::specs(prof.read_only));
     tools.as_array_mut().unwrap().extend(procs::specs(prof.read_only));
     // Read-only, so every mode gets it. Not given to sub-agents (their loop has no image path).
     let view = silence_tools::image::spec_view_image();
@@ -1013,6 +1023,9 @@ async fn dispatch_tool(
     }
     if procs::NAMES.contains(&tc.name.as_str()) {
         return procs::dispatch(ctx, session_arc, tx, tc, &args).await;
+    }
+    if browser::NAMES.contains(&tc.name.as_str()) {
+        return browser::dispatch(ctx, session_arc, tx, tc, &args).await;
     }
     if let Some(rest) = tc.name.strip_prefix("mcp__") {
         let mut parts = rest.splitn(2, "__");

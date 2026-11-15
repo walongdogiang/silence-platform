@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.17";
+pub const PROTOCOL_VERSION: &str = "0.1.18";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -477,6 +477,19 @@ pub enum SessionEvent {
         command: String,
         status: String,
         urls: Vec<String>,
+    },
+    /// What the agent's headless browser shows (`browser_*`): address, title, a small JPEG frame
+    /// (`data:` URL), totals of console errors and failed requests. Empty `url` = closed.
+    /// Not written to the session log (frames are large).
+    Browser {
+        url: String,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frame: Option<String>,
+        #[serde(default)]
+        errors: u64,
+        #[serde(default)]
+        failed: u64,
     },
     Done {
         stop: String,

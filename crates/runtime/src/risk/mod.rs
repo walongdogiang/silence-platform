@@ -305,6 +305,14 @@ pub fn classify(tool: &str, args: &Value, ctx: &RiskCtx) -> Verdict {
             let url = args.get("url").and_then(Value::as_str).unwrap_or("");
             v.add(if silence_tools::http::local_url(url).is_ok() { "LOCAL_HTTP" } else { "HTTP_NOT_LOCAL" });
         }
+        "browser_open" => {
+            let url = args.get("url").and_then(Value::as_str).unwrap_or("");
+            v.add(if silence_tools::http::local_url(url).is_ok() { "LOCAL_BROWSER" } else { "BROWSER_NOT_LOCAL" });
+        }
+        // Clicks and typing on the page already open (opened on this machine).
+        "browser_act" => v.add("LOCAL_BROWSER"),
+        "browser_snapshot" | "browser_console" | "browser_network" | "browser_close" | "browser_screenshot"
+        | "browser_export_test" => v.add("INTERNAL"),
         "submit_plan" | "suggest_mode" | "task" | "update_todos" => v.add("INTERNAL"),
         // Read or stop processes this session started.
         "proc_logs" | "proc_list" | "proc_stop" => v.add("INTERNAL"),

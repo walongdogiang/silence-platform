@@ -51,6 +51,7 @@ pub fn persisted_event(ev: &SessionEvent) -> bool {
             | SessionEvent::Thinking { .. }
             | SessionEvent::Terminal { .. }
             | SessionEvent::Diff { .. }
+            | SessionEvent::Browser { .. }
     )
 }
 

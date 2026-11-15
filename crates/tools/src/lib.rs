@@ -7,6 +7,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
+pub mod browser;
 pub mod http;
 pub mod image;
 pub mod procs;
@@ -393,7 +394,7 @@ async fn execute_uncapped(ws: &Workspace, name: &str, args: &Value) -> Result<To
 }
 
 pub fn mutates(name: &str) -> bool {
-    matches!(name, "write" | "edit" | "shell")
+    matches!(name, "write" | "edit" | "shell" | "proc_start" | "proc_stop" | "browser_act")
 }
 
 fn read(ws: &Workspace, args: &Value) -> Result<ToolOutput> {

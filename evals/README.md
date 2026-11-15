@@ -6,7 +6,7 @@ Eval là bài kiểm tra định kỳ cho agent: cho Agent thật (gọi model t
 
 | Đường dẫn | Là gì | Ai sửa |
 |---|---|---|
-| `v0/manifest.yaml`, `modes/manifest.yaml` | Định nghĩa task: `prompt`, `pass_if` | Người viết task |
+| `v0/manifest.yaml`, `modes/manifest.yaml`, `web/manifest.yaml` | Định nghĩa task: `prompt`, `pass_if`. `web/` cần Edge/Chrome/Chromium trên máy và model đọc được ảnh (kiểm chứng bằng trình duyệt và ảnh chụp, fixture `fixtures/web-app`, kiểm bằng `tests/check.py`); chưa có trong `evals.yml`, chạy tay `--dir evals/web` | Người viết task |
 | `v0/models.yaml`, `modes/models.yaml` | Model đã ghim cho từng task | `evals-calibrate` sinh ra, người duyệt qua PR |
 | `DECISIONS.md` | Nhật ký: task nào đổi model, vì sao, bằng chứng | Dán dòng nháp từ calibrate |
 | `history/runs.jsonl` | Mỗi lần chạy `--history` một dòng: model, pass/fail, token, chi phí, commit | Runner (commit vào repo) |

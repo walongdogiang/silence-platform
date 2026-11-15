@@ -161,6 +161,7 @@ export function narrateToolLive(name: string, input: unknown): NarrateStep {
   if (n === "proc_stop") return { verb: "Stopping", detail: pickId(input) ?? "process" };
   if (n === "proc_list") return { verb: "Checking processes" };
   if (n === "http_check") return { verb: "Checking", detail: httpDetail(input) };
+  if (n.startsWith("browser_")) return browserStep(n, input);
   if (/grep|search|rg|glob|find/.test(n)) {
     if (query && short) return { verb: "Searching", detail: `\`${clip(query, 40)}\` in ${short}` };
     if (query) return { verb: "Searching", detail: `\`${clip(query, 48)}\`` };
@@ -213,6 +214,18 @@ export function narrateToPast(step: NarrateStep): NarrateStep {
     Stopping: "Stopped",
     "Checking processes": "Checked processes",
     Checking: "Checked",
+    "Opening": "Opened",
+    "Reading page": "Read page",
+    "Clicking": "Clicked",
+    "Typing": "Typed",
+    "Selecting": "Selected",
+    "Pressing": "Pressed",
+    "Hovering": "Hovered",
+    "Reading console": "Read console",
+    "Reading network": "Read network",
+    "Closing browser": "Closed browser",
+    "Taking screenshot": "Took screenshot",
+    "Writing test": "Wrote test",
     Blocked: "Blocked",
     "Using tool": "Used tool",
     Using: "Used tool",
@@ -273,7 +286,37 @@ const VERBS = new Set([
   "Exploring", "Explored", "Writing plan", "Wrote plan", "Using tool", "Used tool", "Blocked", "Thinking",
   "Thought", "Planning next moves", "Starting", "Started", "Reading logs", "Read logs", "Stopping", "Stopped",
   "Checking processes", "Checked processes", "Checking", "Checked",
+  "Opening", "Opened", "Reading page", "Read page", "Clicking", "Clicked", "Typing", "Typed", "Selecting", "Selected", "Pressing", "Pressed", "Hovering", "Hovered", "Reading console", "Read console", "Reading network", "Read network", "Closing browser", "Closed browser", "Taking screenshot", "Took screenshot", "Writing test", "Wrote test",
 ]);
+
+const BROWSER_ACT_VERB: Record<string, string> = {
+  click: "Clicking",
+  fill: "Typing",
+  select: "Selecting",
+  press: "Pressing",
+  hover: "Hovering",
+};
+
+/** Steps of the headless browser (`browser_*`). Checked before READ_RE: `browser_open` has "open". */
+function browserStep(n: string, input: unknown): NarrateStep {
+  const i = (input ?? {}) as { url?: unknown; ref?: unknown; action?: unknown; value?: unknown };
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  if (n === "browser_open") return { verb: "Opening", detail: clip(str(i.url).replace(/^https?:\/\//, ""), 48) };
+  if (n === "browser_snapshot") return { verb: "Reading page" };
+  if (n === "browser_console") return { verb: "Reading console" };
+  if (n === "browser_network") return { verb: "Reading network" };
+  if (n === "browser_close") return { verb: "Closing browser" };
+  if (n === "browser_export_test") return { verb: "Writing test", ...(str((input as { title?: unknown } | null)?.title) ? { detail: clip(str((input as { title?: unknown }).title), 48) } : {}) };
+  if (n === "browser_screenshot") {
+    const full = (input as { full_page?: unknown } | null)?.full_page === true;
+    return { verb: "Taking screenshot", ...(str(i.ref) ? { detail: str(i.ref) } : full ? { detail: "full page" } : {}) };
+  }
+  const action = str(i.action).toLowerCase();
+  const verb = BROWSER_ACT_VERB[action] ?? "Using tool";
+  const value = str(i.value);
+  const detail = action === "press" ? value : [str(i.ref), action === "fill" || action === "select" ? `"${value}"` : ""].filter(Boolean).join(" ");
+  return { verb, detail: clip(detail || n, 48) };
+}
 
 /** `GET localhost:5173/api` for an `http_check` step. */
 function httpDetail(input: unknown): string {
