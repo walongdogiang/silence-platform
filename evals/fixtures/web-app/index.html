@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Giỏ hàng</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Giỏ hàng</h1>
+  <form id="add-form">
+    <label for="name">Tên món</label>
+    <input id="name" value="Táo">
+    <label for="qty">Số lượng</label>
+    <input id="qty" type="number" value="1" min="1">
+    <button id="add" type="submit">Thêm</button>
+  </form>
+  <p id="count">0 món</p>
+  <ul id="items"></ul>
+  <script src="app.js"></script>
+</body>
+</html>

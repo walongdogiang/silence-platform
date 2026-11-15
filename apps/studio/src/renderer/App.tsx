@@ -71,6 +71,7 @@ import {
 } from "./chatMeta";
 import { attachToPrompt, cutParams, rewindPrompt, userTurnsBefore } from "./messageMenu";
 import { applyProc, isLocalUrl, type ProcRow } from "./procs";
+import { applyBrowser, type BrowserView } from "./browserView";
 import type { ChatLine, ChatThread, CheckpointFile, Diff, Perm, ShellView } from "./models";
 import {
   applyAppearance,
@@ -298,6 +299,8 @@ export function App() {
   const [outputLog, setOutputLog] = useState<string[]>([]);
   /** Background processes of the open chat's session (Ports tab). */
   const [procs, setProcs] = useState<ProcRow[]>([]);
+  /** What the agent's headless browser shows (Browser tab); null = none open. */
+  const [browserView, setBrowserView] = useState<BrowserView | null>(null);
   const [historyHidden, setHistoryHidden] = useState(() => localStorage.getItem("silence.shell.history") === "1");
 
   const [workspace, setWorkspace] = useState(() => localStorage.getItem("silence.shell.workspace") ?? "");
@@ -394,6 +397,8 @@ export function App() {
   }, [permMode, settings === null]);
   // Ports tab: the processes of this session (they outlive turns; events only carry changes).
   useEffect(() => {
+    // The browser belongs to the session: another chat shows nothing until its agent opens a page.
+    setBrowserView(null);
     if (!sessionId || !window.silence) {
       setProcs([]);
       return;
@@ -676,6 +681,8 @@ export function App() {
             return next;
           });
         }
+      } else if (ev.type === "browser") {
+        setBrowserView((prev) => applyBrowser(prev, ev));
       } else if (ev.type === "proc") {
         setProcs((xs) => applyProc(xs, ev));
         setOutputLog((xs) => [
@@ -1958,6 +1965,7 @@ export function App() {
             termRef={setTermEl}
             output={outputLog}
             procs={procs}
+            browser={browserView}
             onStopProc={(id) => {
               if (!sessionId) return;
               void window.silence.rpc("proc.stop", { session_id: sessionId, id }).catch((e: unknown) => {

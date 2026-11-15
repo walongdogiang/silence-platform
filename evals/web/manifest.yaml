@@ -1,0 +1,68 @@
+# Eval kiểm chứng bằng trình duyệt — fixture web-app (trang tĩnh, lỗi chỉ lộ khi chạy JS).
+# Cần Edge / Chrome / Chromium trên máy chạy eval (Windows có sẵn Edge). Chạy tay:
+#   silence-engine evals --dir evals/web --repo-root .
+# Hướng dẫn chung: evals/README.md
+
+workspace: fixtures/web-app
+setup: []
+verify_cmd: python tests/check.py
+
+tasks:
+  # Lỗi phía client: bấm "Thêm" không có gì xảy ra (TypeError trong app.js). Agent phải mở trang
+  # bằng trình duyệt, đọc lỗi console, sửa, rồi kiểm lại trên trang.
+  - id: W01-browser-finds-client-error
+    kind: bugfix
+    prompt: "Trang giỏ hàng trong thư mục này: bấm nút Thêm thì không có món nào được thêm. Chạy server tĩnh ở nền (`python -u -m http.server 8767 --bind 127.0.0.1`), mở trang, tìm nguyên nhân, sửa, kiểm lại trên trang rằng bấm Thêm đã ra món, rồi dừng server."
+    pass_if:
+      grep:
+        - path: app.js
+          pattern: 'cart\.items\.push'
+      audit_matches:
+        - '"kind":"tool",.*"tool":"browser_open".*"codes":\[[^\]]*"LOCAL_BROWSER"'
+        - '"kind":"tool",.*"tool":"browser_act"'
+        - '"kind":"tool",.*"tool":"proc_stop".*"ok":true'
+      report_mentions:
+        - "Đã kiểm"
+      unchanged:
+        - index.html
+
+  # Lỗi chỉ thấy bằng mắt: dòng đếm món có trong DOM (snapshot chữ vẫn thấy) nhưng chữ gần trắng
+  # trên nền trắng. Agent phải nhìn trang bằng browser_screenshot rồi sửa CSS.
+  - id: W02-browser-screenshot-visual-bug
+    kind: bugfix
+    prompt: "Khách báo: trên trang giỏ hàng không nhìn thấy dòng đếm số món ở đâu cả. Chạy server tĩnh ở nền (`python -u -m http.server 8768 --bind 127.0.0.1`), xem trang như khách thấy, tìm nguyên nhân, sửa, kiểm lại bằng mắt, rồi dừng server."
+    pass_if:
+      test: count_visible
+      audit_matches:
+        - '"kind":"tool",.*"tool":"browser_screenshot"'
+      report_mentions:
+        - "Đã kiểm"
+      unchanged:
+        - index.html
+
+  # Dự án có Playwright (playwright.config.ts, testDir e2e): sau khi sửa và kiểm trên trình duyệt,
+  # agent lưu luồng vừa kiểm thành test bằng browser_export_test + write. Không chạy được test
+  # (fixture không cài node_modules): chỉ kiểm nội dung file.
+  - id: W03-browser-flow-to-playwright-test
+    kind: bugfix
+    prompt: "Bấm Thêm trên trang giỏ hàng không thêm được món. Sửa lỗi, kiểm lại trên trình duyệt (server tĩnh ở nền: `python -u -m http.server 8770 --bind 127.0.0.1`) rằng thêm món chạy, rồi lưu đúng luồng vừa kiểm thành test Playwright của dự án ở `e2e/cart.spec.ts`. Dừng server khi xong."
+    pass_if:
+      grep:
+        - path: app.js
+          pattern: 'cart\.items\.push'
+        - path: e2e/cart.spec.ts
+          pattern: '@playwright/test'
+        - path: e2e/cart.spec.ts
+          pattern: 'getBy(Role|Label|TestId|Placeholder)\('
+        - path: e2e/cart.spec.ts
+          pattern: '\.click\(\)'
+        - path: e2e/cart.spec.ts
+          pattern: 'expect\('
+      audit_matches:
+        - '"kind":"tool",.*"tool":"browser_act"'
+        - '"kind":"tool",.*"tool":"proc_stop".*"ok":true'
+      report_mentions:
+        - "Đã kiểm"
+      unchanged:
+        - index.html
+        - playwright.config.ts

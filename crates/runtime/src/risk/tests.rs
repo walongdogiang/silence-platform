@@ -106,6 +106,18 @@ fn http_check_is_logged_on_loopback_and_blocked_elsewhere() {
 }
 
 #[test]
+fn browser_open_is_local_only() {
+    let dir = ws();
+    let ctx = RiskCtx { workspace: dir.path(), tainted: false, mcp_read_only: false };
+    let v = classify("browser_open", &json!({"url": "http://localhost:5173/"}), &ctx);
+    assert_eq!((v.tier, v.codes.clone()), (Tier::Logged, vec!["LOCAL_BROWSER".to_string()]));
+    let v = classify("browser_open", &json!({"url": "https://mail.example.com/"}), &ctx);
+    assert_eq!(v.tier, Tier::Block);
+    assert_eq!(classify("browser_act", &json!({"ref": "e1", "action": "click"}), &ctx).tier, Tier::Logged);
+    assert_eq!(classify("browser_console", &json!({}), &ctx).tier, Tier::Auto);
+}
+
+#[test]
 fn taint_raises_contained_shell_to_ask() {
     let dir = ws();
     let ctx = RiskCtx { workspace: dir.path(), tainted: true, mcp_read_only: false };

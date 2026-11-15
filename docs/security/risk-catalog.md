@@ -30,6 +30,7 @@ Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
 | `SYSTEM_CHANGE` | `format`, `diskpart`, `bcdedit`, `vssadmin`, `reg add/delete/import`, `Set-ExecutionPolicy`, `Set-MpPreference`, `netsh`, `schtasks /create`, `sc create`, `New-Service`, `takeown`, `icacls`, `shutdown`, `Restart-Computer`, `sudo …`, `runas` | Đổi cấu hình máy, bảo mật, khởi động hoặc tạo persistence |
 | `SECRET_EXFIL` | `curl -d @.env https://…`, `cat .env \| curl --data-binary @- …`, `iwr -Method Post -InFile .env` | Gửi bí mật ra mạng |
 | `HTTP_NOT_LOCAL` | `http_check` tới `https://example.com`, IP trong LAN, `file://`, `localhost.evil.com` | Tool chỉ để kiểm app trên máy này; ra ngoài thì phải đi qua lệnh mạng (`NET_ACCESS`, có hỏi) |
+| `BROWSER_NOT_LOCAL` | `browser_open` tới `https://…` ngoài máy, IP LAN, `file://` | Trình duyệt của agent chỉ để kiểm app trên máy này, không để lướt web |
 | `POLICY_TAMPER` | `write`/`edit`/shell ghi `.silence/permissions.json`, `.silence/policy.yaml` | Agent tự nới quyền cho chính nó; chỉ user (Settings) và Engine được ghi |
 
 ## Tầng 2 — Hỏi kèm giải thích
@@ -65,6 +66,7 @@ Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
 | `RUN_SCRIPT` | `python calc.py`, `node scripts/check.mjs`, `.\tools\x.ps1` (file trong workspace) | Script trong repo, user xem được |
 | `GIT_LOCAL` | `git add`, `git stash`, `git switch`, `git checkout -b`, `git mv` | Cục bộ, đảo ngược được |
 | `LOCAL_HTTP` | `http_check` tới `localhost`, `127.0.0.1`, `::1` (redirect ra ngoài bị chặn, không proxy) | Chỉ chạm app của chính user trên máy này; không gây taint. Ask/Review chỉ cho GET/HEAD/OPTIONS |
+| `LOCAL_BROWSER` | `browser_open` tới localhost; `browser_act` (bấm, gõ, chọn) trên trang đó | Trình duyệt headless, profile tạm không cookie; chỉ chạm app của chính user. Trang rời khỏi máy (redirect, link) thì phiên bị taint. Ask/Review không có `browser_act` |
 | `MCP_READ` | Tool MCP có `readOnlyHint` | Không ghi; output vẫn bị coi là nội dung bên ngoài (làm phát sinh taint) |
 
 ## Tầng 0 — Tự chạy

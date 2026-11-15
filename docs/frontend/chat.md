@@ -137,6 +137,11 @@ Mục đổi hội thoại (Retry, Rewind, Fork) khoá khi đang `busy`. Toast "
 | Stopping | Stopped | `proc_stop` |
 | Checking processes | Checked processes | `proc_list` |
 | Checking | Checked | `http_check` (`GET localhost:5173/api`) |
+| Opening / Reading page | Opened / Read page | `browser_open` (URL) / `browser_snapshot` |
+| Clicking · Typing · Selecting · Pressing · Hovering | Clicked · Typed · Selected · Pressed · Hovered | `browser_act` theo `action` (`e3 "3"`, `Enter`) |
+| Reading console / Reading network / Closing browser | Read console / Read network / Closed browser | `browser_console` / `browser_network` / `browser_close` |
+| Taking screenshot | Took screenshot | `browser_screenshot` (`e4` / `full page`) |
+| Writing test | Wrote test | `browser_export_test` (tiêu đề test); file thật được ghi sau đó bằng `write` (DiffCard) |
 | Searching | Searched | |
 | Editing | Edited | |
 | Running | Ran | |

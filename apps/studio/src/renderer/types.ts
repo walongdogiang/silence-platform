@@ -46,6 +46,8 @@ export type SessionEvent =
   | { type: "terminal"; data: string }
   /** Background process (`proc_start`): started, new localhost URL, or ended. `status`: running | stopped | exited <code>. */
   | { type: "proc"; id: string; command: string; status: string; urls: string[] }
+  /** Agent's headless browser: address, title, small JPEG frame, totals of console errors / failed requests. Empty `url` = closed. */
+  | { type: "browser"; url: string; title: string; frame?: string; errors: number; failed: number }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };
 

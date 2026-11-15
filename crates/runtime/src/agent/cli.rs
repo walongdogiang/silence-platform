@@ -49,7 +49,7 @@ pub(super) async fn run_cli_turn(
         let mut tools = builtin_tools(s.mode);
         if let Some(arr) = tools.as_array_mut() {
             // Images cannot travel back through an MCP text result in this backend.
-            arr.retain(|t| t["function"]["name"] != "view_image");
+            arr.retain(|t| !matches!(t["function"]["name"].as_str(), Some("view_image" | "browser_screenshot")));
         }
         let prior = if s.cli_session.is_none() { prior_transcript(&s.messages) } else { String::new() };
         (

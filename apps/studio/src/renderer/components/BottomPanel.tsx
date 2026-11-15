@@ -1,10 +1,11 @@
-import { ExternalLink, Plus, Square, X } from "lucide-react";
+import { AlertTriangle, ExternalLink, Plus, Square, X } from "lucide-react";
 import type { Ref } from "react";
 import { useT, type MsgKey } from "../i18n";
 import { SoftScroll } from "./SoftScroll";
 import { isLocalUrl, procState, sortProcs, type ProcRow } from "../procs";
+import { shortUrl, type BrowserView } from "../browserView";
 
-export type PanelTab = "terminal" | "output" | "problems" | "debug" | "ports";
+export type PanelTab = "terminal" | "output" | "problems" | "debug" | "ports" | "browser";
 
 const TABS: { id: PanelTab; label: MsgKey; live?: boolean }[] = [
   { id: "problems", label: "panel.problems" },
@@ -12,6 +13,7 @@ const TABS: { id: PanelTab; label: MsgKey; live?: boolean }[] = [
   { id: "debug", label: "panel.debug" },
   { id: "terminal", label: "panel.terminal", live: true },
   { id: "ports", label: "panel.ports", live: true },
+  { id: "browser", label: "panel.browser", live: true },
 ];
 
 export function BottomPanel(props: {
@@ -25,6 +27,8 @@ export function BottomPanel(props: {
   procs?: ProcRow[];
   onStopProc?: (id: string) => void;
   onOpenUrl?: (url: string) => void;
+  /** What the agent's headless browser shows (`browser` events). */
+  browser?: BrowserView | null;
 }) {
   const tr = useT();
   return (
@@ -60,6 +64,7 @@ export function BottomPanel(props: {
             </pre>
           </SoftScroll>
         ) : null}
+        {props.tab === "browser" ? <BrowserPane view={props.browser ?? null} onOpen={props.onOpenUrl} /> : null}
         {props.tab === "ports" ? <PortsList procs={props.procs ?? []} onStop={props.onStopProc} onOpen={props.onOpenUrl} /> : null}
         {props.tab === "problems" || props.tab === "debug" ? (
           <p className="hint">{tr("panel.notWired", { tab: tr(TABS.find((t) => t.id === props.tab)?.label ?? "panel.problems") })}</p>
@@ -114,5 +119,44 @@ function PortsList(props: { procs: ProcRow[]; onStop?: (id: string) => void; onO
         })}
       </ul>
     </SoftScroll>
+  );
+}
+
+/** Browser tab: read-only mirror of the agent's headless browser — address, title, last frame, error counts. */
+function BrowserPane(props: { view: BrowserView | null; onOpen?: (url: string) => void }) {
+  const tr = useT();
+  const v = props.view;
+  if (!v) return <p className="hint">{tr("browser.empty")}</p>;
+  return (
+    <div className="browser-pane">
+      <div className="browser-bar">
+        <button
+          type="button"
+          className="browser-url"
+          title={isLocalUrl(v.url) ? tr("ports.open", { url: v.url }) : v.url}
+          disabled={!isLocalUrl(v.url)}
+          onClick={() => props.onOpen?.(v.url)}
+        >
+          {shortUrl(v.url)}
+          {isLocalUrl(v.url) ? <ExternalLink size={12} aria-hidden /> : null}
+        </button>
+        <span className="browser-title" title={v.title}>
+          {v.title}
+        </span>
+        {v.errors > 0 ? (
+          <span className="browser-badge error" title={tr("browser.errorsTip")}>
+            <AlertTriangle size={12} aria-hidden /> {tr("browser.errors", { n: v.errors })}
+          </span>
+        ) : null}
+        {v.failed > 0 ? (
+          <span className="browser-badge" title={tr("browser.failedTip")}>
+            {tr("browser.failed", { n: v.failed })}
+          </span>
+        ) : null}
+      </div>
+      <div className="browser-frame">
+        {v.frame ? <img src={v.frame} alt={tr("browser.frameAlt", { url: shortUrl(v.url) })} draggable={false} /> : null}
+      </div>
+    </div>
   );
 }

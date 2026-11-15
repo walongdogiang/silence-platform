@@ -86,5 +86,14 @@ describe("narration of verification tools", () => {
     });
     expect(narrateToPast(narrateToolLive("http_check", { url: "http://127.0.0.1:8000/" })).verb).toBe("Checked");
     expect(narrateToPast(narrateToolLive("proc_start", { command: "x" })).verb).toBe("Started");
+    expect(narrateToolLive("browser_open", { url: "http://localhost:5173/cart" })).toEqual({ verb: "Opening", detail: "localhost:5173/cart" });
+    expect(narrateToolLive("browser_act", { ref: "e3", action: "fill", value: "3" })).toEqual({ verb: "Typing", detail: 'e3 "3"' });
+    expect(narrateToolLive("browser_act", { action: "press", value: "Enter" })).toEqual({ verb: "Pressing", detail: "Enter" });
+    expect(narrateToPast(narrateToolLive("browser_act", { ref: "e1", action: "click" }))).toEqual({ verb: "Clicked", detail: "e1" });
+    expect(narrateToPast(narrateToolLive("browser_console", {})).verb).toBe("Read console");
+    expect(narrateToolLive("browser_screenshot", { ref: "e4" })).toEqual({ verb: "Taking screenshot", detail: "e4" });
+    expect(narrateToPast(narrateToolLive("browser_screenshot", {})).verb).toBe("Took screenshot");
+    expect(narrateToolLive("browser_export_test", { title: "adds an item" })).toEqual({ verb: "Writing test", detail: "adds an item" });
+    expect(narrateToPast(narrateToolLive("browser_export_test", {})).verb).toBe("Wrote test");
   });
 });
