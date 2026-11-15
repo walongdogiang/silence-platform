@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { LangContext, type Lang } from "../i18n";
+import { DEFAULT_LANG, LANGS, LangContext, type Lang } from "../i18n";
 import type { ChatLine } from "../models";
 import { ChatHistoryPanel } from "./ChatHistoryPanel";
 import { ChatPane } from "./ChatPane";
 import { Composer } from "./Composer";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { DeleteChatDialog } from "./DeleteChatDialog";
+import { UndoToast } from "./UndoToast";
 import { TitleBar } from "./TitleBar";
 
 /** Vietnamese letters with diacritics: none may show in the English UI (user/agent text aside). */
@@ -33,6 +36,7 @@ const pane = (
     lines={lines}
     plan={"1. Add the parser module\n2. Wire it into the CLI"}
     perm={{
+      session_id: "s",
       request_id: "r",
       name: "shell",
       input: { command: "npm install zod" },
@@ -107,12 +111,21 @@ const titleBar = (
   />
 );
 
+const confirmDialog = (
+  <ConfirmDialog title="Rewind?" body="Body" confirmLabel="Rewind" danger onResult={noop} />
+);
+const deleteDialog = <DeleteChatDialog title="My chat" turns={3} onCancel={noop} onDelete={noop} onArchive={noop} />;
+const undoToast = <UndoToast title="My chat" onUndo={noop} onDismiss={noop} />;
+
 describe("UI language sweep", () => {
   it.each([
     ["ChatPane", pane],
     ["Composer", composer],
     ["ChatHistoryPanel", history],
     ["TitleBar", titleBar],
+    ["ConfirmDialog", confirmDialog],
+    ["DeleteChatDialog", deleteDialog],
+    ["UndoToast", undoToast],
   ])("%s in English has no Vietnamese text", (_, node) => {
     const out = inLang("en", node);
     const at = out.search(VI);
@@ -127,5 +140,20 @@ describe("UI language sweep", () => {
     expect(inLang("vi", pane)).toContain("Cho phép một lần");
     expect(inLang("vi", composer)).toContain("Lập kế hoạch, xây dựng");
     expect(inLang("en", composer)).toContain("Plan, Build, / for skills, @ for context");
+  });
+
+  it("delete dialog and undo toast switch language and show the countdown", () => {
+    expect(inLang("en", deleteDialog)).toContain("Delete chat?");
+    expect(inLang("en", deleteDialog)).toContain("and its 3 messages");
+    expect(inLang("vi", deleteDialog)).toContain("Xoá đoạn chat?");
+    expect(inLang("vi", deleteDialog)).toContain("cùng 3 tin nhắn");
+    expect(inLang("en", undoToast)).toContain("Undo");
+    expect(inLang("en", undoToast)).toContain("8s");
+    expect(inLang("vi", undoToast)).toContain("Hoàn tác");
+  });
+
+  it("English is the default language", () => {
+    expect(DEFAULT_LANG).toBe("en");
+    expect(LANGS[0].id).toBe("en");
   });
 });

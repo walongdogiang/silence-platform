@@ -4,7 +4,12 @@ type: spec
 code:
   - apps/studio/src/renderer/components/EvalsPage.tsx
   - apps/studio/src/renderer/evalConfig.ts
+  - apps/studio/src/renderer/evalSettings.ts
+  - apps/studio/src/renderer/components/EvalsSettingsPanel.tsx
+  - crates/runtime/src/eval_config.rs
   - apps/studio/src/renderer/evalLive.ts
+  - apps/studio/src/renderer/evalTrace.ts
+  - crates/runtime/src/eval_trace.rs
   - crates/runtime/src/eval_rpc.rs
 ---
 
@@ -17,6 +22,19 @@ Chạy eval agent ngay trong Studio, thay cho `npm run evals …`. Cách eval ch
 - Lối vào chính: icon **Evals** (bình thí nghiệm) trên TitleBar, giữa Chat và Settings. Ngoài ra: **View → Evals**, `Ctrl+Shift+E`, hoặc Settings → **Giới thiệu** → hàng **Evals** (lối tắt).
 - Bấm lại icon, nút **×** ở đầu trang, hoặc mở chat/file khác thì trang đóng. Lượt chạy vẫn tiếp tục.
 - Mọi lối vào chỉ hiện khi Engine thấy thư mục `evals/` ở repo root (`eval.catalog` trả `available: true`), tức là khi chạy từ checkout của repo 5ilence.
+
+## Tab Cấu hình
+
+Đầu trang có hai tab: **Chạy** (mặc định) và **Cấu hình**. Tab Cấu hình sửa `evals/config.yaml`: component `EvalsSettingsPanel.tsx`, hàm thuần `evalSettings.ts` (`ciMonthlyCap`, `parseCap`, `sameSettings`), RPC `eval.config.get` / `eval.config.set` ở `eval_rpc.rs` (`config_get`, `config_set`), Engine `eval_config.rs`.
+
+- **Nguồn khi chạy trên máy**: radio mọi nguồn trong catalog, kể cả Claude CLI, cộng "Model riêng của từng task" (`per-task`). Mỗi nguồn ghi tên biến khoá và trạng thái từ `providers::source_ready`: "dùng được trên máy này", hoặc lý do (chưa cài / chưa đăng nhập CLI, thiếu khoá).
+- **Profile**: smoke / nightly / weekly, mỗi profile một dòng mô tả, lệnh `npm run evals:<profile>`, ô trần chi (weekly ba ô).
+- **CI (GitHub Actions)**: ô "Tự chạy theo lịch trên GitHub" (tắt sẵn). Tắt thì chỉ hiện giải thích. Bật thì hiện radio nguồn CI (không có Claude CLI), nhắc tên secret, hai ô Đêm/Tuần và dòng "Tối đa khoảng $X mỗi tháng" (trần 26 lượt Đêm + 4 lượt Tuần, không phải chi dự kiến).
+- Studio **không nhập, không đọc, không ghi** khoá API.
+- Ô trần chi nhận số USD từ 0 tới `max_cap_usd` của Engine; sai thì viền đỏ, nút **Lưu** bị khoá.
+- **Lưu** ghi file và báo: lượt chạy trên máy dùng ngay; CI dùng sau khi commit và merge PR. **Hoàn tác** quay về giá trị đã lưu. Lưu xong, tab Chạy cập nhật nguồn mặc định.
+- Ô **Nguồn** của tab Chạy: mặc định "Theo cấu hình (<nguồn>)" (gửi không có `source`; Engine dùng nguồn của file), rồi "Model riêng của từng task" (`per-task`), rồi từng nguồn.
+- Tab Chạy không bị unmount khi sang tab Cấu hình (chỉ ẩn), nên cấu hình và bảng kết quả đang xem vẫn còn.
 
 ## Theo dõi khi chạy
 
@@ -39,9 +57,12 @@ Chạy eval agent ngay trong Studio, thay cho `npm run evals …`. Cách eval ch
 - **Chân trang (dính đáy):** ước tính chi phí, rồi nút Chạy n task; khi đang chạy thì là nút Dừng.
 
 **Cột phải: kết quả**
-- **Kết quả trực tiếp** (`eval.progress`): thanh tiến độ, bảng task / kết quả / model / chi phí / thời gian; tổng kết khi xong; nút **Chạy lại task trượt (n)**, nút này chỉ đặt lại danh sách task chứ không tự chạy.
+- **Kết quả trực tiếp** (`eval.progress`): thanh tiến độ, bảng task / kết quả / model / lượt gọi (số lần gọi model) / cache (tỉ lệ token input lấy từ prompt cache, `evalLive.ts::fmtCacheHit`; `–` khi không có số) / chi phí / thời gian; tổng kết khi xong; nút **Chạy lại task trượt (n)**, nút này chỉ đặt lại danh sách task chứ không tự chạy.
 - **Chi tiết task:** bấm một dòng đã xong để mở, gồm:
+  - tab **Checks**: từng điều kiện `pass_if` với ✓/✗ và lý do trượt (vd. "pattern not found in the file", đuôi output của test). Task có check trượt thì mở thẳng tab này;
+  - tab **Trace**: dòng thời gian của lần thử (model/slot, token và chi phí mỗi lượt, text, suy nghĩ, tool call có đầu vào/kết quả và thời gian, lỗi). Gom từ `evalTrace.ts`;
   - tab Báo cáo (Markdown như chat), tab Thay đổi (file thêm/sửa/xoá so với fixture, trước/sau), tab Audit;
+  - lần thử chạy trước khi có `checks.json`/`trace.jsonl` thì hai tab đầu báo "chưa có";
   - chọn lần thử khi có nhiều lần;
   - nút **Mở thư mục** (main chỉ cho phép đường dẫn trong `evals/results`).
 - **Lần chạy gần đây:** 10 file `metrics-*.json` mới nhất, mỗi lần có nút "Dùng các task này" và "Chạy lại task trượt"; chip theo task (màu theo kết quả) mở chi tiết task.

@@ -7,6 +7,8 @@ import type { EvalCatalog, EvalConfig, EvalRun, EvalStatus, EvalTaskInfo } from 
 export type EvalStore = { current: EvalConfig; saved: Record<string, EvalConfig> };
 
 export const MAX_REPEAT = 5;
+/** `source` = mỗi task chạy model ghim của nó. Không có `source` = nguồn trong `evals/config.yaml`. */
+export const PER_TASK = "per-task";
 
 /** v0, every task, each task's own model, one attempt, $1 cap, no history line. */
 export const DEFAULT_EVAL_CONFIG: EvalConfig = {
@@ -74,7 +76,7 @@ export function sanitize(cfg: EvalConfig, catalog: EvalCatalog | null): EvalConf
     tasks: cfg.tasks.filter((id) => ids.has(id)),
     repeat: Math.min(MAX_REPEAT, Math.max(1, Math.round(cfg.repeat || 1))),
   };
-  if (out.source && !catalog.sources.some((s) => s.id === out.source)) delete out.source;
+  if (out.source && out.source !== PER_TASK && !catalog.sources.some((s) => s.id === out.source)) delete out.source;
   if (out.max_cost !== undefined && !(out.max_cost >= 0)) delete out.max_cost;
   return out;
 }

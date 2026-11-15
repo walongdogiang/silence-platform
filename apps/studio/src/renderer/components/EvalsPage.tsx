@@ -6,6 +6,7 @@ import {
   lastFailed,
   loadEvalStore,
   MAX_REPEAT,
+  PER_TASK,
   rerunFailed,
   resetConfig,
   sanitize,
@@ -14,20 +15,26 @@ import {
   withSuite,
   type EvalStore,
 } from "../evalConfig";
-import { liveProgress, type Live } from "../evalLive";
+import { fmtCacheHit, liveProgress, type Live } from "../evalLive";
+import { fmtMs, traceItems, type TraceItem } from "../evalTrace";
 import { useT, type T } from "../i18n";
+import { EvalsSettingsPanel } from "./EvalsSettingsPanel";
 import { MarkdownMessage } from "./MarkdownMessage";
 import type {
   EvalCatalog,
   EvalConfig,
   EvalEstimate,
   EvalRun,
+  EvalSettings,
+  EvalSettingsInfo,
   EvalStatus,
   EvalTaskDetail,
   ModelInfo,
 } from "../types";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+const DETAIL_TABS = ["checks", "trace", "report", "diff", "audit"] as const;
+type DetailTab = (typeof DETAIL_TABS)[number];
 
 function rpc<R>(method: string, params?: unknown): Promise<R> {
   return window.silence.rpc(method, params) as Promise<R>;
@@ -72,8 +79,11 @@ export function EvalsPage(props: {
   const live = props.live;
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [detail, setDetail] = useState<EvalTaskDetail | null>(null);
-  const [detailTab, setDetailTab] = useState<"report" | "diff" | "audit">("report");
+  const [detailTab, setDetailTab] = useState<DetailTab>("report");
   const [error, setError] = useState("");
+  const [page, setPage] = useState<"run" | "settings">("run");
+  /** `evals/config.yaml`: the default source of a run whose Source box is "As configured". */
+  const [settings, setSettings] = useState<EvalSettings | null>(null);
   const cfg = store.current;
   const cfgRef = useRef(cfg);
   cfgRef.current = cfg;
@@ -91,6 +101,9 @@ export function EvalsPage(props: {
         // First visit: every task of the default suite.
         return { ...s, current: fixed.tasks.length === 0 && s.current.tasks.length === 0 ? resetConfig(c) : fixed };
       });
+      rpc<EvalSettingsInfo>("eval.config.get")
+        .then((i) => setSettings(i.settings))
+        .catch(() => setSettings(null));
       const r = await rpc<{ runs: EvalRun[] }>("eval.runs");
       setRuns(r.runs ?? []);
     } catch (e) {
@@ -140,7 +153,13 @@ export function EvalsPage(props: {
   const selected = new Set(cfg.tasks);
   const toggle = (id: string) =>
     setCfg({ ...cfg, tasks: selected.has(id) ? cfg.tasks.filter((x) => x !== id) : tasks.map((x) => x.id).filter((x) => x === id || selected.has(x)) });
-  const sourceModels = props.models.filter((m) => !cfg.source || m.provider === cfg.source);
+  // No source in the config = the default of evals/config.yaml; `per-task` = each task's own model.
+  const effectiveSource = cfg.source === PER_TASK ? undefined : cfg.source || (settings?.source !== PER_TASK ? settings?.source : undefined);
+  const sourceModels = props.models.filter((m) => !effectiveSource || m.provider === effectiveSource);
+  const defaultLabel =
+    settings?.source === PER_TASK
+      ? t("evals.sourceOwn")
+      : (catalog?.sources.find((s) => s.id === settings?.source)?.label ?? settings?.source ?? "…");
   const running = Boolean(live?.running) || Boolean(catalog?.running && !live);
 
   async function start() {
@@ -160,7 +179,10 @@ export function EvalsPage(props: {
 
   async function openDetail(suite: string, id: string, attempt?: number) {
     try {
-      setDetail(await rpc<EvalTaskDetail>("eval.task", { suite, task_id: id, attempt }));
+      const d = await rpc<EvalTaskDetail>("eval.task", { suite, task_id: id, attempt });
+      setDetail(d);
+      // A new task opens on Checks when something failed; switching attempts keeps the tab.
+      if (attempt === undefined) setDetailTab(d.checks?.some((c) => !c.ok) ? "checks" : "report");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -214,7 +236,24 @@ export function EvalsPage(props: {
         </button>
       </header>
 
-      <div className="evals-grid">
+      <div className="evals-pages" role="tablist">
+        {(["run", "settings"] as const).map((k) => (
+          <button key={k} type="button" role="tab" aria-selected={page === k} className={page === k ? "on" : undefined} onClick={() => setPage(k)}>
+            {t(k === "run" ? "evals.page.run" : "evals.page.settings")}
+          </button>
+        ))}
+      </div>
+
+      {page === "settings" ? (
+        <EvalsSettingsPanel
+          onSaved={(s) => {
+            setSettings(s);
+            setEstimate(null);
+          }}
+        />
+      ) : null}
+
+      <div className="evals-grid" hidden={page !== "run"}>
         <section className="evals-config">
           <div className="evals-setups">
             <label>
@@ -316,12 +355,14 @@ export function EvalsPage(props: {
                 value={cfg.source ?? ""}
                 onChange={(e) => {
                   const source = e.target.value || undefined;
+                  const next = source === PER_TASK ? undefined : source || (settings?.source !== PER_TASK ? settings?.source : undefined);
                   // A model of another source no longer fits: back to each task's own model.
-                  const keepModel = !cfg.model || cfg.model === "auto" || props.models.some((m) => m.id === cfg.model && m.provider === source);
+                  const keepModel = !cfg.model || cfg.model === "auto" || props.models.some((m) => m.id === cfg.model && m.provider === next);
                   setCfg({ ...cfg, source, model: keepModel ? cfg.model : undefined });
                 }}
               >
-                <option value="">{t("evals.sourceOwn")}</option>
+                <option value="">{t("evals.sourceDefault", { source: defaultLabel })}</option>
+                <option value={PER_TASK}>{t("evals.sourceOwn")}</option>
                 {catalog.sources.map((s) => (
                   <option key={s.id} value={s.id} disabled={!s.available} title={s.unavailable_reason || undefined}>
                     {s.label}
@@ -507,6 +548,8 @@ export function EvalsPage(props: {
                     <th>{t("evals.col.task")}</th>
                     <th>{t("evals.col.status")}</th>
                     <th>{t("evals.col.model")}</th>
+                    <th title={t("evals.col.callsHint")}>{t("evals.col.calls")}</th>
+                    <th title={t("evals.col.cacheHint")}>{t("evals.col.cache")}</th>
                     <th>{t("evals.col.cost")}</th>
                     <th>{t("evals.col.time")}</th>
                   </tr>
@@ -531,6 +574,8 @@ export function EvalsPage(props: {
                           ) : null}
                         </td>
                         <td>{r?.model ?? ""}</td>
+                        <td>{m && m.status !== "SKIP" ? m.model_calls : ""}</td>
+                        <td>{m && m.status !== "SKIP" ? fmtCacheHit(m) : ""}</td>
                         <td>{m ? fmtUsd(m.cost_usd) : ""}</td>
                         <td>{m ? `${m.duration_secs.toFixed(0)}s` : ""}</td>
                       </tr>
@@ -596,13 +641,15 @@ export function EvalsPage(props: {
 
 function TaskDetail(props: {
   detail: EvalTaskDetail;
-  tab: "report" | "diff" | "audit";
-  onTab: (t: "report" | "diff" | "audit") => void;
+  tab: DetailTab;
+  onTab: (t: DetailTab) => void;
   onAttempt: (n: number) => void;
   onClose: () => void;
   t: T;
 }) {
   const { detail: d, t } = props;
+  const failedChecks = (d.checks ?? []).filter((c) => !c.ok).length;
+  const trace = useMemo(() => traceItems(d.trace), [d.trace]);
   return (
     <div className="evals-detail">
       <div className="evals-detail-head">
@@ -633,14 +680,44 @@ function TaskDetail(props: {
         </button>
       </div>
       <div className="evals-tabs" role="tablist">
-        {(["report", "diff", "audit"] as const).map((k) => (
+        {DETAIL_TABS.map((k) => (
           <button key={k} type="button" role="tab" aria-selected={props.tab === k} className={props.tab === k ? "on" : undefined} onClick={() => props.onTab(k)}>
             {t(`evals.detail.${k}`)}
             {k === "diff" && d.files.length ? ` (${d.files.length})` : ""}
+            {k === "checks" && failedChecks > 0 ? ` (${failedChecks}✗)` : ""}
           </button>
         ))}
       </div>
       <div className="evals-detail-body">
+        {props.tab === "checks" ? (
+          !d.checks?.length ? (
+            <p className="evals-muted">{t("evals.checks.none")}</p>
+          ) : (
+            <ul className="evals-checks">
+              {d.checks.map((c, i) => (
+                <li key={i} className={c.ok ? "ok" : "bad"}>
+                  <span className="evals-check-mark" aria-label={c.ok ? "PASS" : "FAIL"}>
+                    {c.ok ? "✓" : "✗"}
+                  </span>
+                  <code>{c.kind}</code>
+                  {c.target ? <span className="evals-check-target">{c.target}</span> : null}
+                  {c.detail ? <pre className="evals-check-detail">{c.detail}</pre> : null}
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+        {props.tab === "trace" ? (
+          trace.length === 0 ? (
+            <p className="evals-muted">{t("evals.trace.none")}</p>
+          ) : (
+            <ol className="evals-trace">
+              {trace.map((x, i) => (
+                <TraceRow key={i} item={x} t={t} />
+              ))}
+            </ol>
+          )
+        ) : null}
         {props.tab === "report" ? (
           d.report.trim() ? (
             <MarkdownMessage text={d.report} />
@@ -688,5 +765,75 @@ function TaskDetail(props: {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function TraceRow(props: { item: TraceItem; t: T }) {
+  const { item: x, t } = props;
+  const at = <span className="evals-trace-t">{fmtMs(x.t_ms)}</span>;
+  if (x.kind === "tool") {
+    return (
+      <li className={`evals-trace-tool ${x.ok === false ? "bad" : ""}`}>
+        <details>
+          <summary>
+            {at}
+            <span className="evals-check-mark">{x.ok === undefined ? "…" : x.ok ? "✓" : "✗"}</span>
+            <code>{x.name}</code>
+            {x.ms !== undefined ? <span className="evals-muted"> {fmtMs(x.ms)}</span> : null}
+          </summary>
+          {x.input !== undefined ? (
+            <>
+              <small>{t("evals.trace.input")}</small>
+              <pre>{typeof x.input === "string" ? x.input : JSON.stringify(x.input, null, 2)}</pre>
+            </>
+          ) : null}
+          {x.output !== undefined ? (
+            <>
+              <small>{t("evals.trace.output")}</small>
+              <pre>{x.output}</pre>
+            </>
+          ) : null}
+        </details>
+      </li>
+    );
+  }
+  if (x.kind === "text" || x.kind === "plan") {
+    return (
+      <li className="evals-trace-text">
+        {at}
+        <div className="evals-trace-body">
+          <MarkdownMessage text={x.text} />
+        </div>
+      </li>
+    );
+  }
+  if (x.kind === "thinking") {
+    return (
+      <li className="evals-trace-thinking">
+        <details>
+          <summary>
+            {at}
+            {t("evals.trace.thinking")}
+          </summary>
+          <pre>{x.text}</pre>
+        </details>
+      </li>
+    );
+  }
+  const text =
+    x.kind === "route"
+      ? `→ ${x.model}${x.slot ? ` · ${x.slot}` : ""}${x.escalated ? " ↑" : ""} (${x.purpose})`
+      : x.kind === "cost"
+        ? `${x.input.toLocaleString()} in · ${x.output.toLocaleString()} out · ${fmtUsd(x.usd)}`
+        : x.kind === "diff"
+          ? `diff ${x.path}`
+          : x.kind === "note" && x.text === "truncated"
+            ? t("evals.trace.truncated")
+            : x.text;
+  return (
+    <li className={`evals-trace-meta evals-trace-${x.kind}`}>
+      {at}
+      <span>{text}</span>
+    </li>
   );
 }

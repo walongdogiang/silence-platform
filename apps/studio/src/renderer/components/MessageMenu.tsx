@@ -25,6 +25,8 @@ export type MenuAt = { x: number; y: number };
  */
 export function MessageMenu(props: { at: MenuAt; items: MessageMenuItem[]; label: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Nơi mở menu (tin nhắn / bong bóng): Esc trả focus về đó để người dùng bàn phím không mất chỗ.
+  const opener = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
   const [pos, setPos] = useState<CSSProperties>({
     position: "fixed",
     left: props.at.x,
@@ -51,15 +53,24 @@ export function MessageMenu(props: { at: MenuAt; items: MessageMenuItem[]; label
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "Escape" || e.key === "Tab") {
         e.preventDefault();
+        const back = opener.current;
         props.onClose();
+        if (back && document.contains(back)) back.focus();
         return;
       }
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
         e.preventDefault();
         const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
         if (!btns.length) return;
         const i = btns.indexOf(document.activeElement as HTMLButtonElement);
-        const next = e.key === "ArrowDown" ? (i + 1) % btns.length : (i - 1 + btns.length) % btns.length;
+        const next =
+          e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? btns.length - 1
+              : e.key === "ArrowDown"
+                ? (i + 1) % btns.length
+                : (i - 1 + btns.length) % btns.length;
         btns[next]?.focus();
         return;
       }
@@ -103,6 +114,10 @@ export function MessageMenu(props: { at: MenuAt; items: MessageMenuItem[]; label
             className={`history-menu-item${x.danger ? " danger" : ""}${x.desc ? " has-desc" : ""}`}
             disabled={x.disabled}
             onClick={x.run}
+            // Rê chuột = chọn: không còn hai dòng sáng cùng lúc (hover + focus từ bàn phím).
+            onMouseMove={(e) => {
+              if (document.activeElement !== e.currentTarget) e.currentTarget.focus({ preventScroll: true });
+            }}
           >
             {x.icon}
             <span className="msg-menu-text">

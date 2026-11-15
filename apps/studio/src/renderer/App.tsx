@@ -1,6 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { History } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import mountains from "./assets/wallpapers/mountains.png";
 import { BottomPanel, type PanelTab } from "./components/BottomPanel";
@@ -10,13 +11,17 @@ import {
   firstExchange,
   loadThreads,
   previewFrom,
+  shownTitle,
   titleFrom,
   titleLocked,
 } from "./components/ChatHistoryPanel";
 import { ChatPane } from "./components/ChatPane";
 import { ChatTabBar } from "./components/ChatTabBar";
+import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
 import { Composer } from "./components/Composer";
 import { ImageLightbox, type LightboxState } from "./components/ImageLightbox";
+import { TooltipLayer } from "./components/TooltipLayer";
+import { UndoToast } from "./components/UndoToast";
 import { isImagePath, readWorkspaceImage } from "./workspaceImages";
 import { routeText, type SessionMode } from "./modes";
 import { LangContext, translator } from "./i18n";
@@ -69,7 +74,7 @@ import {
   thinkingLiveStep,
   type NarrateStep,
 } from "./chatMeta";
-import { attachToPrompt, cutParams, rewindPrompt, userTurnsBefore } from "./messageMenu";
+import { attachToPrompt, cutParams, rewindImages, rewindPrompt, userTurnsBefore } from "./messageMenu";
 import { applyProc, isLocalUrl, type ProcRow } from "./procs";
 import { applyBrowser, type BrowserView } from "./browserView";
 import type { ChatLine, ChatThread, CheckpointFile, Diff, Perm, ShellView } from "./models";
@@ -252,6 +257,9 @@ export function App() {
   /** Latest prefs for the Engine event listener (registered once). */
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
+  /** Latest UI language for `session.prompt` (the send path can outlive a render). */
+  const langRef = useRef(appearance.lang);
+  langRef.current = appearance.lang;
   /** UI strings in the chosen language (App sits above `LangContext`, so no `useT` here). */
   const t = translator(appearance.lang);
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
@@ -346,6 +354,8 @@ export function App() {
   /** Ảnh workspace mở từ chip / menu Files / panel Review. */
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [lines, setLines] = useState<ChatLine[]>([]);
+  /** Setter gốc — handler sự kiện Engine che `setLines` bằng bản định tuyến theo session. */
+  const setLinesState = setLines;
   const [diff, setDiff] = useState<Diff | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
   const [perm, setPerm] = useState<Perm | null>(null);
@@ -364,6 +374,20 @@ export function App() {
   const fit = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  /** Đổi session đang xem và cập nhật ref ngay — sự kiện tới trước lần render kế tiếp không rơi nhầm thread. */
+  const switchSession = (id: string) => {
+    sessionIdRef.current = id;
+    setSessionId(id);
+  };
+  /** Session sở hữu lượt đang chạy (một lượt mỗi lúc). Đổi tab giữa lượt: sự kiện vẫn ghi vào thread của nó. */
+  const runSessionRef = useRef("");
+  const [runSessionId, setRunSessionId] = useState("");
+  const markRun = (id: string) => {
+    runSessionRef.current = id;
+    setRunSessionId(id);
+  };
+  /** Plan nộp lúc thread không mở (hoặc đang mở rồi rời đi): giữ theo session, hiện lại khi mở thread. */
+  const pendingPlanRef = useRef(new Map<string, string>());
   const turnStartedAtRef = useRef(0);
   const turnFilesRef = useRef<CheckpointFile[]>([]);
   const thoughtStartedAtRef = useRef(0);
@@ -378,9 +402,33 @@ export function App() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs" | "preview">("changes");
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
+  /** Sửa `lines` của thread có session `sid`: thread đang mở → state `lines`; thread nền → bản lưu trong `threads`. */
+  const linesFor = (sid: string, fn: (xs: ChatLine[]) => ChatLine[]) => {
+    if (!sid || sid === sessionIdRef.current) setLines(fn);
+    else setThreads((xs) => xs.map((x) => (x.sessionId === sid ? { ...x, lines: fn(x.lines), updatedAt: Date.now() } : x)));
+  };
   // Id ảnh không còn trong IndexedDB: không hỏi lại mỗi lần `lines` đổi (stream token).
   const missedImagesRef = useRef(new Set<string>());
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => loadOpenTabs());
+  /** Chat vừa xoá, còn hoàn tác được (toast). `index`/`tabIndex` = chỗ cũ trong danh sách / dải tab (-1 = không mở). */
+  const [undoDel, setUndoDel] = useState<{ thread: ChatThread; index: number; tabIndex: number; wasActive: boolean } | null>(
+    null,
+  );
+  /** Hộp xác nhận chung (thay window.confirm): `askConfirm` trả Promise<boolean>. */
+  const [confirmReq, setConfirmReq] = useState<(ConfirmRequest & { resolve: (ok: boolean) => void }) | null>(null);
+  function askConfirm(req: ConfirmRequest): Promise<boolean> {
+    return new Promise((resolve) => setConfirmReq({ ...req, resolve }));
+  }
+  const answerConfirm = (ok: boolean) => {
+    setConfirmReq((c) => {
+      c?.resolve(ok);
+      return null;
+    });
+  };
+  /** Hoàn tác chat đang mở: chờ `threads` có lại thread rồi mới mở nó. */
+  const reopenRef = useRef("");
   const [activeThreadId, setActiveThreadId] = useState("");
   activeThreadRef.current = activeThreadId;
   /** Title of the open chat, for the "agent finished" notice. */
@@ -535,7 +583,8 @@ export function App() {
               lines,
               title: titleLocked(t) ? t.title : titleFrom(lines, t.title),
               preview: previewFrom(lines),
-              updatedAt: Date.now(),
+              // Chỉ bump khi nội dung đổi; bấm chuyển chat không được reset bộ đếm giờ.
+              updatedAt: t.lines === lines && t.sessionId === sessionId ? t.updatedAt : Date.now(),
             }
           : t,
       ),
@@ -561,7 +610,7 @@ export function App() {
       .find((x) => x && (!workspace || x.workspace === workspace));
     if (!t) return;
     setActiveThreadId(t.id);
-    setSessionId(t.sessionId);
+    switchSession(t.sessionId);
     setLines(t.lines);
   }, [activeThreadId, openTabIds, threads, workspace]);
 
@@ -574,7 +623,24 @@ export function App() {
       const p = payload as { session_id?: string; event?: SessionEvent };
       const ev = p.event;
       if (!ev) return;
-      if (p.session_id && p.session_id !== sessionIdRef.current) return;
+      // Lỗi cấp Engine/Sidecar không có session_id: gán cho lượt đang chạy, không phải tab nào đang mở.
+      const sid = p.session_id || runSessionRef.current || "";
+      // `here`: thread đang mở. `bg`: lượt đang chạy ở thread user vừa rời đi — vẫn ghi vào thread đó.
+      const here = !sid || sid === sessionIdRef.current;
+      const bg = !here && sid === runSessionRef.current;
+      if (!here && !bg) return;
+      const bgThread = bg ? threadsRef.current.find((x) => x.sessionId === sid) : undefined;
+      const setLines = (fn: (xs: ChatLine[]) => ChatLine[]) => {
+        if (here) setLinesState(fn);
+        else
+          setThreads((xs) =>
+            xs.map((x) => (x.sessionId === sid ? { ...x, lines: fn(x.lines), updatedAt: Date.now() } : x)),
+          );
+      };
+      /** Thread chạy nền có việc cho user (xong, lỗi, chờ duyệt): chấm unread trên lịch sử. */
+      const flagBg = () => {
+        if (bgThread) setThreads((xs) => xs.map((x) => (x.id === bgThread.id ? { ...x, unread: true } : x)));
+      };
       if (ev.type === "token") {
         setLines((xs) => {
           let base = xs;
@@ -626,7 +692,7 @@ export function App() {
       } else if (ev.type === "route") {
         const auto = Boolean(ev.slot);
         const label = auto ? autoModelLabel(ev.model_id, modelsRef.current) : ev.model_id;
-        if (auto && !isSideRoute(ev.task_class)) setAutoModel(label);
+        if (here && auto && !isSideRoute(ev.task_class)) setAutoModel(label);
         setLines((xs) => [
           ...xs,
           {
@@ -643,15 +709,28 @@ export function App() {
         const prompt = lastPromptRef.current;
         setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode, reason: ev.reason, prompt }]);
       } else if (ev.type === "plan") {
-        setPlan(ev.markdown);
+        if (here) setPlan(ev.markdown);
+        else {
+          pendingPlanRef.current.set(sid, ev.markdown);
+          flagBg();
+        }
       } else if (ev.type === "diff") {
         const fileDiff = { path: ev.path, before: ev.before, after: ev.after, applied: ev.applied === true };
         const prev = turnFilesRef.current.filter((f) => f.path !== ev.path);
         turnFilesRef.current = [...prev, fileDiff];
-        setDiff(fileDiff);
+        // Thread nền: file vẫn vào checkpoint của lượt (turnFilesRef); không bật diff lên thread đang xem.
+        if (here) setDiff(fileDiff);
       } else if (ev.type === "permission") {
         setPermError(false);
-        setPerm({ request_id: ev.request_id, name: ev.name, input: ev.input, reason: ev.reason, risk: ev.risk });
+        setPerm({
+          session_id: sid || sessionIdRef.current,
+          request_id: ev.request_id,
+          name: ev.name,
+          input: ev.input,
+          reason: ev.reason,
+          risk: ev.risk,
+        });
+        flagBg();
         // Cửa sổ không ở phía trước thì báo ra desktop. Chỉ gửi lý do (không gửi lệnh).
         const np = prefsRef.current;
         if (np.notifyPermission || np.flashTaskbar) {
@@ -681,6 +760,8 @@ export function App() {
             return next;
           });
         }
+      } else if (!here && (ev.type === "browser" || ev.type === "proc" || ev.type === "terminal")) {
+        // Browser/Ports/Terminal hiển thị theo session đang mở; session nền tự tải lại khi mở thread.
       } else if (ev.type === "browser") {
         setBrowserView((prev) => applyBrowser(prev, ev));
       } else if (ev.type === "proc") {
@@ -710,11 +791,14 @@ export function App() {
         setOutputLog((xs) => [...xs.slice(-199), logLine]);
         setBusy(false);
         setRun(null);
-        // Giữ prompt: trả lại câu vừa gửi nếu composer đang trống. Không auto-retry.
-        const last = lastPromptRef.current;
-        setPrompt((p) => (p.trim() ? p : last));
+        markRun("");
+        if (here) {
+          // Giữ prompt: trả lại câu vừa gửi nếu composer đang trống. Không auto-retry.
+          const last = lastPromptRef.current;
+          setPrompt((p) => (p.trim() ? p : last));
+        } else flagBg();
       } else if (ev.type === "done") {
-        if (ev.stop === "budget") {
+        if (ev.stop === "budget" && here) {
           setBudgetHit(true);
           // The Engine dropped the unanswered prompt: give it back to the composer.
           const last = lastPromptRef.current;
@@ -732,17 +816,19 @@ export function App() {
         });
         setBusy(false);
         setRun(null);
+        markRun("");
+        if (!here) flagBg();
         void refreshCost();
         // Chỉ gửi tên chat, không gửi nội dung trả lời (thông báo hiện cả trên màn hình khoá).
         const np = prefsRef.current;
         if (np.notifyDone || np.flashTaskbar) {
           void window.silence
-            .notifyDone?.(threadTitleRef.current, { notify: np.notifyDone, flash: np.flashTaskbar })
+            .notifyDone?.(bgThread?.title ?? threadTitleRef.current, { notify: np.notifyDone, flash: np.flashTaskbar })
             .catch(() => undefined);
         }
       } else if (ev.type === "cost") {
         setRun((m) => addCost(m, ev));
-        const tid = activeThreadRef.current;
+        const tid = here ? activeThreadRef.current : bgThread?.id;
         if (tid) setSpendByThread((all) => ({ ...all, [tid]: addSpend(all[tid] ?? EMPTY_SPEND, ev) }));
         setCost((c) => ({
           ...c,
@@ -1017,16 +1103,19 @@ export function App() {
       forkedFromId: opts?.forkedFromId,
       titleSource: opts?.titleSource ?? "auto",
     };
+    stashPlan();
     setActiveThreadId(id);
-    setSessionId(liveSessionId);
+    switchSession(liveSessionId);
     setLines(initial);
     setPlan(null);
     setDiff(null);
-    setPerm(null);
     setPrompt("");
     setImages([]);
-    setBusy(false);
-    setRun(null);
+    // Lượt ở thread khác vẫn chạy nền: không tắt busy của nó (chỉ dọn trạng thái kẹt khi không có lượt nào).
+    if (!runSessionRef.current) {
+      setBusy(false);
+      setRun(null);
+    }
     setShowEvals(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
@@ -1087,7 +1176,7 @@ export function App() {
   ) {
     if (!workspace) return;
     const sliced = src.map((l) => ({ ...l }));
-    if (sliced.length === 0) return;
+    if (sliced.length === 0 && opts.prompt === undefined) return;
     snapshotActive();
     const parent = threads.find((t) => t.id === parentId);
     const parentSid = parentId === activeThreadId ? sessionId : (parent?.sessionId ?? "");
@@ -1099,6 +1188,8 @@ export function App() {
       title: parentLocked && parent ? parent.title : titleFrom(sliced, parent?.title ?? t("history.newChat")),
       titleSource: parentLocked ? "ai" : "auto",
     });
+    if (opts.prompt !== undefined) setPrompt(opts.prompt);
+    if (opts.images?.length) setImages(opts.images);
     await refreshCost();
   }
 
@@ -1132,7 +1223,17 @@ export function App() {
     if (busy) return;
     const target = lines[userLine];
     if (target?.kind !== "user") return;
-    if (!retry && !window.confirm(t("app.rewindConfirm"))) return;
+    if (!retry) {
+      const removed = lines.slice(userLine).filter((l) => l.kind === "user").length;
+      const ok = await askConfirm({
+        title: t("app.rewindTitle"),
+        body: t(removed > 1 ? "app.rewindConfirm" : "app.rewindConfirmOne", { count: removed }),
+        confirmLabel: t("app.rewindDo"),
+        danger: true,
+        icon: <History size={16} aria-hidden />,
+      });
+      if (!ok) return;
+    }
     if (!(await cutEngineHistory(lines, userLine))) return;
     setLines(lines.slice(0, userLine));
     setPlan(null);
@@ -1141,11 +1242,13 @@ export function App() {
     turnFilesRef.current = [];
     turnStartedAtRef.current = 0;
     if (retry) {
-      void send(target.text);
+      // Retry gửi lại cả ảnh của tin gốc (nếu còn trong bộ nhớ).
+      void send(target.text, undefined, target.images);
       return;
     }
     setPrompt((p) => rewindPrompt(target.text, p));
-    if (target.images?.length) setImages(target.images);
+    // Ảnh của tin về composer, không đè ảnh đang đính kèm trong bản nháp.
+    if (target.images?.length) setImages((prev) => rewindImages(target.images, prev));
     focusComposer();
   }
 
@@ -1258,11 +1361,30 @@ export function App() {
               lines,
               title: titleLocked(x) ? x.title : titleFrom(lines, x.title),
               preview: previewFrom(lines),
-              updatedAt: Date.now(),
+              updatedAt: x.lines === lines && x.sessionId === sessionId ? x.updatedAt : Date.now(),
             }
           : x,
       ),
     );
+  }
+
+  /** Rời thread đang mở: plan chưa duyệt đi theo session của nó, mở lại thread thì hiện lại. */
+  function stashPlan() {
+    if (plan && sessionIdRef.current) pendingPlanRef.current.set(sessionIdRef.current, plan);
+  }
+
+  /** Mở thread `t` trong khung chat. Card quyền (`perm`) không xoá: nó gắn session và chỉ hiện ở thread của nó. */
+  function showThread(t: ChatThread) {
+    stashPlan();
+    setActiveThreadId(t.id);
+    switchSession(t.sessionId);
+    setLines(t.lines);
+    const pending = pendingPlanRef.current.get(t.sessionId) ?? null;
+    pendingPlanRef.current.delete(t.sessionId);
+    setPlan(pending);
+    setDiff(null);
+    setPrompt("");
+    setImages([]);
   }
 
   function selectThread(id: string) {
@@ -1274,17 +1396,10 @@ export function App() {
     if (t.unread || t.archived) patchThread(id, { unread: false, archived: false });
     if (id !== activeThreadId) {
       snapshotActive();
-      setActiveThreadId(id);
-      setSessionId(t.sessionId);
-      setLines(t.lines);
-      setPlan(null);
-      setDiff(null);
-      setPerm(null);
-      setPrompt("");
-      setImages([]);
+      showThread(t);
       if (workspace && !t.sessionId) {
         void createLiveSession(workspace).then((liveId) => {
-          setSessionId(liveId);
+          switchSession(liveId);
         });
       }
     }
@@ -1298,22 +1413,15 @@ export function App() {
     if (activeThreadId !== id) return;
     const next = nextIds.map((x) => threads.find((t) => t.id === x)).find((t) => t && t.workspace === workspace);
     if (next) {
-      setActiveThreadId(next.id);
-      setSessionId(next.sessionId);
-      setLines(next.lines);
-      setPlan(null);
-      setDiff(null);
-      setPerm(null);
-      setPrompt("");
-      setImages([]);
+      showThread(next);
       return;
     }
+    stashPlan();
     setActiveThreadId("");
-    setSessionId("");
+    switchSession("");
     setLines([]);
     setPlan(null);
     setDiff(null);
-    setPerm(null);
   }
 
   /** Settings → Dữ liệu → Xoá toàn bộ: mọi chat (kể cả đã ghim) và log của Engine. Audit giữ nguyên. */
@@ -1333,6 +1441,13 @@ export function App() {
   }
 
   function deleteThread(id: string) {
+    const index = threads.findIndex((t) => t.id === id);
+    if (index >= 0) {
+      const old = threads[index];
+      // Chat đang mở: `lines` mới nhất nằm ở state, không phải bản trong `threads`.
+      const thread = id === activeThreadId ? { ...old, sessionId, lines } : old;
+      setUndoDel({ thread, index, tabIndex: openTabIds.indexOf(id), wasActive: id === activeThreadId });
+    }
     const rest = threads.filter((t) => t.id !== id);
     const nextOpenIds = openTabIds.filter((x) => x !== id);
     setThreads(rest);
@@ -1346,13 +1461,38 @@ export function App() {
     if (next) {
       setOpenTabIds(nextOpenIds.includes(next.id) ? nextOpenIds : [next.id, ...nextOpenIds]);
       setActiveThreadId(next.id);
-      setSessionId(next.sessionId);
+      switchSession(next.sessionId);
       setLines(next.lines);
       return;
     }
     setOpenTabIds(nextOpenIds);
     void newChat();
   }
+
+  function undoDelete() {
+    const u = undoDel;
+    if (!u) return;
+    setUndoDel(null);
+    const id = u.thread.id;
+    setThreads((xs) => (xs.some((x) => x.id === id) ? xs : [...xs.slice(0, u.index), u.thread, ...xs.slice(u.index)]));
+    if (u.tabIndex >= 0)
+      setOpenTabIds((ids) => (ids.includes(id) ? ids : [...ids.slice(0, u.tabIndex), id, ...ids.slice(u.tabIndex)]));
+    if (u.wasActive) reopenRef.current = id;
+  }
+
+  // Hoàn tác chat đang mở: mở lại nó khi đã về `threads`; tab "Chat mới" rỗng mở thay lúc xoá thì bỏ.
+  useEffect(() => {
+    const id = reopenRef.current;
+    if (!id || !threads.some((x) => x.id === id)) return;
+    reopenRef.current = "";
+    const placeholder = activeThreadId && activeThreadId !== id && lines.length === 0 ? activeThreadId : "";
+    selectThread(id);
+    if (placeholder) {
+      setOpenTabIds((ids) => ids.filter((x) => x !== placeholder));
+      setThreads((xs) => xs.filter((x) => x.id !== placeholder));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threads]);
 
   async function openFile(rel: string) {
     if (!workspace) return;
@@ -1380,10 +1520,10 @@ export function App() {
     }
   }
 
-  async function send(retryText?: string, modeOverride?: SessionMode) {
+  async function send(retryText?: string, modeOverride?: SessionMode, retryImages?: string[]) {
     const text = (retryText ?? prompt).trim();
-    // Thử lại (retry) chỉ gửi lại chữ; ảnh chỉ đi cùng lượt gửi từ composer.
-    const turnImages = retryText === undefined ? images : [];
+    // Thử lại (retry): ảnh do nơi gọi đưa vào (Retry trong menu tin nhắn); không thì chỉ gửi lại chữ.
+    const turnImages = retryText === undefined ? images : (retryImages ?? []);
     if (!sessionId || (!text && turnImages.length === 0) || busy) return;
     // `mode` là state nên không kịp cập nhật khi vừa setMode: dùng giá trị ghi đè cho lượt này.
     const turnMode = modeOverride ?? mode;
@@ -1404,6 +1544,8 @@ export function App() {
     ]);
     setBusy(true);
     setRun(startRun(turnStartedAtRef.current));
+    markRun(sessionId);
+    let sid = sessionId;
     if (turnImages.length) {
       // Lưu ảnh vào IndexedDB để mở lại thread vẫn thấy; dòng user được nhận ra qua mảng ảnh.
       void putImages(turnImages).then((ids) => {
@@ -1412,14 +1554,17 @@ export function App() {
       });
     }
     try {
-      let sid = sessionId;
       try {
         await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       } catch (e) {
         // Engine đã restart nên session cũ (lưu trong lịch sử) không còn: tạo session mới, giữ lịch sử hiển thị.
         if (!/unknown session/i.test(e instanceof Error ? e.message : String(e)) || !workspace) throw e;
+        const old = sid;
         sid = await createLiveSession(workspace);
-        setSessionId(sid);
+        // User có thể đã đổi tab trong lúc chờ: gắn session mới vào đúng thread đã gửi, không kéo khung chat theo.
+        if (sessionIdRef.current === old) switchSession(sid);
+        else setThreads((xs) => xs.map((x) => (x.sessionId === old ? { ...x, sessionId: sid } : x)));
+        markRun(sid);
         await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       }
       // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
@@ -1455,29 +1600,38 @@ export function App() {
         text,
         context,
         ...(turnImages.length ? { images: turnImages } : {}),
+        // Ngôn ngữ giao diện: Engine dùng khi tin nhắn không rõ ngôn ngữ ("ok", chỉ dán log).
+        // Engine cũ (protocol < 0.1.17) bỏ qua trường này.
+        ui_lang: langRef.current,
       });
     } catch (e) {
       // RPC bị từ chối (vd. Engine chưa sẵn sàng): tắt busy, trả prompt, hiện thẻ lỗi chung.
       const message = e instanceof Error ? e.message : String(e);
       turnStartedAtRef.current = 0;
       thoughtStartedAtRef.current = 0;
-      setLines((xs) => [...xs, { kind: "error", message }]);
+      const stillHere = sid === sessionIdRef.current;
+      linesFor(sid, (xs) => [...xs, { kind: "error", message }]);
       setOutputLog((xs) => [...xs.slice(-199), `[error] ${message}`]);
       setBusy(false);
       setRun(null);
-      setPrompt((p) => (p.trim() ? p : text));
-      setImages((xs) => (xs.length ? xs : turnImages));
+      markRun("");
+      // Chỉ trả prompt/ảnh về composer khi user còn ở thread đã gửi (không đổ sang chat khác).
+      if (stillHere) {
+        setPrompt((p) => (p.trim() ? p : text));
+        setImages((xs) => (xs.length ? xs : turnImages));
+      }
     }
   }
 
   /** Yêu cầu Engine dừng lượt: cờ abort được kiểm ở đầu mỗi vòng; `done` (stop=abort) sẽ tắt busy. */
   async function stop() {
-    if (!sessionId || !busy) return;
+    const target = runSessionRef.current || sessionId;
+    if (!target || !busy) return;
     setRun(markStopping);
     // Engine từ chối quyền đang chờ khi abort; gỡ card ngay để không còn nút duyệt "mồ côi".
     setPerm(null);
     try {
-      await window.silence.rpc("session.abort", { session_id: sessionId });
+      await window.silence.rpc("session.abort", { session_id: target });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setOutputLog((xs) => [...xs.slice(-199), `[error] ${t("app.stopFailed", { message })}`]);
@@ -1546,7 +1700,13 @@ export function App() {
     );
     const target = checkpoints.find((c) => c.id === id);
     if (!target) return;
-    const ok = window.confirm(t("app.restoreConfirm"));
+    const ok = await askConfirm({
+      title: t("app.restoreTitle"),
+      body: t("app.restoreConfirm"),
+      confirmLabel: t("app.restoreDo"),
+      danger: true,
+      icon: <History size={16} aria-hidden />,
+    });
     if (!ok) return;
 
     const toWrite = filesToRestore(checkpoints, id);
@@ -1575,11 +1735,15 @@ export function App() {
     }
     setDiff(null);
     setPlan(null);
-    setPerm(null);
-    turnFilesRef.current = [];
-    turnStartedAtRef.current = 0;
-    setBusy(false);
-    setRun(null);
+    setPerm((p) => (p?.session_id === sessionId ? null : p));
+    // Lượt đang chạy ở thread khác thì để yên.
+    if (!runSessionRef.current || runSessionRef.current === sessionId) {
+      turnFilesRef.current = [];
+      turnStartedAtRef.current = 0;
+      setBusy(false);
+      setRun(null);
+      markRun("");
+    }
   }
 
   function onChip(chip: string) {
@@ -1602,14 +1766,14 @@ export function App() {
   }
 
   async function answerPerm(allow: boolean, scope: PermScope) {
-    if (!perm || !sessionId || permBusy) return;
+    if (!perm || permBusy) return;
     setPermBusy(true);
     setPermError(false);
     try {
       // Deny never persists; Engine enforces this too. `remember` is the legacy flag for old Engines.
       const s: PermScope = allow ? scope : "once";
       await window.silence.rpc("session.permission", {
-        session_id: sessionId,
+        session_id: perm.session_id,
         request_id: perm.request_id,
         allow,
         scope: s,
@@ -1640,15 +1804,18 @@ export function App() {
     ]);
     setBusy(true);
     setRun(startRun(turnStartedAtRef.current));
+    markRun(sessionId);
+    const planSid = sessionId;
     try {
-      await window.silence.rpc("session.approve_plan", { session_id: sessionId });
+      await window.silence.rpc("session.approve_plan", { session_id: planSid });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       turnStartedAtRef.current = 0;
       thoughtStartedAtRef.current = 0;
-      setLines((xs) => [...xs, { kind: "error", message }]);
+      linesFor(planSid, (xs) => [...xs, { kind: "error", message }]);
       setBusy(false);
       setRun(null);
+      markRun("");
     }
   }
 
@@ -1710,6 +1877,12 @@ export function App() {
   // Locked opt-in models (e.g. Fable) stay visible in the picker but can't be picked there.
   const locked = lockedModels(models, modelPrefs);
   const pickerModels = locked.length ? [...allModels, ...locked] : allModels;
+  /** Lượt đang chạy thuộc thread đang mở? Thread khác chỉ thấy composer khoá, không thấy pulse/Stop. */
+  const busyHere = busy && (!runSessionId || runSessionId === sessionId);
+  const busyElsewhere = busy && !busyHere;
+  const permHere = perm && perm.session_id === sessionId ? perm : null;
+  const runThreadId = runSessionId ? threads.find((x) => x.sessionId === runSessionId)?.id : undefined;
+
   const composerEl = (
     <Composer
       prompt={prompt}
@@ -1736,9 +1909,9 @@ export function App() {
         setFocusSources(Date.now());
         openSettings("models");
       }}
-      busy={busy}
+      busy={busyHere}
       onStop={() => void stop()}
-      disabled={!sessionId}
+      disabled={!sessionId || busyElsewhere}
       files={tree}
       context={contextUsage}
       onOpenFile={(p) => void openFile(p)}
@@ -1801,7 +1974,7 @@ export function App() {
           transcript={prefs.transcript}
           lines={lines}
           plan={plan}
-          perm={perm}
+          perm={permHere}
           sandboxNote={autonomousFallbackNote(permMode, sandbox, t)}
           onOpenPermissions={() => openSettings("permissions")}
           diff={diff}
@@ -1809,8 +1982,8 @@ export function App() {
           hasSession={Boolean(sessionId)}
           wsName={wsName}
           workspace={workspace || undefined}
-          busy={busy}
-          run={run}
+          busy={busyHere}
+          run={busyHere ? run : null}
           mode={mode}
           onOpenFile={(p) => void openFile(p)}
           onSwitchAndRun={(m, text) => {
@@ -1839,7 +2012,16 @@ export function App() {
           onOpenWorkspace={() => void openWorkspace()}
           onChip={onChip}
           onUsePrompt={setPrompt}
-          onRetry={() => void send(lastPromptRef.current)}
+          onSwitchModel={() => {
+            setFocusSources(Date.now());
+            openSettings("models");
+          }}
+          onRetry={(text) => {
+            const again = text ?? lastPromptRef.current;
+            // Lỗi đã trả prompt về composer: gửi lại thì dọn đi để không gửi trùng lần nữa.
+            setPrompt((p) => (p.trim() === again.trim() ? "" : p));
+            void send(again);
+          }}
           onAttachEdited={attachEdited}
         />
         {activeThreadId ? budgetBanner : null}
@@ -1888,6 +2070,7 @@ export function App() {
       data-blur={appearance.blur ? "on" : "off"}
       style={wp ? ({ ["--wp" as string]: wp } as CSSProperties) : undefined}
     >
+      <TooltipLayer />
       {lightbox ? (
         <ImageLightbox images={lightbox.images} index={lightbox.index} onClose={() => setLightbox(null)} />
       ) : null}
@@ -1979,12 +2162,31 @@ export function App() {
           />
         </main>
 
+        {confirmReq ? (
+          <ConfirmDialog
+            title={confirmReq.title}
+            body={confirmReq.body}
+            confirmLabel={confirmReq.confirmLabel}
+            danger={confirmReq.danger}
+            icon={confirmReq.icon}
+            onResult={answerConfirm}
+          />
+        ) : null}
+        {undoDel ? (
+          <UndoToast
+            key={undoDel.thread.id}
+            title={shownTitle(undoDel.thread.title, t)}
+            onUndo={undoDelete}
+            onDismiss={() => setUndoDel(null)}
+          />
+        ) : null}
         {showHistory ? (
           <ChatHistoryPanel
             workspace={workspace}
             threads={threads}
             activeId={activeThreadId}
             runState={busy ? (perm && !run?.stopping ? "waiting" : "running") : undefined}
+            runId={runThreadId}
             onNewChat={() => void newChat()}
             onSelect={selectThread}
             onDelete={deleteThread}

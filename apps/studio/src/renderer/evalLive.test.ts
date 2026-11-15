@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyProgress, liveProgress, replay, type Live } from "./evalLive";
+import { applyProgress, fmtCacheHit, liveProgress, replay, type Live } from "./evalLive";
 import type { EvalProgress, EvalTaskMetrics } from "./types";
 
 const metrics = (id: string, cost_usd: number): EvalTaskMetrics =>
@@ -46,5 +46,13 @@ describe("eval live state", () => {
     expect(live.running).toBe(false);
     expect(live.summary?.counts.pass).toBe(1);
     expect(replay({ running: false, events: [] })).toBeNull();
+  });
+});
+
+describe("fmtCacheHit", () => {
+  it("shows the cached share of input tokens", () => {
+    expect(fmtCacheHit({ input_tokens: 1000, cache_read_tokens: 724 })).toBe("72%");
+    expect(fmtCacheHit({ input_tokens: 1000 })).toBe("0%");
+    expect(fmtCacheHit({ input_tokens: 0, cache_read_tokens: 0 })).toBe("–");
   });
 });

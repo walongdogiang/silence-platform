@@ -18,6 +18,7 @@ const vi = translator("vi");
 const en = translator("en");
 
 const shell = (pattern?: string): Perm => ({
+  session_id: "s",
   request_id: "r",
   name: "shell",
   input: { command: "npm install zod" },

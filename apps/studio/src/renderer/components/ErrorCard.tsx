@@ -1,4 +1,4 @@
-import { AlertCircle, RotateCcw } from "lucide-react";
+import { AlertCircle, RotateCcw, Shuffle } from "lucide-react";
 import { errorCopy, errorDetail } from "../errorCopy";
 import { useT } from "../i18n";
 import type { ErrorInfo } from "../types";
@@ -9,9 +9,11 @@ export function ErrorCard(props: {
   info?: ErrorInfo;
   retryDisabled?: boolean;
   onRetry?: () => void;
+  /** Mở chọn model/nguồn (Settings → Models) khi thử lại không giúp được. */
+  onSwitchModel?: () => void;
 }) {
   const t = useT();
-  const c = errorCopy(props.info, t);
+  const c = errorCopy(props.info, t, props.message);
   return (
     <div className="msg-error" role="alert">
       <div className="msg-error-head">
@@ -20,11 +22,18 @@ export function ErrorCard(props: {
       </div>
       <p className="msg-error-body">{c.body}</p>
       <p className="msg-error-hint">{c.hint}</p>
-      {c.canRetry && props.onRetry ? (
+      {(c.canRetry && props.onRetry) || (c.canSwitchModel && props.onSwitchModel) ? (
         <div className="row">
-          <button type="button" className="ghost" disabled={props.retryDisabled} onClick={props.onRetry}>
-            <RotateCcw size={12} strokeWidth={1.75} /> {t("err.retry")}
-          </button>
+          {c.canSwitchModel && props.onSwitchModel ? (
+            <button type="button" className="ghost" onClick={props.onSwitchModel}>
+              <Shuffle size={12} strokeWidth={1.75} /> {t("err.switchModel")}
+            </button>
+          ) : null}
+          {c.canRetry && props.onRetry ? (
+            <button type="button" className="ghost" disabled={props.retryDisabled} onClick={props.onRetry}>
+              <RotateCcw size={12} strokeWidth={1.75} /> {t("err.retry")}
+            </button>
+          ) : null}
         </div>
       ) : null}
       <details className="msg-error-detail">

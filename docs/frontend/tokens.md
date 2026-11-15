@@ -5,6 +5,8 @@ code:
   - apps/studio/src/renderer/theme/tokens.css
   - apps/studio/src/renderer/theme/appearance.ts
   - apps/studio/src/renderer/components/settings/AppearanceSection.tsx
+  - apps/studio/src/renderer/components/TooltipLayer.tsx
+  - apps/studio/src/renderer/tooltip.ts
 ---
 # Tokens & appearance
 
@@ -36,6 +38,12 @@ Token: `--scroll-size` 6px; `--scroll-thumb-idle` (mờ) / `--scroll-thumb` / `-
 ## Icon
 
 `lucide-react`. Titlebar window buttons: stroke đậm, hover scale + glow copper.
+
+## Tooltip
+
+Không dùng tooltip native của OS. `TooltipLayer` (mount một lần trong `App.tsx`) tự chuyển mọi `title` thành `data-tip` và vẽ `.app-tip`: nền `--surface-3`, viền `--border-subtle`, chữ `--font-size-xs`, căn giữa dưới phần tử (không đủ chỗ thì lật lên trên), cách mép cửa sổ 8px. Hiện sau 450ms; đang có tip thì tip kế bên hiện ngay. Hiện cả khi Tab tới (`:focus-visible`); Esc, bấm chuột, cuộn, rời cửa sổ thì ẩn. Giảm chuyển động thì tắt fade.
+
+Viết nhãn như cũ bằng `title={t(...)}`. Đuôi `(Ctrl+J)` trong chuỗi i18n hiện thành phím tắt mờ bên phải; đuôi `(chưa gắn)` / `(not wired yet)` (`common.notWired`) hiện thành ghi chú mờ (`parseTip` trong `tooltip.ts`). Nút chỉ có icon được gắn `aria-label` từ nhãn, nút có chữ được gắn `aria-description`.
 
 ## Link và syntax
 

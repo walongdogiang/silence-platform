@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { LangContext } from "../i18n";
 import { Composer } from "./Composer";
 
 const base = {
@@ -14,8 +15,13 @@ const base = {
   disabled: false,
 };
 
+// Asserts Vietnamese labels, so it renders in "vi" explicitly (the default is English).
 const html = (over: { busy: boolean; prompt?: string; onStop?: () => void }) =>
-  renderToStaticMarkup(<Composer {...base} {...over} />);
+  renderToStaticMarkup(
+    <LangContext.Provider value="vi">
+      <Composer {...base} {...over} />
+    </LangContext.Provider>,
+  );
 
 describe("Composer Stop", () => {
   it("đang chạy + có onStop: hiện nút Dừng, không hiện nút gửi", () => {

@@ -107,3 +107,9 @@ export function useEvalLive(onEnd?: (live: Live) => void) {
   }, [setLive]);
   return { live, ended, sync, markStopping };
 }
+
+/** Share of a task's input tokens served from the prompt cache, e.g. `72%`; `–` when unknown. */
+export function fmtCacheHit(m: Pick<EvalTaskMetrics, "input_tokens" | "cache_read_tokens">): string {
+  if (!m.input_tokens) return "–";
+  return `${Math.round((100 * (m.cache_read_tokens ?? 0)) / m.input_tokens)}%`;
+}
