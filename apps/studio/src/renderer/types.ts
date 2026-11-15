@@ -22,6 +22,12 @@ export type PermissionRisk = {
   escalation?: { count: number; stop_only: boolean; blocked: string[] };
 };
 
+/** Copy of `packages/protocol` SandboxStatus / NetworkList (`sandbox.status`, `network.list`). */
+export type SandboxStatus =
+  | { state: "unsupported" | "not_installed" | "ready" }
+  | { state: "degraded"; reason: string };
+export type NetworkList = { defaults: string[]; allow: string[] };
+
 export type SessionEvent =
   | { type: "token"; text: string }
   | { type: "thinking"; text: string }

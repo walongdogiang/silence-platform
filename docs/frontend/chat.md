@@ -115,6 +115,8 @@ Nhãn trong file này ghi bản tiếng Anh; UI hiện theo ngôn ngữ đã ch�
 | Writing plan | Wrote plan | `submit_plan` |
 | Using tool | Used tool | MCP / tool khác |
 
+Bước `Running`/`Ran` của lệnh chạy trong sandbox (Tự chủ) có thêm badge **sandbox** (`.msg-step-sbx`, `NarrateStep.sandboxed`).
+
 ## Thread
 
 Gửi → Planning + bắt đầu đo thought. `thinking` → Thinking + body. `tool_start`/`token` → seal `ms`. `done`/`error` → drop Planning/Thinking live, past bước, Thought record, checkpoint, worked.
@@ -146,6 +148,11 @@ Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 
 - Danh sách lý do: tiêu đề đậm + giải thích (`.perm-reasons`), mã nằm ở `title` để tra catalog.
 - Badge tầng cạnh tiêu đề (`Cần duyệt`). Nút: **Cho phép một lần** (chính), **Cho phép "<mẫu>" trong phiên này**, **Luôn cho phép "<mẫu>" trong workspace**, **Từ chối**. Hai nút giữa chỉ hiện khi Engine gửi `risk.pattern`; không có mẫu (pipeline, git huỷ thay đổi, secrets…) thì ẩn. Không còn checkbox "Nhớ". Chi tiết phạm vi: [security/permissions.md](../security/permissions.md).
 - Bước bị chặn (tầng 3) không có card: bước `Running …` đổi thành `Blocked <lý do>`.
+- **Tự chủ (`autonomous`)**, khi sandbox Ready (`docs/security/permissions.md` → Chế độ Tự chủ):
+  - Bước chạy trong sandbox có badge nhỏ **sandbox** sau chi tiết bước (Engine gửi trace `sandbox.run {call_id}`, UI gắn cờ `sandboxed` lên dòng `narrate` vừa tạo; lưu cùng lịch sử).
+  - **Card host lạ:** Engine gửi `risk.hosts`. Card liệt kê host (`.perm-hosts`) dưới nhãn "Host chưa có trong danh sách cho phép"; hai nút nhớ đổi thành **Cho phép <host> trong phiên này** / **Luôn cho phép <host> trong workspace** (lưu `.silence/network.json`, không lưu mẫu `curl *`). **Cho phép một lần** chỉ cấp host cho lệnh đó. Host tới từ Engine, client không gửi host nào.
+  - **Card leo thang:** Engine gửi `risk.escalation {count, stop_only, blocked[]}` sau 3 lần bị chặn liên tiếp. Tiêu đề "Bị chặn N lần liên tiếp", badge **Đã chặn**, lệnh thật nguyên văn, danh sách "Thứ đã cản" do Engine sinh (không hiện chữ model viết). Nút **Chạy một lần ngoài sandbox** (chính; ẩn khi `stop_only`) và **Dừng** (gửi từ chối; khi `stop_only` là nút chính duy nhất). Không có nút nhớ.
+  - **Banner** `.sbx-banner` trên card: khi người dùng chọn Tự chủ mà sandbox không Ready (chưa cài / cần sửa / chưa hỗ trợ), nói rõ Engine đang chạy y như Cân bằng, kèm nút **Mở cài đặt**.
 - Bấm Stop: card gỡ ngay, Engine tự từ chối quyền đang chờ.
 - Panel Changes dùng `DiffEditor` before/after; Monaco nạp cục bộ, không qua CDN.
 

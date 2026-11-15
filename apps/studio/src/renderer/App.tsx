@@ -39,7 +39,7 @@ import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImag
 import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
 import { DiffPane } from "./components/DiffPane";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
-import { blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
+import { autonomousFallbackNote, blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import { EvalsPage } from "./components/EvalsPage";
@@ -77,7 +77,7 @@ import {
   type Appearance,
 } from "./theme/appearance";
 import { loadModelPrefs, lockedModels, saveModelPrefs, visibleModels } from "./theme/modelsPrefs";
-import type { CliInfo, ContextUsage, ModelInfo, SessionEvent } from "./types";
+import type { CliInfo, ContextUsage, ModelInfo, SandboxStatus, SessionEvent } from "./types";
 import { loadPrefs, savePrefs, type Prefs } from "./prefs";
 import { pinnedSessionIds, pruneThreads } from "./retention";
 
@@ -254,6 +254,19 @@ export function App() {
   const [shellView, setShellView] = useState<ShellView>(() => loadShellView());
   /** Settings dialog: open on `section`; `n` changes on every request so it can re-target. */
   const [settings, setSettings] = useState<{ section: SettingsSection; n: number } | null>(null);
+  async function refreshSandbox() {
+    if (!window.silence) return;
+    try {
+      setSandbox((await window.silence.rpc("sandbox.status", { refresh: true })) as SandboxStatus);
+    } catch {
+      // Engine cũ (protocol < 0.1.15) chưa có RPC này: coi như chưa biết, Tự chủ không chọn được.
+      setSandbox(null);
+    }
+  }
+  /** Cài / sửa sandbox: Windows hiện một hộp UAC; RPC trả về khi xong hoặc khi bị từ chối. */
+  async function setupSandbox() {
+    setSandbox((await window.silence.rpc("sandbox.setup", {})) as SandboxStatus);
+  }
   const openSettings = (section: SettingsSection = loadSettingsSection()) => setSettings({ section, n: Date.now() });
   /** Evals full page (TitleBar button, View → Evals, Ctrl+Shift+E, Settings → Giới thiệu). Dev only:
    *  shown when the Engine sees an `evals/` folder. */
@@ -335,6 +348,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   /** Chế độ quyền (Settings): Cân bằng mặc định hoặc Thận trọng. Gửi lên Engine mỗi lượt. */
   const [permMode, setPermMode] = useState<UiPermMode>(() => loadPermMode());
+  /** Sandbox lệnh (`sandbox.status`, Engine cache 30 s). `null` = chưa biết / Engine cũ. */
+  const [sandbox, setSandbox] = useState<SandboxStatus | null>(null);
   /** Run pulse của lượt đang chạy: giờ bắt đầu, token/USD cộng từ `cost`, cờ Stop (`docs/frontend/status.md`). */
   const [run, setRun] = useState<RunMeter | null>(null);
   const termRef = useRef<HTMLDivElement | null>(null);
@@ -367,6 +382,12 @@ export function App() {
   const spend = spendByThread[activeThreadId] ?? EMPTY_SPEND;
   /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+
+  // Trạng thái sandbox: lúc mở app, khi đổi chế độ quyền và khi đóng Settings (có thể vừa cài xong).
+  useEffect(() => {
+    void refreshSandbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permMode, settings === null]);
 
   // Làm mới khi đổi session / mode / model và khi lượt kết thúc (busy → false).
   useEffect(() => {
@@ -609,6 +630,16 @@ export function App() {
             .notifyPermission?.(ev.risk?.reasons[0]?.title ?? ev.reason, { notify: np.notifyPermission, flash: np.flashTaskbar })
             .catch(() => undefined);
         }
+      } else if (ev.type === "trace" && ev.event === "sandbox.run") {
+        // Lệnh shell vừa bắt đầu chạy trong sandbox (Tự chủ): gắn badge lên bước đang chạy.
+        setLines((xs) => {
+          const i = xs.length - 1;
+          const last = xs[i];
+          if (last?.kind !== "narrate") return xs;
+          const next = [...xs];
+          next[i] = { ...last, sandboxed: true };
+          return next;
+        });
       } else if (ev.type === "trace" && ev.event === "policy.blocked") {
         // Risk Engine chặn lệnh (tầng 3): biến bước "Running …" đang chạy thành "Blocked <lý do>".
         const step = blockedStep(ev.detail);
@@ -1640,6 +1671,8 @@ export function App() {
           lines={lines}
           plan={plan}
           perm={perm}
+          sandboxNote={autonomousFallbackNote(permMode, sandbox, t)}
+          onOpenPermissions={() => openSettings("permissions")}
           diff={diff}
           sessionId={sessionId}
           hasSession={Boolean(sessionId)}
@@ -1839,6 +1872,9 @@ export function App() {
               : undefined
           }
           workspace={workspace}
+          sandbox={sandbox}
+          onRefreshSandbox={refreshSandbox}
+          onSetupSandbox={setupSandbox}
           permMode={permMode}
           onPermMode={(m) => {
             setPermMode(m);

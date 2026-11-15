@@ -35,6 +35,8 @@ export type ChatLine =
       /** Bước đọc file: gộp Read liên tiếp cùng file (`mergeReadSteps`). */
       file?: string;
       ranges?: [number, number | null][];
+      /** Lệnh shell chạy trong sandbox (Tự chủ): Engine gửi trace `sandbox.run`. */
+      sandboxed?: boolean;
       /** legacy persist */ text?: string;
     }
   | { kind: "thought"; ms?: number; brief: string; body?: string }

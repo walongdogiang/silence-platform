@@ -14,16 +14,19 @@ export type NarrateStep = {
   file?: string;
   /** Khoảng dòng đã đọc; bỏ trống khi có `file` = đọc cả file. */
   ranges?: LineRange[];
+  /** Lệnh shell chạy trong sandbox (Tự chủ): hiện badge "sandbox". */
+  sandboxed?: boolean;
 };
 
 const READ_RE = /read|outline|cat|open|fs\.read|list|tree/;
 const READ_VERB = /^(Reading|Read)$/;
 
 /** Dòng `narrate` đã lưu → bước, giữ `file`/`ranges` để gộp Read. */
-export function narrateFromLine(l: { verb: string; detail?: string; file?: string; ranges?: LineRange[] }): NarrateStep {
+export function narrateFromLine(l: { verb: string; detail?: string; file?: string; ranges?: LineRange[]; sandboxed?: boolean }): NarrateStep {
   const s: NarrateStep = { verb: l.verb, detail: l.detail };
   if (l.file) s.file = l.file;
   if (l.ranges) s.ranges = l.ranges;
+  if (l.sandboxed) s.sandboxed = true;
   return s;
 }
 

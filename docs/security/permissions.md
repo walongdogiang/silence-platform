@@ -192,7 +192,7 @@ Code: `crates/sandbox` (`src/win/`). Lý do thiết kế và số đo: `crates/s
   - **Host trong allowlist mà nhận upload** (github.com, các API…) là một đường gửi dữ liệu ra ngoài. Vì vậy mặc định chỉ có registry, và các lệnh `git push` / `*publish` vẫn ở tầng ask.
   - Lần cấp quyền đầu cho repo lớn chậm, vì ACL phải lan xuống mọi file (`target/`, `node_modules/`).
   - Toolchain nằm trong profile của user (ví dụ `~/.cargo`) thì sandbox không thấy; cần `sandbox grant --read`.
-  - **Đã nối vào agent** (Phase 4a, Engine): xem [Chế độ Tự chủ](#chế-độ-tự-chủ-autonomous). Studio chưa bật mục này (Phase 4b).
+  - **Đã nối vào agent** (Phase 4a, Engine): xem [Chế độ Tự chủ](#chế-độ-tự-chủ-autonomous). Studio bật mục này khi sandbox Ready (Phase 4b).
 
 ## Chế độ Tự chủ (autonomous)
 
@@ -236,7 +236,14 @@ Tầng 3 vẫn **chặn mỗi lần gọi**; thẻ leo thang là đường duy n
 
 ## Chọn chế độ (Settings)
 
-Settings → **Chế độ quyền**: **Cân bằng** (mặc định) hoặc **Thận trọng**. **Tự chủ** hiển thị nhưng tắt, vì cần sandbox chặn mạng (xem [backlog.md](backlog.md)). Lựa chọn lưu ở `localStorage` (`silence.permission.mode`), gửi lúc `session.create` và đồng bộ lại trước mỗi lượt bằng `session.set_permission` (RPC này từ chối `yolo`). Đổi trong lúc có phiên mở thì áp dụng ngay cho phiên đó.
+Settings → **Quyền** (`PermissionsSection.tsx`):
+
+- **Chế độ quyền**: **Cân bằng** (mặc định), **Thận trọng** hoặc **Tự chủ**. Tự chủ chỉ chọn được khi `sandbox.status` là `ready`; chưa sẵn sàng thì nút tắt kèm gợi ý. Nếu đã chọn Tự chủ rồi sandbox hỏng, nút vẫn sáng để bỏ chọn, và chat hiện banner "Tự chủ đang chạy như Cân bằng" (`autonomousFallbackNote`) kèm nút **Mở cài đặt**.
+- **Sandbox lệnh**: dòng trạng thái (Sẵn sàng / Chưa cài / Cần sửa: <lý do> / Chưa hỗ trợ) và nút **Cài sandbox (UAC)** hoặc **Sửa (UAC)** gọi `sandbox.setup` (Windows hỏi quyền quản trị một lần; từ chối thì không cài gì), cùng nút **Kiểm tra lại** (`sandbox.status {refresh:true}`). Studio đọc lại trạng thái lúc mở app, khi đổi chế độ quyền và khi đóng Settings.
+- **Host mạng được phép**: registry có sẵn và host đã thêm cho workspace (`network.list`), mỗi host có nút gỡ (`network.revoke`, gỡ luôn khỏi các phiên đang mở).
+- **Quyền đã nhớ**: như trước.
+
+Lựa chọn lưu ở `localStorage` (`silence.permission.mode`), gửi lúc `session.create` và đồng bộ lại trước mỗi lượt bằng `session.set_permission` (RPC này từ chối `yolo`). Đổi trong lúc có phiên mở thì áp dụng ngay cho phiên đó.
 
 ## Nạp hướng dẫn cho AI
 
