@@ -1601,7 +1601,7 @@ export function App() {
         context,
         ...(turnImages.length ? { images: turnImages } : {}),
         // Ngôn ngữ giao diện: Engine dùng khi tin nhắn không rõ ngôn ngữ ("ok", chỉ dán log).
-        // Engine cũ (protocol < 0.1.17) bỏ qua trường này.
+        // Engine cũ (protocol < 0.1.19) bỏ qua trường này.
         ui_lang: langRef.current,
       });
     } catch (e) {
