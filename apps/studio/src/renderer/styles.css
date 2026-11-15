@@ -3863,15 +3863,15 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .msg-step-sbx {
   margin-left: 6px;
   padding: 0 6px;
-  border: 1px solid var(--border, currentColor);
+  border: 1px solid var(--border-ui);
   border-radius: 999px;
   font-size: 10.5px;
   line-height: 16px;
   opacity: 0.75;
   white-space: nowrap;
 }
-.sbx-banner {
-  display: flex;
+.banner.sbx-banner {
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -3886,10 +3886,10 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   font-weight: 600;
 }
 .sbx-state.ready {
-  color: var(--ok, #3fb950);
+  color: var(--success);
 }
 .sbx-state.degraded {
-  color: var(--warn, #d29922);
+  color: var(--warning);
 }
 .perm-hosts-label {
   margin: 8px 0 4px;
