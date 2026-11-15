@@ -281,7 +281,8 @@ pub fn shell_matches(pattern: &str, cmd: &str) -> bool {
 pub fn classify(tool: &str, args: &Value, ctx: &RiskCtx) -> Verdict {
     let mut v = Verdict::new();
     match tool {
-        "shell" => {
+        // `proc_start` runs a shell command in the background: same rules as `shell`.
+        "shell" | "proc_start" => {
             let cmd = args.get("command").and_then(Value::as_str).unwrap_or("");
             classify_command(cmd, ctx.workspace, &mut v);
             if ctx.tainted && v.tier < Tier::Ask {
@@ -300,7 +301,13 @@ pub fn classify(tool: &str, args: &Value, ctx: &RiskCtx) -> Verdict {
                 check_path(&p, ctx.workspace, PathUse::Write, &mut v);
             }
         }
+        "http_check" => {
+            let url = args.get("url").and_then(Value::as_str).unwrap_or("");
+            v.add(if silence_tools::http::local_url(url).is_ok() { "LOCAL_HTTP" } else { "HTTP_NOT_LOCAL" });
+        }
         "submit_plan" | "suggest_mode" | "task" | "update_todos" => v.add("INTERNAL"),
+        // Read or stop processes this session started.
+        "proc_logs" | "proc_list" | "proc_stop" => v.add("INTERNAL"),
         t if t.starts_with("mcp__") => v.add(if ctx.mcp_read_only { "MCP_READ" } else { "MCP_CALL" }),
         _ => v.add("UNKNOWN_TOOL"),
     }

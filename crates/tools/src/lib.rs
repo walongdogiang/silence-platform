@@ -7,7 +7,9 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
+pub mod http;
 pub mod image;
+pub mod procs;
 pub use image::{read_image, ImageFile};
 
 /// Hard cap on any tool output handed back to the model (bytes). Longer output is cut with a note.
@@ -172,6 +174,7 @@ pub fn specs(read_only: bool) -> Vec<ToolSpec> {
         spec_grep(),
         spec_git_status(),
         spec_git_diff(),
+        spec_http_check(),
     ];
     if !read_only {
         tools.extend([spec_write(), spec_edit(), spec_shell()]);
@@ -311,6 +314,25 @@ fn spec_shell() -> ToolSpec {
     }
 }
 
+fn spec_http_check() -> ToolSpec {
+    ToolSpec {
+        name: "http_check".into(),
+        description: "Send one HTTP request to an app running on this machine (localhost, 127.0.0.1, ::1 only) and get status, key headers and the body (HTML as page text, JSON pretty). Use it to check a route after a change or that a dev server answers. Not for the internet. In Ask/Review only GET/HEAD/OPTIONS."
+            .into(),
+        parameters: obj(
+            json!({
+                "url": {"type": "string", "description": "e.g. http://localhost:5173/api/items"},
+                "method": {"type": "string", "description": "GET (default), POST, PUT, PATCH, DELETE, HEAD, OPTIONS"},
+                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                "body": {"description": "String, or a JSON value (sent as application/json)."},
+                "raw": {"type": "boolean", "description": "Return the body as is (HTML source) instead of page text."},
+                "timeout_ms": {"type": "integer"}
+            }),
+            &["url"],
+        ),
+    }
+}
+
 fn spec_git_status() -> ToolSpec {
     ToolSpec {
         name: "git_status".into(),
@@ -356,6 +378,7 @@ async fn execute_uncapped(ws: &Workspace, name: &str, args: &Value) -> Result<To
         "glob" => glob_files(ws, args),
         "grep" => grep(ws, args),
         "shell" => shell(ws, args).await,
+        "http_check" => http::http_check(args).await,
         "git_status" => git(ws, &["status", "--porcelain=v1"]).await,
         "git_diff" => {
             let mut cmd = vec!["diff"];
@@ -808,16 +831,9 @@ foreach ($c in 'Set-Content','Add-Content','Out-File','Get-Content') { $PSDefaul
 #[cfg(not(windows))]
 const POWERSHELL_UTF8_PREAMBLE: &str = "";
 
-async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
-    let command = args["command"].as_str().unwrap_or("");
-    if command.is_empty() {
-        return Err(anyhow!("empty command"));
-    }
-    let timeout = Duration::from_millis(
-        args.get("timeout_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(120_000),
-    );
+/// PowerShell (Windows, UTF-8) or `bash -lc`, cwd = workspace root, stdout/stderr piped,
+/// killed on drop. Shared by `shell` and background processes (`procs`).
+pub fn shell_command(ws: &Workspace, command: &str) -> Command {
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("powershell");
         let script = format!("{POWERSHELL_UTF8_PREAMBLE}\n{command}");
@@ -829,9 +845,24 @@ async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         c
     };
     cmd.current_dir(&ws.root)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    cmd
+}
+
+async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
+    let command = args["command"].as_str().unwrap_or("");
+    if command.is_empty() {
+        return Err(anyhow!("empty command"));
+    }
+    let timeout = Duration::from_millis(
+        args.get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000),
+    );
+    let mut cmd = shell_command(ws, command);
     let child = cmd.spawn().context("spawn shell")?;
     let pid = child.id().unwrap_or(0);
     let _guard = silence_sandbox::wrap_pid(pid).ok();

@@ -132,6 +132,11 @@ Mục đổi hội thoại (Retry, Rewind, Fork) khoá khi đang `busy`. Toast "
 | Planning next moves | *(không lưu)* | Placeholder; bị thay |
 | Thinking | Thought briefly / Thought Ns | Bản ghi + full body |
 | Reading | Read | |
+| Starting | Started | `proc_start` (dev server nền) |
+| Reading logs | Read logs | `proc_logs` |
+| Stopping | Stopped | `proc_stop` |
+| Checking processes | Checked processes | `proc_list` |
+| Checking | Checked | `http_check` (`GET localhost:5173/api`) |
 | Searching | Searched | |
 | Editing | Edited | |
 | Running | Ran | |

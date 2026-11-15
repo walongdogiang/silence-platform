@@ -51,6 +51,11 @@ codes:
     title: Chạy script trong workspace
     detail: Chạy một file script nằm trong workspace.
     hint: Running a script file from the workspace.
+  LOCAL_HTTP:
+    tier: logged
+    title: Gọi app trên máy này
+    detail: http_check gửi một request tới localhost / 127.0.0.1 (app của chính bạn); redirect ra ngoài bị chặn.
+    hint: One HTTP request to an app on this machine.
   MCP_READ:
     tier: logged
     title: MCP chỉ đọc
@@ -185,6 +190,11 @@ codes:
     title: Gửi bí mật ra ngoài
     detail: Gửi file chứa bí mật lên mạng.
     hint: Sending secrets over the network is blocked.
+  HTTP_NOT_LOCAL:
+    tier: block
+    title: http_check ra ngoài máy
+    detail: http_check chỉ gọi được localhost, 127.0.0.1 hoặc ::1; không dùng nó để truy cập Internet hay máy khác.
+    hint: http_check only reaches this machine (localhost, 127.0.0.1, ::1). Do not use it for other hosts.
   POLICY_TAMPER:
     tier: block
     title: Sửa quyền của 5ilence

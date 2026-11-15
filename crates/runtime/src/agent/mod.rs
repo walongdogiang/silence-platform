@@ -27,6 +27,7 @@ mod history;
 mod modes;
 mod plan;
 mod policy;
+mod procs;
 mod resume;
 mod sandbox;
 mod subagent;
@@ -38,6 +39,8 @@ pub use modes::{profile, ModeProfile};
 pub use plan::approve_plan;
 pub use policy::{decide_permission, decide_permission_scoped, list_permissions, revoke_permission};
 pub use history::{fork_session, rewind_session};
+pub use procs::rows as proc_rows;
+pub(crate) use procs::table as proc_table;
 pub use resume::resume_session;
 pub use sandbox::{
     list_network, list_snapshots, restore_session_snapshot, restore_snapshot, revoke_network, session_snapshots,
@@ -133,6 +136,8 @@ pub struct AppCtx {
     pub events: Mutex<HashMap<String, mpsc::UnboundedSender<SessionEvent>>>,
     /// Command sandbox: cached status, proxy, per-call network credentials.
     pub sandbox: crate::sandbox_host::SandboxHost,
+    /// Background processes per session (`proc_*` tools). Dropping a table stops its processes.
+    pub procs: Mutex<HashMap<String, Arc<silence_tools::procs::Table>>>,
 }
 
 impl AppCtx {
@@ -146,6 +151,7 @@ impl AppCtx {
             sessions: Mutex::new(HashMap::new()),
             events: Mutex::new(HashMap::new()),
             sandbox: crate::sandbox_host::SandboxHost::new(),
+            procs: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -779,6 +785,7 @@ fn builtin_tools(mode: SessionMode) -> Value {
         }));
     }
     arr_extend_task(&mut tools, prof.read_only);
+    tools.as_array_mut().unwrap().extend(procs::specs(prof.read_only));
     // Read-only, so every mode gets it. Not given to sub-agents (their loop has no image path).
     let view = silence_tools::image::spec_view_image();
     tools.as_array_mut().unwrap().push(json!({
@@ -1004,6 +1011,9 @@ async fn dispatch_tool(
         );
         return Ok("plan submitted".into());
     }
+    if procs::NAMES.contains(&tc.name.as_str()) {
+        return procs::dispatch(ctx, session_arc, tx, tc, &args).await;
+    }
     if let Some(rest) = tc.name.strip_prefix("mcp__") {
         let mut parts = rest.splitn(2, "__");
         let server = parts.next().unwrap_or("");
@@ -1058,6 +1068,10 @@ async fn dispatch_tool(
             },
         );
         return Ok(out);
+    }
+    if tc.name == "http_check" && !silence_tools::http::is_safe_method(&args) && session_arc.lock().await.mode.read_only() {
+        // A POST/PUT/DELETE can change the app's data: not in Ask/Review.
+        return Ok(refuse(tx, tc, "only allows GET, HEAD and OPTIONS in a read-only mode"));
     }
     if silence_tools::mutates(&tc.name) {
         // Defence in depth: read-only modes never offer these tools, but a model can still

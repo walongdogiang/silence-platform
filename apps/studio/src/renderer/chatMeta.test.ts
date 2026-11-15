@@ -73,3 +73,18 @@ describe("step text in the UI language", () => {
     expect(stepText({ verb: "Read", detail: "a.ts" }, translator("en"))).toBe("Read a.ts");
   });
 });
+
+describe("narration of verification tools", () => {
+  it("names background-process and http_check steps", () => {
+    expect(narrateToolLive("proc_start", { command: "npm run dev" })).toEqual({ verb: "Starting", detail: "npm run dev" });
+    expect(narrateToolLive("proc_logs", { id: "p1" })).toEqual({ verb: "Reading logs", detail: "p1" });
+    expect(narrateToolLive("proc_stop", { id: "p1" })).toEqual({ verb: "Stopping", detail: "p1" });
+    expect(narrateToolLive("proc_list", {})).toEqual({ verb: "Checking processes" });
+    expect(narrateToolLive("http_check", { url: "http://localhost:5173/api", method: "post" })).toEqual({
+      verb: "Checking",
+      detail: "POST localhost:5173/api",
+    });
+    expect(narrateToPast(narrateToolLive("http_check", { url: "http://127.0.0.1:8000/" })).verb).toBe("Checked");
+    expect(narrateToPast(narrateToolLive("proc_start", { command: "x" })).verb).toBe("Started");
+  });
+});

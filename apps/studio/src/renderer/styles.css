@@ -3911,3 +3911,36 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .perm-esc-desc {
   margin: 4px 0 8px;
 }
+/* Ports tab (BottomPanel → PortsList): background processes the agent started. */
+.ports-list { list-style: none; margin: 0; padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; }
+.ports-row {
+  display: grid;
+  grid-template-columns: 8px 88px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm, 12px);
+  color: var(--text-secondary);
+}
+.ports-row:hover { background: var(--surface-hover); }
+.ports-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.ports-dot.running { background: var(--success, #3fb950); }
+.ports-dot.exited { background: var(--error); }
+.ports-status { color: var(--text-muted); white-space: nowrap; }
+.ports-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.ports-urls { display: flex; gap: 6px; flex-wrap: wrap; }
+.ports-url {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 0; background: transparent; padding: 0;
+  color: var(--link); cursor: pointer; font: inherit;
+}
+.ports-url:hover { color: var(--link-hover); text-decoration: underline; }
+.ports-stop {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 8px;
+  border: 1px solid var(--border-ui); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer;
+}
+.ports-stop:hover { color: var(--error); border-color: var(--error); }

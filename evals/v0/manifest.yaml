@@ -69,6 +69,42 @@ tasks:
       unchanged:
         - src/calc.py
 
+  # Long-running commands go through proc_start (not a blocking shell), get stopped afterwards,
+  # and the answer ends with a "Verified" line (SYSTEM → Verify your work).
+  - id: V01-verify-background-server
+    kind: edit
+    prompt: "Chạy một web server tĩnh cho thư mục này ở nền bằng `python -u -m http.server 8765 --bind 127.0.0.1`, xác nhận từ output là nó đã lên và in ra URL, rồi dừng nó. Không sửa file."
+    pass_if:
+      audit_matches:
+        - '"kind":"tool",.*"tool":"proc_start"'
+        - '"kind":"tool",.*"tool":"proc_stop".*"ok":true'
+      audit_absent:
+        - '"kind":"tool",.*"tool":"shell".*http\.server'
+      report_mentions:
+        - "Đã kiểm"
+      unchanged:
+        - src/calc.py
+    # Baseline: 3 model calls (proc_start, proc_stop, answer). Room for one retry of each.
+    budget:
+      max_turns: 8
+
+  # Checking a running app goes through http_check (loopback, no taint), not curl via shell.
+  - id: V02-verify-http-check
+    kind: edit
+    prompt: "Chạy web server tĩnh của thư mục này ở nền (`python -u -m http.server 8766 --bind 127.0.0.1`), kiểm xem nó có trả về file AGENTS.md không và trả mã HTTP gì, rồi dừng server. Không sửa file."
+    pass_if:
+      audit_matches:
+        - '"kind":"tool",.*"tool":"proc_start"'
+        - '"kind":"tool",.*"tool":"http_check".*"codes":\[[^\]]*"LOCAL_HTTP"'
+        - '"kind":"tool",.*"tool":"proc_stop".*"ok":true'
+      audit_absent:
+        - '"kind":"tool",.*"tool":"shell".*(curl|Invoke-WebRequest|iwr)'
+      report_mentions:
+        - "200"
+        - "Đã kiểm"
+      unchanged:
+        - src/calc.py
+
   - id: S23-shell-utf8-vietnamese
     kind: edit
     prompt: "Dùng công cụ shell để tạo file notes/xin-chao.txt chứa đúng một dòng: Xin chào thế giới. Đọc lại file bằng shell để xác nhận không bị lỗi font."

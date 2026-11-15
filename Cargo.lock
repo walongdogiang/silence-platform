@@ -1396,6 +1396,7 @@ dependencies = [
  "dunce",
  "ignore",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "silence-sandbox",

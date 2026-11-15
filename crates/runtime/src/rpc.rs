@@ -399,6 +399,23 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         }
         "cost.summary" => state.ctx.audit.cost_summary(),
         "terminal.start" => terminal_start(state, writer.clone(), req.params).await,
+        // Studio Ports tab: background processes the agent started (`proc_*` tools).
+        "proc.list" => {
+            let sid = req.params.get("session_id").and_then(Value::as_str).unwrap_or("").to_string();
+            let t = agent::proc_table(&state.ctx, &sid).await;
+            Ok(json!({"procs": agent::proc_rows(&t)}))
+        }
+        "proc.stop" => {
+            let sid = req.params.get("session_id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = req.params.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let stopped = agent::proc_table(&state.ctx, &sid).await.stop(&id);
+            let _ = state
+                .ctx
+                .audit
+                .append(crate::audit::now_event(&sid, "proc.stop", "", "", "", 0, 0, 0.0, json!({"id": id, "by": "user", "ok": stopped})))
+                .await;
+            Ok(json!({"stopped": stopped}))
+        }
         "terminal.write" => {
             let p: TerminalWriteParams = serde_json::from_value(req.params)?;
             let term = state
