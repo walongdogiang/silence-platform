@@ -82,6 +82,7 @@ pub async fn resume_session(ctx: &AppCtx, session_id: &str) -> Result<SessionRes
             budget_pass: false,
             cli_hot: false,
             tool_log: Vec::new(),
+            sbx: SandboxSession::default(),
         };
         live.insert(session_id.to_string(), Arc::new(Mutex::new(session)));
     }

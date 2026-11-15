@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.14";
+pub const PROTOCOL_VERSION: &str = "0.1.15";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -306,6 +306,22 @@ pub struct PermissionRisk {
     /// What "remember" would store, e.g. `npm install *`. `None` = cannot be remembered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
+    /// Hosts of a network command that are not allowlisted yet (the card offers to allow them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
+    /// Set when this card is an escalation (repeated blocks), not a normal permission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalation: Option<Escalation>,
+}
+
+/// Escalation card: the agent was blocked `count` times in a row this turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Escalation {
+    pub count: u32,
+    /// Only "Dừng" is offered (the blocked action may never run).
+    pub stop_only: bool,
+    /// What got in the way: reason titles, hosts or paths, as the Engine saw them.
+    pub blocked: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

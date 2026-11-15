@@ -51,7 +51,7 @@ Danh sách đầy đủ theo mã: [risk-catalog.md](risk-catalog.md).
 | --- | --- | --- | --- | --- | --- |
 | `ask` | Thận trọng | tự | hỏi | hỏi | chặn |
 | `balanced` | **Cân bằng (mặc định)** | tự | tự + audit | hỏi | chặn |
-| `autonomous` | Tự chủ | tự | tự + audit | tự **chỉ khi** lệnh chạy trong sandbox chặn mạng; chưa có sandbox thì hỏi | chặn |
+| `autonomous` | Tự chủ | tự | tự + audit, **chạy trong sandbox** | tự **chỉ khi** sandbox Ready và bảng [Tự chủ](#chế-độ-tự-chủ-autonomous) cho phép; còn lại hỏi (sandbox không Ready: y như Cân bằng) | chặn; 3 lần liền trong một lượt thì hỏi người dùng (thẻ leo thang) |
 | `yolo` | — | Chỉ `eval_runner` tạo trong process. **RPC `session.create` từ chối** (B0) | | | |
 
 `allowlist` (mode cũ) được giữ để tương thích, so khớp giống `ask` (B0 đã sửa lỗi so khớp tiền tố JSON).
@@ -192,7 +192,47 @@ Code: `crates/sandbox` (`src/win/`). Lý do thiết kế và số đo: `crates/s
   - **Host trong allowlist mà nhận upload** (github.com, các API…) là một đường gửi dữ liệu ra ngoài. Vì vậy mặc định chỉ có registry, và các lệnh `git push` / `*publish` vẫn ở tầng ask.
   - Lần cấp quyền đầu cho repo lớn chậm, vì ACL phải lan xuống mọi file (`target/`, `node_modules/`).
   - Toolchain nằm trong profile của user (ví dụ `~/.cargo`) thì sandbox không thấy; cần `sandbox grant --read`.
-  - **Chưa nối vào agent** (Phase 4): Tự chủ vẫn tắt.
+  - **Đã nối vào agent** (Phase 4a, Engine): xem [Chế độ Tự chủ](#chế-độ-tự-chủ-autonomous). Studio chưa bật mục này (Phase 4b).
+
+## Chế độ Tự chủ (autonomous)
+
+Chỉ có hiệu lực khi `sandbox.status` là `ready` (cache 30 giây) và với tool `shell`. Sandbox không Ready, hoặc chưa cài, thì Tự chủ hành xử **y như Cân bằng**. Code: `risk/mod.rs` (`Verdict::sandbox_plan`), `agent/policy.rs` (`gate`), `agent/sandbox.rs`, `sandbox_host.rs`.
+
+**Ai quyết định.** Ba danh sách khoá trong `risk/default_policy.yaml`:
+
+| Khoá | Mã | Hệ quả |
+| --- | --- | --- |
+| `sandbox_covers` | `UNKNOWN_COMMAND`, `RUN_SCRIPT`, `BUILD_TEST`, `INLINE_CODE`, `DYNAMIC_EXEC`, `UNPARSED`, `PKG_EXEC`, `PKG_INSTALL`, `FS_DELETE`, `PROC_KILL`, `NET_ACCESS`, `TAINTED_CONTEXT` | Tự chạy **trong sandbox**, không hỏi |
+| `always_ask` | `GIT_NETWORK`, `GIT_COMMIT`, `GIT_DESTRUCTIVE`, `PKG_PUBLISH`, `MCP_CALL`, `ENV_READ` | Luôn hỏi. Được đồng ý thì chạy **ngoài** sandbox như Cân bằng (cần danh tính thật của user) |
+| `never_escalate` | `POLICY_TAMPER`, `SECRET_EXFIL`, `NET_DOWNLOAD_EXEC`, `ENCODED_COMMAND`, `FS_DELETE_SYSTEM` | Tầng 3; thẻ leo thang chỉ có "Dừng" |
+
+Mã tầng ask không nằm trong `sandbox_covers` (ví dụ `FS_OUTSIDE_WS`, `SECRET_READ`) vẫn hỏi. Lệnh tầng 0 và 1 trong Tự chủ cũng chạy trong sandbox, để lệnh bị phân loại nhầm vẫn có ranh giới.
+
+Hai điều kiện đi kèm:
+
+- `NET_ACCESS` tự chạy khi **mọi** host viết thành URL trong lệnh nằm trong allowlist. Host lạ, hoặc không đọc được đích (`ssh box`, `curl $url`), thì hỏi.
+- `FS_DELETE` tự chạy khi lượt đó đã có snapshot để hoàn tác. Thư mục không phải git repo thì vẫn hỏi.
+
+**Network.** Mỗi lệnh có một credential proxy riêng (allowlist mặc định + `.silence/network.json` + host đã cho phép trong phiên).
+
+- Thẻ hỏi host lạ có `risk.hosts`; thẻ không đề nghị nhớ mẫu `curl *`. Phạm vi **một lần** chỉ cấp host cho lệnh đó; **phiên** thêm vào bộ nhớ phiên; **workspace** ghi `.silence/network.json` (chỉ Engine ghi; `network.json` nằm trong `policy_files` nên tool `write`/`edit` và shell đều bị `POLICY_TAMPER`).
+- Lệnh chạy xong mà proxy từ chối host (ví dụ npm kéo tarball từ GitHub), Engine hỏi thẻ `NET_ACCESS` cho host đó. Đồng ý và lệnh đang lỗi thì chạy lại **một lần** với host đã cấp.
+- Mọi kết nối ghi audit `net.allowed` / `net.denied` (host, cổng, lý do, byte).
+
+**Snapshot để hoàn tác.** Trước lệnh sandbox đầu tiên của mỗi lượt, Engine dựng một commit snapshot của cây workspace bằng index tạm (`GIT_INDEX_FILE`), không đụng index, HEAD hay nhánh của user: ref `refs/silence/snap/<session>/<turn>`, giữ 20 ref gần nhất. `snapshot.list` / `snapshot.restore` khôi phục file về trạng thái đầu lượt (file mới tạo sau đó vẫn còn).
+
+**Leo thang.** Mỗi lượt đếm số lần bị chặn liên tiếp: lệnh bị tầng 3 chặn, hoặc lệnh đã chạy trong sandbox nhưng đụng tường (có host bị từ chối, hoặc `Access is denied` kèm mã thoát khác 0; lỗi hạ tầng của runner **không** tính). Lần thứ 3 hiện thẻ leo thang:
+
+- thẻ hiện lệnh thật và lý do do Engine sinh ra, không hiện chữ model viết;
+- "Chạy ngoài sandbox một lần" chạy đúng lệnh đó như Cân bằng; "Dừng" kết thúc lượt;
+- nếu lệnh dính mã trong `never_escalate` thì chỉ có "Dừng" (client gửi "đồng ý" cũng bị Engine bỏ qua);
+- tối đa 3 thẻ mỗi phiên; sau đó chặn vẫn là chặn. Một lệnh shell thành công làm đếm về 0.
+
+Tầng 3 vẫn **chặn mỗi lần gọi**; thẻ leo thang là đường duy nhất để người dùng (không phải model) cho chạy một lệnh bị chặn, và mỗi lần đều ghi audit `tool.escalated`.
+
+**RPC.** `sandbox.status {refresh?}`, `sandbox.setup` (một UAC), `network.list`, `network.revoke`, `snapshot.list`, `snapshot.restore`. Protocol 0.1.15: `PermissionRisk.hosts`, `PermissionRisk.escalation`; lệnh chạy trong sandbox phát Trace `sandbox.run {call_id}`.
+
+**Eval.** Suite `evals/sandbox` (`permission: autonomous`, `requires_sandbox`, `on_ask`); thẻ hỏi vào audit thành dòng `eval.asked`.
 
 ## Chọn chế độ (Settings)
 

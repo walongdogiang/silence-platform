@@ -58,6 +58,9 @@ pub struct Policy {
     never_remember: Vec<String>,
     taint_codes: Vec<String>,
     subcommand_programs: Vec<String>,
+    pub sandbox_covers: Vec<String>,
+    always_ask: Vec<String>,
+    never_escalate: Vec<String>,
 }
 
 impl Tier {
@@ -93,11 +96,62 @@ pub struct Verdict {
     pub tier: Tier,
     /// Reason codes, highest tier first. Never empty.
     pub codes: Vec<String>,
+    /// Hosts named by URL in network commands (`curl https://x.io/a` → `x.io`), lowercase.
+    pub net_hosts: Vec<String>,
+    /// A network command whose target could not be read from its arguments (`ssh box`).
+    pub net_unknown: bool,
+}
+
+/// What Autonomous mode does with a call while the sandbox is Ready.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SandboxPlan {
+    /// Run inside the sandbox without asking.
+    Cover,
+    /// Ask the user first; if allowed it runs outside the sandbox, like in Balanced.
+    Ask,
 }
 
 impl Verdict {
     fn new() -> Self {
-        Self { tier: Tier::Auto, codes: Vec::new() }
+        Self { tier: Tier::Auto, codes: Vec::new(), net_hosts: Vec::new(), net_unknown: false }
+    }
+
+    /// Hosts of this call that are not in `allow` (all of them when a target is unreadable).
+    pub fn unlisted_hosts(&self, allow: &[String]) -> Vec<String> {
+        self.net_hosts
+            .iter()
+            .filter(|h| !silence_sandbox::proxy::host_allowed(h, allow))
+            .cloned()
+            .collect()
+    }
+
+    /// Autonomous + sandbox Ready: may this call run in the sandbox without asking?
+    /// `allow` = hosts the proxy lets through; `can_undo` = the turn has a git snapshot.
+    pub fn sandbox_plan(&self, allow: &[String], can_undo: bool) -> SandboxPlan {
+        let p = policy();
+        if self.tier == Tier::Block || self.codes.iter().any(|c| p.always_ask.contains(c)) {
+            return SandboxPlan::Ask;
+        }
+        for c in &self.codes {
+            let tier = p.codes.get(c).map(|i| i.tier).unwrap_or(Tier::Ask);
+            if tier < Tier::Ask {
+                continue;
+            }
+            if !p.sandbox_covers.contains(c) {
+                return SandboxPlan::Ask;
+            }
+            match c.as_str() {
+                "NET_ACCESS" if self.net_unknown || !self.unlisted_hosts(allow).is_empty() => return SandboxPlan::Ask,
+                "FS_DELETE" if !can_undo => return SandboxPlan::Ask,
+                _ => {}
+            }
+        }
+        SandboxPlan::Cover
+    }
+
+    /// The escalation card may not offer to run this blocked call anyway.
+    pub fn never_escalate(&self) -> bool {
+        self.codes.iter().any(|c| policy().never_escalate.contains(c))
     }
 
     fn add(&mut self, code: &str) {
@@ -177,6 +231,8 @@ impl Verdict {
                 })
                 .collect(),
             pattern,
+            hosts: Vec::new(),
+            escalation: None,
         }
     }
 }
@@ -427,6 +483,28 @@ fn is_recursive(tokens: &[String]) -> bool {
     })
 }
 
+/// Hosts of the `scheme://host[:port]/…` tokens of a command (lowercase, userinfo stripped).
+fn url_hosts(tokens: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in tokens.iter().skip(1) {
+        let t = t.trim_matches(['"', '\'', '(', ')', ',', ';']);
+        let t = t.split_once('=').filter(|(k, _)| !k.contains("://")).map_or(t, |(_, v)| v);
+        let Some((_, rest)) = t.split_once("://") else { continue };
+        let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let auth = auth.rsplit_once('@').map_or(auth, |(_, h)| h);
+        let host = if let Some(v6) = auth.strip_prefix('[') {
+            v6.split(']').next().unwrap_or("")
+        } else {
+            auth.split(':').next().unwrap_or("")
+        };
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        if !host.is_empty() && !host.contains(['$', '%', '`', '{']) && !out.contains(&host) {
+            out.push(host);
+        }
+    }
+    out
+}
+
 /// Classify a shell command line into `v`.
 pub fn classify_command(cmd: &str, ws: &Path, v: &mut Verdict) {
     let p = policy();
@@ -538,6 +616,17 @@ pub fn classify_command(cmd: &str, ws: &Path, v: &mut Verdict) {
             downloaded = true;
         }
         v.add(&code);
+        if code == "NET_ACCESS" {
+            let hosts = url_hosts(&toks);
+            if hosts.is_empty() {
+                v.net_unknown = true;
+            }
+            for h in hosts {
+                if !v.net_hosts.contains(&h) {
+                    v.net_hosts.push(h);
+                }
+            }
+        }
 
         // Paths named in the arguments.
         let how = if is_delete(&prog) || code == "FS_DELETE" {

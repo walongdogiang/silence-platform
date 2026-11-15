@@ -27,6 +27,7 @@ mod modes;
 mod plan;
 mod policy;
 mod resume;
+mod sandbox;
 mod subagent;
 mod usage;
 
@@ -36,6 +37,10 @@ pub use modes::{profile, ModeProfile};
 pub use plan::approve_plan;
 pub use policy::{decide_permission, decide_permission_scoped, list_permissions, revoke_permission};
 pub use resume::resume_session;
+pub use sandbox::{
+    list_network, list_snapshots, restore_session_snapshot, restore_snapshot, revoke_network, session_snapshots,
+    SandboxSession,
+};
 pub use usage::context_usage;
 pub(crate) use auto::{record_aux_cost, title_pick, ToolOutcome};
 
@@ -112,6 +117,8 @@ pub struct Session {
     pub cli_hot: bool,
     /// Tool calls finished since the loop last looked (escalation signals).
     pub tool_log: Vec<ToolOutcome>,
+    /// Autonomous-mode state (approved hosts, snapshot turn, block streak).
+    pub sbx: SandboxSession,
 }
 
 pub struct AppCtx {
@@ -122,6 +129,8 @@ pub struct AppCtx {
     pub store: Arc<SessionStore>,
     pub sessions: Mutex<HashMap<String, Arc<Mutex<Session>>>>,
     pub events: Mutex<HashMap<String, mpsc::UnboundedSender<SessionEvent>>>,
+    /// Command sandbox: cached status, proxy, per-call network credentials.
+    pub sandbox: crate::sandbox_host::SandboxHost,
 }
 
 impl AppCtx {
@@ -134,6 +143,7 @@ impl AppCtx {
             store,
             sessions: Mutex::new(HashMap::new()),
             events: Mutex::new(HashMap::new()),
+            sandbox: crate::sandbox_host::SandboxHost::new(),
         }
     }
 }
@@ -190,6 +200,7 @@ pub async fn create_session(
         budget_pass: false,
         cli_hot: false,
         tool_log: Vec::new(),
+        sbx: SandboxSession::default(),
     };
     persist_messages(ctx, &mut session).await;
     ctx.sessions
@@ -338,6 +349,8 @@ async fn run_turn(
         let mut s = session_arc.lock().await;
         s.abort = false;
         s.tool_log.clear();
+        s.sbx.turn += 1;
+        s.sbx.blocked_streak = 0;
         let content = crate::images::user_content(&redact(&text), &images);
         s.messages.push(json!({"role":"user","content": content}));
         persist_messages(&ctx, &mut s).await;
@@ -899,7 +912,7 @@ async fn gated(
     mcp_read_only: bool,
 ) -> Result<Option<String>> {
     Ok(match gate(ctx, session_arc, tx, &tc.name, args, mcp_read_only).await? {
-        Gate::Run(_) => None,
+        Gate::Run(_) | Gate::Sandbox { .. } => None,
         Gate::Denied => Some(DENIED_BY_USER.into()),
         Gate::Blocked(msg) => Some(blocked(tx, tc, msg)),
     })
@@ -1053,11 +1066,13 @@ async fn dispatch_tool(
     }
     // Every remaining tool (read, grep, write, edit, shell, …) goes through the Risk Engine.
     let verdict = match gate(ctx, session_arc, tx, &tc.name, &args, false).await? {
-        Gate::Run(v) => v,
+        Gate::Run(v) => (v, None),
+        Gate::Sandbox { verdict, extra_hosts } => (verdict, Some(extra_hosts)),
         // A denial or a policy block is not the model struggling: no escalation signal.
         Gate::Denied => return Ok(DENIED_BY_USER.into()),
         Gate::Blocked(msg) => return Ok(blocked(tx, tc, msg)),
     };
+    let (verdict, sandbox_hosts) = verdict;
     let is_test = verdict.codes.iter().any(|c| c == "BUILD_TEST");
     if tc.name == "shell" {
         let payload = args.to_string();
@@ -1078,7 +1093,10 @@ async fn dispatch_tool(
     }
 
     let ws = session_arc.lock().await.workspace.clone();
-    let result = silence_tools::execute(&ws, &tc.name, &args).await;
+    let result = match sandbox_hosts {
+        Some(hosts) => sandbox::run_in_sandbox(ctx, session_arc, tx, tc, &args, &ws, &verdict, hosts).await,
+        None => silence_tools::execute(&ws, &tc.name, &args).await,
+    };
     if result.is_ok() && verdict.brings_external_content() {
         session_arc.lock().await.tainted = true;
     }
@@ -1549,7 +1567,7 @@ mod permission_tests {
             }
         }
         match out {
-            Gate::Run(_) => (true, risk, None),
+            Gate::Run(_) | Gate::Sandbox { .. } => (true, risk, None),
             Gate::Denied => (false, risk, None),
             Gate::Blocked(m) => (false, risk, Some(m)),
         }

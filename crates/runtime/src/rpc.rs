@@ -175,6 +175,39 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             agent::revoke_permission(&state.ctx, ws, entry).await?;
             Ok(json!({"allow": agent::list_permissions(ws)?}))
         }
+        "sandbox.status" => {
+            if req.params.get("refresh").and_then(|v| v.as_bool()).unwrap_or(false) {
+                state.ctx.sandbox.invalidate();
+            }
+            Ok(serde_json::to_value(state.ctx.sandbox.status().await)?)
+        }
+        "sandbox.setup" => {
+            // One UAC prompt; the call returns when setup is done (or the user declined).
+            Ok(serde_json::to_value(state.ctx.sandbox.setup().await?)?)
+        }
+        "network.list" => {
+            let ws = req.params.get("workspace").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(json!({
+                "defaults": silence_sandbox::proxy::DEFAULT_ALLOW,
+                "allow": agent::list_network(ws)?,
+            }))
+        }
+        "network.revoke" => {
+            let ws = req.params.get("workspace").and_then(|v| v.as_str()).unwrap_or("");
+            let host = req.params.get("host").and_then(|v| v.as_str()).unwrap_or("");
+            agent::revoke_network(&state.ctx, ws, host).await?;
+            Ok(json!({"allow": agent::list_network(ws)?}))
+        }
+        "snapshot.list" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(json!({"turns": agent::session_snapshots(&state.ctx, sid).await?}))
+        }
+        "snapshot.restore" => {
+            let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let turn = req.params.get("turn").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            agent::restore_session_snapshot(&state.ctx, sid, turn).await?;
+            Ok(json!({"ok": true}))
+        }
         "session.set_mode" => {
             let sid = req.params.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
             let mode: silence_protocol::SessionMode = serde_json::from_value(

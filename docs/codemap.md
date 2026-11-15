@@ -58,10 +58,15 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Job Object, timeout process | `crates/sandbox/src/lib.rs` |
 | Xác thực kết nối RPC (`auth.hello`, `SILENCE_RPC_TOKEN`) | `crates/runtime/src/rpc_auth.rs`, `rpc.rs` (`serve_connection`); Studio: `apps/studio/src/main/index.ts` (`spawnRuntime`) |
 | DACL chỉ cho user hiện tại (named pipe) | `crates/sandbox/src/owner_only.rs` |
-| Lọc env cho lệnh trong sandbox (chưa nối vào shell) | `crates/sandbox/src/env.rs` (`scrub`) |
+| Lọc env cho lệnh trong sandbox | `crates/sandbox/src/env.rs` (`scrub`) |
 | Sandbox Windows: chạy lệnh dưới `silence-sbx` (runner, token, ACL, Job) | `crates/sandbox/src/win/` (`launch::run`, `runner`, `token`, `acl`, `job`); API `silence_sandbox::{run, status, grant_workspace}` |
 | Cài / gỡ sandbox, cấp quyền workspace | `crates/sandbox/src/win/setup.rs`; CLI `silence-engine sandbox …` (`crates/runtime/src/main.rs` `sandbox_cmd`, `sandbox_exec`) |
 | Mạng của sandbox: firewall rule, proxy allowlist | `crates/sandbox/src/win/firewall.rs` (`install`, `check`); `crates/sandbox/src/proxy.rs` (`Proxy`, `Grant`, `NetEvent`, `workspace_allowlist`) |
+| Tự chủ: bảng quyết định (cover / ask), host trong lệnh | `runtime/src/risk/mod.rs` (`Verdict::sandbox_plan`, `url_hosts`); khoá `sandbox_covers` / `always_ask` / `never_escalate` ở `risk/default_policy.yaml` |
+| Tự chủ: gate chọn sandbox / hỏi / chặn, thẻ leo thang | `agent/policy.rs::gate` (`Gate::Sandbox`), `agent/sandbox.rs` (`block_seen`, `run_in_sandbox`, `ask_hosts`) |
+| Tự chủ: snapshot hoàn tác mỗi lượt (`refs/silence/snap/…`) | `agent/sandbox.rs` (`take_snapshot`, `restore_snapshot`); RPC `snapshot.list` / `snapshot.restore` |
+| Sandbox phía Engine: cache status, proxy một phiên, credential theo lệnh, `.silence/network.json` | `runtime/src/sandbox_host.rs` (`SandboxHost`, `network::{add,remove,list}`); RPC `sandbox.status` / `sandbox.setup` / `network.list` / `network.revoke` |
+| Chạy shell trong sandbox | `crates/tools/src/lib.rs::shell_sandboxed` |
 | MCP client/host | `crates/mcp/src/lib.rs` |
 
 ## Protocol (đổi cả hai)
