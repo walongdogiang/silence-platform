@@ -91,15 +91,17 @@ pub(super) fn build_request(
     });
     if !system.is_empty() {
         let mut blocks: Vec<Value> = system.into_iter().map(|t| json!({"type": "text", "text": t})).collect();
+        // Static prompt first (shared by every session), then the runtime env block.
+        if blocks.len() > 1 {
+            mark_cache(blocks.first_mut());
+        }
         mark_cache(blocks.last_mut());
         body["system"] = Value::Array(blocks);
     }
-    // Cache the growing history too: the last block of the last message.
-    if let Some(last) = msgs.last_mut() {
-        if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
-            mark_cache(arr.last_mut());
-        }
-    }
+    // Cache the growing history too: its last block. The `<turn_context>` tail (merged into the
+    // last user message as its final text block) changes every call, so the mark goes on the
+    // block before it; otherwise the next call would find no cache entry for the history.
+    mark_history_end(&mut msgs);
     body["messages"] = Value::Array(msgs);
     if model.tools {
         let mut ts = convert_tools(tools);
@@ -117,6 +119,35 @@ pub(super) fn build_request(
         body["output_config"] = json!({"effort": e});
     }
     body
+}
+
+fn mark_history_end(msgs: &mut [Value]) {
+    let is_tail = |b: &Value| {
+        b.get("type").and_then(Value::as_str) == Some("text")
+            && b.get("text").and_then(Value::as_str).is_some_and(|t| t.starts_with(super::TURN_CONTEXT_TAG))
+    };
+    let Some(n) = msgs.len().checked_sub(1) else { return };
+    let tail_in_last = msgs[n]
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|a| a.last())
+        .is_some_and(is_tail);
+    if !tail_in_last {
+        if let Some(arr) = msgs[n].get_mut("content").and_then(Value::as_array_mut) {
+            mark_cache(arr.last_mut());
+        }
+        return;
+    }
+    let len = msgs[n].get("content").and_then(Value::as_array).map_or(0, Vec::len);
+    if len >= 2 {
+        if let Some(arr) = msgs[n].get_mut("content").and_then(Value::as_array_mut) {
+            mark_cache(arr.get_mut(len - 2));
+        }
+    } else if n > 0 {
+        if let Some(arr) = msgs[n - 1].get_mut("content").and_then(Value::as_array_mut) {
+            mark_cache(arr.last_mut());
+        }
+    }
 }
 
 fn mark_cache(block: Option<&mut Value>) {
@@ -521,6 +552,31 @@ mod tests {
         let plain = build_request(&model(false), &history, &tools, 1000, None);
         assert!(plain.get("thinking").is_none());
         assert!(plain.get("output_config").is_none());
+    }
+
+    #[test]
+    fn history_breakpoint_skips_the_turn_context_tail() {
+        let tail = json!({"role": "user", "content": "<turn_context>\n## Mode: Ask\n</turn_context>"});
+        let cached = |b: &Value| b["cache_control"]["type"] == "ephemeral";
+
+        // Turn start: the tail merges into the prompt's user message; the prompt is marked.
+        let history = vec![json!({"role": "system", "content": "S"}), json!({"role": "user", "content": "hi"}), tail.clone()];
+        let body = build_request(&model(false), &history, &json!([]), 1000, None);
+        let blocks = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(cached(&blocks[0]) && !cached(&blocks[1]));
+
+        // Mid-turn: tool result, then the tail, in one user message.
+        let history = vec![
+            json!({"role": "user", "content": "hi"}),
+            json!({"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]}),
+            json!({"role": "tool", "tool_call_id": "t1", "content": "ok"}),
+            tail,
+        ];
+        let body = build_request(&model(false), &history, &json!([]), 1000, None);
+        let last = body["messages"][2]["content"].as_array().unwrap();
+        assert_eq!(last[0]["type"], "tool_result");
+        assert!(cached(&last[0]) && !cached(&last[1]));
     }
 
     #[test]

@@ -167,7 +167,8 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
                 _ => p.text,
             };
             crate::images::validate(&p.images)?;
-            agent::prompt_with_images(state.ctx.clone(), p.session_id, text, p.images).await?;
+            let ui_lang = p.ui_lang.as_deref().and_then(crate::lang::ReplyLang::from_code);
+            agent::prompt_with_images(state.ctx.clone(), p.session_id, text, p.images, ui_lang).await?;
             Ok(json!({"ok": true}))
         }
         "permissions.list" => {
@@ -327,6 +328,8 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
             Ok(json!({"ok": true}))
         }
         "eval.cancel" => Ok(json!({"cancelled": state.evals.cancel()})),
+        "eval.config.get" => state.evals.config_get(&state.ctx.catalog).await,
+        "eval.config.set" => state.evals.config_set(req.params, &state.ctx.catalog),
         "eval.status" => Ok(state.evals.status()),
         "eval.runs" => Ok(state.evals.runs(20)),
         "eval.task" => {

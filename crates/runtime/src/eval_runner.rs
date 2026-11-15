@@ -8,6 +8,7 @@ use crate::agent::{self, AppCtx};
 use crate::audit::AuditLog;
 use crate::compact::estimate_tokens;
 use crate::eval_history;
+use crate::eval_trace::Trace;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use silence_protocol::{PermissionMode, SessionEvent, SessionMode};
@@ -30,6 +31,8 @@ pub struct AttemptOpts {
     /// Overrides the task's `effort`.
     pub effort: Option<String>,
     pub cancel: CancelFlag,
+    /// USD left under `--max-cost`: the attempt is aborted once it has spent this much.
+    pub cost_cap: Option<f64>,
 }
 
 /// Progress of a run, for the CLI printer and Studio (`eval.progress`).
@@ -94,8 +97,28 @@ pub(crate) struct Task {
     /// the audit as `eval.asked` with their codes, so `audit_matches` can require / forbid them.
     #[serde(default)]
     on_ask: Option<String>,
+    /// Efficiency guard: the attempt is aborted and fails once the agent goes over it.
+    #[serde(default)]
+    budget: Budget,
     pass_if: PassIf,
 }
+
+/// Per-task efficiency limits (manifest `budget:`). Like CursorBench reporting steps and tokens
+/// next to correctness: a task that passes but takes 3× the calls is a regression too.
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
+pub(crate) struct Budget {
+    /// Model calls (agent steps, side calls included) allowed for one attempt.
+    #[serde(default)]
+    max_turns: Option<u32>,
+    /// Input tokens (cached included) allowed for one attempt.
+    #[serde(default)]
+    max_input_tokens: Option<u64>,
+}
+
+/// `error_code` of an attempt aborted because the run's `--max-cost` was reached mid-task.
+pub const MAX_COST_CODE: &str = "EVAL_MAX_COST";
+/// Failed this many judged runs in a row (history): `--retry-failed` does not retry it.
+pub const STABLE_FAIL_RUNS: usize = 3;
 
 impl Task {
     /// Session mode the task runs in (`mode`, else Plan for plan tasks, else Agent).
@@ -145,6 +168,10 @@ struct PassIf {
     /// The final report must be at most this many characters (answer-style tasks).
     #[serde(default)]
     max_report_chars: Option<usize>,
+    /// The final report must be written in this language (`vi` | `en`), as `lang::detect`
+    /// reads it.
+    #[serde(default)]
+    report_lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,12 +255,14 @@ pub fn is_infra_error(code: &str) -> bool {
             | "TIMEOUT"
             | "CLI_NOT_FOUND"
             | "CLI_AUTH"
+            | "CLI_LIMIT"
+            | MAX_COST_CODE
     )
 }
 
 /// Infra errors every later task would hit too: stop the run instead of burning through it.
 pub fn is_fatal_error(code: &str) -> bool {
-    matches!(code, "PROVIDER_CREDITS" | "PROVIDER_AUTH" | "CLI_NOT_FOUND" | "CLI_AUTH")
+    matches!(code, "PROVIDER_CREDITS" | "PROVIDER_AUTH" | "CLI_NOT_FOUND" | "CLI_AUTH" | "CLI_LIMIT" | MAX_COST_CODE)
 }
 
 /// Status of one attempt: infra error code → `Error`, else pass/fail by the checks.
@@ -270,6 +299,11 @@ pub struct RunOptions {
     pub source: Option<String>,
     /// Effort for every task (overrides the manifest's `effort`).
     pub effort: Option<String>,
+    /// Least recently run tasks first (from history), so a run cut short by `--max-cost`
+    /// does not always skip the same tail of the manifest (nightly).
+    pub rotate: bool,
+    /// Only tasks a change since this commit can affect (`evals/affects.yaml`, CLI only).
+    pub affected_since: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -285,6 +319,8 @@ impl Default for RunOptions {
             profile: "manual".into(),
             source: None,
             effort: None,
+            rotate: false,
+            affected_since: None,
         }
     }
 }
@@ -342,6 +378,14 @@ impl Suite {
         match source {
             Some(src) => self.catalog.same_model_on(src, &model).map_err(|e| format!("{e}")),
             None => Ok(model),
+        }
+    }
+
+    /// `model` moved to `source` (same family or tier there); `None` = unchanged.
+    pub(crate) fn model_on(&self, model: &str, source: Option<&str>) -> std::result::Result<String, String> {
+        match source {
+            Some(src) => self.catalog.same_model_on(src, model).map_err(|e| format!("{e}")),
+            None => Ok(model.to_string()),
         }
     }
 
@@ -405,9 +449,12 @@ impl Suite {
         let mut report = String::new();
         let mut plan = String::new();
         let approve = task.on_ask.as_deref() == Some("approve");
-        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics, &opts.cancel, &ctx, &sid, approve).await;
+        let mut trace = Trace::new();
+        let limits = Limits { budget: task.budget, cost_cap: opts.cost_cap };
+        let ok_run = wait_done(&mut rx, &mut report, &mut plan, &mut metrics, &mut trace, &opts.cancel, &limits, &ctx, &sid, approve).await;
         metrics.finish();
         let _ = std::fs::write(task_dir.join("report.md"), &report);
+        let _ = std::fs::write(task_dir.join("trace.jsonl"), trace.finish());
         if opts.cancel.load(Ordering::Relaxed) {
             metrics.status = Status::Skip;
             metrics.error = Some("cancelled".into());
@@ -415,11 +462,18 @@ impl Suite {
             metrics.duration_secs = started.elapsed().as_secs_f64();
             return Ok(metrics);
         }
-        let passed = ok_run && {
-            let audit_text = std::fs::read_to_string(task_dir.join("audit.jsonl")).unwrap_or_default();
-            check_pass(task, &ws, &self.fixture, &report, &plan, &self.manifest.verify_cmd)
-                && audit_pass(&task.pass_if, &audit_text)
-        };
+        // Every check runs (even after a failed run) so the UI can say what went wrong.
+        let audit_text = std::fs::read_to_string(task_dir.join("audit.jsonl")).unwrap_or_default();
+        let mut checks = Vec::new();
+        if !ok_run {
+            checks.push(CheckResult::fail("run", "", metrics.error.as_deref().unwrap_or("the agent did not finish the turn")));
+        }
+        checks.extend(check_all(task, &ws, &self.fixture, &report, &plan, &self.manifest.verify_cmd));
+        checks.extend(audit_checks(&task.pass_if, &audit_text));
+        if let Ok(j) = serde_json::to_string_pretty(&checks) {
+            let _ = std::fs::write(task_dir.join("checks.json"), j);
+        }
+        let passed = ok_run && checks.iter().all(|c| c.ok);
         metrics.status = attempt_status(passed, metrics.error_code.as_deref());
         metrics.attempts = 1;
         metrics.passes = u32::from(metrics.status == Status::Pass);
@@ -484,9 +538,39 @@ fn skipped(task: &Task, model: &str, reason: String) -> TaskMetrics {
 
 pub async fn run(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &RunOptions) -> Result<i32> {
     let suite = Suite::load(dir, catalog_path, repo_root)?;
+    let mut opts = opts.clone();
+    if let Some(since) = &opts.affected_since {
+        match affected_tasks(&suite, repo_root, since, &opts.only) {
+            Ok(ids) if ids.is_empty() => {
+                println!("không có thay đổi liên quan tới bộ {} kể từ {since}: không chạy task nào", suite.name);
+                return Ok(0);
+            }
+            Ok(ids) => {
+                println!("thay đổi kể từ {since} ảnh hưởng {} task: {}", ids.len(), ids.join(","));
+                opts.only = ids;
+            }
+            // Unknown commit (force-push, shallow clone…): run what was asked rather than skip.
+            Err(e) => println!("không xác định được thay đổi ({e:#}); chạy như không có --affected-since"),
+        }
+    }
     let cancel = CancelFlag::default();
-    let summary = run_with(&suite, opts, &cancel, &mut print_progress).await?;
+    let summary = run_with(&suite, &opts, &cancel, &mut print_progress).await?;
     finish_run(&summary, repo_root, opts.history)
+}
+
+/// Ids of the suite's tasks (within `only` when given) that files changed since `since` affect.
+fn affected_tasks(suite: &Suite, repo_root: &Path, since: &str, only: &[String]) -> Result<Vec<String>> {
+    let affects = crate::eval_affects::Affects::load(&repo_root.join("evals/affects.yaml"))?;
+    let changed = crate::eval_affects::changed_files(repo_root, since)?;
+    let sel = affects.select(&changed)?;
+    Ok(suite
+        .manifest
+        .tasks
+        .iter()
+        .map(|t| t.id.clone())
+        .filter(|id| only.is_empty() || only.contains(id))
+        .filter(|id| sel.keeps(id))
+        .collect())
 }
 
 /// CLI output of a run (same lines as before the progress callback existed).
@@ -518,21 +602,32 @@ pub async fn run_with(
     on: &mut (dyn FnMut(EvalProgress) + Send),
 ) -> Result<RunMetrics> {
     let meta = RunMeta::now(&suite.name, &opts.profile, opts.repeat.max(1), &suite.repo_root);
-    let selected: Vec<&Task> = suite
+    let mut selected: Vec<&Task> = suite
         .manifest
         .tasks
         .iter()
         .filter(|t| opts.only.is_empty() || opts.only.contains(&t.id))
         .collect();
+    let observations = if opts.rotate || opts.retry_failed {
+        eval_history::load_observations(&suite.repo_root)
+    } else {
+        Vec::new()
+    };
+    if opts.rotate {
+        // Never run first, then oldest last run (run ids sort by time). Stable: ties keep
+        // manifest order.
+        selected.sort_by_cached_key(|t| eval_history::last_run(&observations, &suite.name, &t.id));
+    }
     on(EvalProgress::Started {
         run_id: meta.run_id.clone(),
         suite: suite.name.clone(),
         tasks: selected.iter().map(|t| t.id.clone()).collect(),
     });
-    let attempt_opts = AttemptOpts {
+    let mut attempt_opts = AttemptOpts {
         source: opts.source.clone(),
         effort: opts.effort.clone(),
         cancel: cancel.clone(),
+        cost_cap: None,
     };
     let mut rows: Vec<TaskMetrics> = Vec::new();
     let mut spent = 0.0;
@@ -586,6 +681,7 @@ pub async fn run_with(
         for _ in 0..opts.repeat.max(1) {
             n += 1;
             on(EvalProgress::TaskStarted { id: task.id.clone(), model: model.clone(), attempt: n });
+            attempt_opts.cost_cap = opts.max_cost.map(|cap| (cap - spent).max(0.0));
             let m = suite.attempt(task, &model, n, &attempt_opts).await?;
             spent += m.cost_usd;
             agg.merge_attempt(&m);
@@ -600,8 +696,16 @@ pub async fn run_with(
             }
         }
         agg.status = agg.aggregate_status();
-        if agg.status == Status::Fail && opts.retry_failed && stopped.is_none() && !over_budget(spent) {
+        // A task that keeps failing is broken (task or harness), not flaky: retrying it only
+        // burns money (Anthropic: a steady 0% usually means a broken task).
+        let streak = eval_history::fail_streak(&observations, &suite.name, &task.id);
+        let stable_fail = streak >= STABLE_FAIL_RUNS;
+        if agg.status == Status::Fail && opts.retry_failed && stable_fail && agg.error.is_none() {
+            agg.error = Some(format!("không chạy lại: đã trượt {streak} lượt liền"));
+        }
+        if agg.status == Status::Fail && opts.retry_failed && !stable_fail && stopped.is_none() && !over_budget(spent) {
             on(EvalProgress::TaskStarted { id: task.id.clone(), model: model.clone(), attempt: n + 1 });
+            attempt_opts.cost_cap = opts.max_cost.map(|cap| (cap - spent).max(0.0));
             let m = suite.attempt(task, &model, n + 1, &attempt_opts).await?;
             spent += m.cost_usd;
             agg.add_usage(&m);
@@ -672,7 +776,9 @@ async fn wait_done(
     report: &mut String,
     plan: &mut String,
     metrics: &mut TaskMetrics,
+    trace: &mut Trace,
     cancel: &CancelFlag,
+    limits: &Limits,
     ctx: &Arc<AppCtx>,
     sid: &str,
     approve: bool,
@@ -706,6 +812,15 @@ async fn wait_done(
         };
         if let Ok(Some(e)) = &ev {
             metrics.observe(e);
+            trace.push(e);
+            if matches!(e, SessionEvent::Cost { .. }) {
+                if let Some((code, why)) = metrics.over_limits(limits) {
+                    let _ = agent::abort(ctx, sid).await;
+                    metrics.error = Some(why);
+                    metrics.error_code = code;
+                    return false;
+                }
+            }
         }
         match ev {
             Ok(Some(SessionEvent::Token { text })) => report.push_str(&text),
@@ -751,6 +866,12 @@ async fn wait_done(
     }
 }
 
+/// Limits checked while an attempt runs (`wait_done`).
+pub(crate) struct Limits {
+    budget: Budget,
+    cost_cap: Option<f64>,
+}
+
 /// Per-task numbers collected from `SessionEvent`s (no change to the agent loop needed).
 ///
 /// Tokens come from `SessionEvent::Cost` (the provider's usage, see `gateway::ChatResult`).
@@ -777,6 +898,10 @@ pub struct TaskMetrics {
     pub estimated_calls: u32,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Part of `input_tokens` read from the provider's prompt cache (0 = none or unknown).
+    pub cache_read_tokens: u64,
+    /// Part of `input_tokens` written to the prompt cache.
+    pub cache_write_tokens: u64,
     pub tool_calls: u32,
     pub tool_calls_by_name: BTreeMap<String, u32>,
     pub tool_output_bytes: u64,
@@ -857,8 +982,12 @@ impl TaskMetrics {
                 output_tokens,
                 usd,
                 slot,
+                cache_read_tokens,
+                cache_write_tokens,
                 ..
             } => {
+                self.cache_read_tokens += *cache_read_tokens as u64;
+                self.cache_write_tokens += *cache_write_tokens as u64;
                 if !slot.is_empty() {
                     *self.usd_by_slot.entry(slot.clone()).or_default() += usd;
                 }
@@ -901,6 +1030,39 @@ impl TaskMetrics {
         }
     }
 
+    /// First limit of `l` this attempt went over: (`error_code`, message). Checked after each
+    /// model call, so the call that crosses a limit has already been paid for.
+    fn over_limits(&self, l: &Limits) -> Option<(Option<String>, String)> {
+        if let Some(cap) = l.cost_cap {
+            if self.usd_reported >= cap {
+                return Some((
+                    Some(MAX_COST_CODE.into()),
+                    format!("{MAX_COST_CODE}: đạt trần chi của lượt chạy giữa task (${:.4})", self.usd_reported),
+                ));
+            }
+        }
+        if let Some(n) = l.budget.max_turns {
+            if self.model_calls > n {
+                return Some((None, format!("budget: {} lần gọi model > max_turns {n}", self.model_calls)));
+            }
+        }
+        if let Some(n) = l.budget.max_input_tokens {
+            if self.input_tokens > n {
+                return Some((None, format!("budget: {} input token > max_input_tokens {n}", self.input_tokens)));
+            }
+        }
+        None
+    }
+
+    /// Share of input tokens served from the prompt cache (0.0 … 1.0).
+    pub fn cache_hit_rate(&self) -> f64 {
+        if self.input_tokens == 0 {
+            0.0
+        } else {
+            self.cache_read_tokens as f64 / self.input_tokens as f64
+        }
+    }
+
     /// Flush the estimated output of the last call without usage.
     pub fn finish(&mut self) {
         self.close_prev_call();
@@ -934,6 +1096,8 @@ impl TaskMetrics {
         self.estimated_calls += o.estimated_calls;
         self.input_tokens += o.input_tokens;
         self.output_tokens += o.output_tokens;
+        self.cache_read_tokens += o.cache_read_tokens;
+        self.cache_write_tokens += o.cache_write_tokens;
         self.tool_calls += o.tool_calls;
         self.tool_output_bytes += o.tool_output_bytes;
         self.cost_usd += o.cost_usd;
@@ -1034,12 +1198,12 @@ impl RunMetrics {
     }
 
     pub fn table(&self) -> String {
-        let row = |cols: [&str; 9], h: &str| {
-            let [a, b, c, d, e, f, g, i, j] = cols;
-            format!("{a:<28} {b:>5} {c:<16} {d:>5} {e:>6} {f:>9} {g:>8} {i:>8} {j:>6}  {h}\n")
+        let row = |cols: [&str; 10], h: &str| {
+            let [a, b, c, d, e, f, k, g, i, j] = cols;
+            format!("{a:<28} {b:>5} {c:<16} {d:>5} {e:>6} {f:>9} {k:>6} {g:>8} {i:>8} {j:>6}  {h}\n")
         };
         let mut s = row(
-            ["task", "ok", "model", "n", "calls", "in_tok", "out_tok", "usd", "secs"],
+            ["task", "ok", "model", "n", "calls", "in_tok", "cache", "out_tok", "usd", "secs"],
             "tools_by_name",
         );
         for t in self.tasks.iter().chain(std::iter::once(&self.total)) {
@@ -1067,6 +1231,7 @@ impl RunMetrics {
                     &n,
                     &calls,
                     &t.input_tokens.to_string(),
+                    &format!("{:.0}%", t.cache_hit_rate() * 100.0),
                     &t.output_tokens.to_string(),
                     &format!("{:.4}", t.cost_usd),
                     &format!("{:.0}", t.duration_secs),
@@ -1085,84 +1250,247 @@ impl RunMetrics {
     }
 }
 
-/// `audit_matches` must each hit a line; `audit_absent` must hit none. Bad regex = fail.
-fn audit_pass(p: &PassIf, audit: &str) -> bool {
-    let hit = |pat: &str| match regex::Regex::new(pat) {
-        Ok(re) => Some(audit.lines().any(|l| re.is_match(l))),
-        Err(_) => None,
-    };
-    p.audit_matches.iter().all(|pat| hit(pat) == Some(true))
-        && p.audit_absent.iter().all(|pat| hit(pat) == Some(false))
+/// Result of one `pass_if` check, written to `checks.json` and shown in Studio (tab Checks).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CheckResult {
+    /// `run`, `grep`, `test`, `unchanged`, `report_mentions`, `plan_mentions`, `max_report_chars`,
+    /// `report_lang`, `audit_matches`, `audit_absent`.
+    pub kind: String,
+    /// What was checked: a path, a pattern, a test filter, a phrase.
+    pub target: String,
+    pub ok: bool,
+    /// Why it failed (or the matching line, for `audit_absent`). Empty when there is nothing to add.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
 }
 
-fn check_pass(
+impl CheckResult {
+    fn new(kind: &str, target: &str, ok: bool, detail: impl Into<String>) -> Self {
+        Self { kind: kind.into(), target: target.into(), ok, detail: detail.into() }
+    }
+    fn pass(kind: &str, target: &str) -> Self {
+        Self::new(kind, target, true, "")
+    }
+    fn fail(kind: &str, target: &str, detail: impl Into<String>) -> Self {
+        Self::new(kind, target, false, detail)
+    }
+}
+
+fn clip(s: &str, n: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(n).collect::<String>())
+    }
+}
+
+/// `audit_matches` must each hit a line; `audit_absent` must hit none. Bad regex = fail.
+fn audit_checks(p: &PassIf, audit: &str) -> Vec<CheckResult> {
+    let first_hit = |pat: &str| regex::Regex::new(pat).map(|re| audit.lines().find(|l| re.is_match(l)));
+    let mut out = Vec::new();
+    for pat in &p.audit_matches {
+        out.push(match first_hit(pat) {
+            Ok(Some(_)) => CheckResult::pass("audit_matches", pat),
+            Ok(None) => CheckResult::fail("audit_matches", pat, "no audit line matches"),
+            Err(e) => CheckResult::fail("audit_matches", pat, format!("bad regex: {e}")),
+        });
+    }
+    for pat in &p.audit_absent {
+        out.push(match first_hit(pat) {
+            Ok(None) => CheckResult::pass("audit_absent", pat),
+            Ok(Some(line)) => CheckResult::fail("audit_absent", pat, format!("matched: {}", clip(line, 300))),
+            Err(e) => CheckResult::fail("audit_absent", pat, format!("bad regex: {e}")),
+        });
+    }
+    out
+}
+
+#[cfg(test)]
+fn audit_pass(p: &PassIf, audit: &str) -> bool {
+    audit_checks(p, audit).iter().all(|c| c.ok)
+}
+
+/// Every non-audit check of `pass_if`. All of them run, so a failure lists every reason.
+fn check_all(
     task: &Task,
     ws: &Path,
     fixture: &Path,
     report: &str,
     plan: &str,
     verify_cmd: &str,
-) -> bool {
+) -> Vec<CheckResult> {
+    let p = &task.pass_if;
+    let mut out = Vec::new();
     let hay = format!("{report}\n{plan}").to_lowercase();
-    if task.pass_if.max_report_chars.is_some_and(|n| report.trim().chars().count() > n) {
-        return false;
+    if let Some(n) = p.max_report_chars {
+        let len = report.trim().chars().count();
+        let detail = if len > n { format!("report has {len} chars") } else { String::new() };
+        out.push(CheckResult::new("max_report_chars", &n.to_string(), len <= n, detail));
     }
-    for rel in &task.pass_if.unchanged {
-        if std::fs::read(ws.join(rel)).ok() != std::fs::read(fixture.join(rel)).ok() {
-            return false;
-        }
-    }
-    for g in &task.pass_if.grep {
-        let path = ws.join(&g.path);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return false;
+    if let Some(code) = &p.report_lang {
+        let want = crate::lang::ReplyLang::from_code(code);
+        let got = crate::lang::detect(report);
+        let detail = match got {
+            Some(l) if Some(l) != want => format!("report is in {}", l.name()),
+            None => "report language unclear".to_string(),
+            _ => String::new(),
         };
-        let re = match regex::Regex::new(&g.pattern) {
-            Ok(r) => r,
-            Err(_) => return false,
+        out.push(CheckResult::new("report_lang", code, want.is_some() && got == want, detail));
+    }
+    for rel in &p.unchanged {
+        let now = std::fs::read(ws.join(rel)).ok();
+        let before = std::fs::read(fixture.join(rel)).ok();
+        out.push(if now == before {
+            CheckResult::pass("unchanged", rel)
+        } else if now.is_none() {
+            CheckResult::fail("unchanged", rel, "file was deleted")
+        } else {
+            CheckResult::fail("unchanged", rel, "file differs from the fixture")
+        });
+    }
+    for g in &p.grep {
+        let target = format!("{}: {}", g.path, g.pattern);
+        let check = match (std::fs::read_to_string(ws.join(&g.path)), regex::Regex::new(&g.pattern)) {
+            (_, Err(e)) => CheckResult::fail("grep", &target, format!("bad regex: {e}")),
+            (Err(_), _) => CheckResult::fail("grep", &target, "file not found"),
+            (Ok(text), Ok(re)) if re.is_match(&text) => CheckResult::pass("grep", &target),
+            (Ok(_), Ok(_)) => CheckResult::fail("grep", &target, "pattern not found in the file"),
         };
-        if !re.is_match(&text) {
-            return false;
-        }
+        out.push(check);
     }
-    if let Some(filter) = task
-        .pass_if
-        .test
-        .as_deref()
-        .or(task.verify_filter.as_deref())
-    {
-        if !run_verify(ws, verify_cmd, filter) {
-            return false;
-        }
+    if let Some(filter) = p.test.as_deref().or(task.verify_filter.as_deref()) {
+        let (ok, tail) = run_verify(ws, verify_cmd, filter);
+        out.push(CheckResult::new("test", filter, ok, if ok { String::new() } else { tail }));
     }
-    for n in &task.pass_if.report_mentions {
-        if !hay.contains(&n.to_lowercase()) {
-            return false;
-        }
+    for n in &p.report_mentions {
+        let ok = hay.contains(&n.to_lowercase());
+        out.push(CheckResult::new("report_mentions", n, ok, if ok { "" } else { "not mentioned in the answer" }));
     }
-    for n in &task.pass_if.plan_mentions {
-        if !hay.contains(&n.to_lowercase()) {
-            return false;
-        }
+    for n in &p.plan_mentions {
+        let ok = hay.contains(&n.to_lowercase());
+        out.push(CheckResult::new("plan_mentions", n, ok, if ok { "" } else { "not mentioned in the plan" }));
     }
-    true
+    out
 }
 
-fn run_verify(ws: &Path, cmd: &str, filter: &str) -> bool {
-    if cmd.is_empty() {
-        return true;
-    }
-    let mut c = std::process::Command::new("python");
-    // verify_cmd is like `python -m tests.runner`
+/// Run the fixture's tests; on failure also return the exit code and last lines of the output.
+fn run_verify(ws: &Path, cmd: &str, filter: &str) -> (bool, String) {
     let mut parts = cmd.split_whitespace();
-    if let Some(bin) = parts.next() {
-        c = std::process::Command::new(bin);
-        for a in parts {
-            c.arg(a);
+    let Some(bin) = parts.next() else {
+        return (true, String::new());
+    };
+    // verify_cmd is like `python -m tests.runner`
+    let mut c = std::process::Command::new(bin);
+    c.args(parts).arg(filter).current_dir(ws);
+    match c.output() {
+        Ok(o) => {
+            let text = format!("{}\n{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+            let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+            let tail = lines[lines.len().saturating_sub(12)..].join("\n");
+            let code = o.status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+            (o.status.success(), format!("exit {code}\n{}", clip(&tail, 2000)))
+        }
+        Err(e) => (false, format!("could not run `{cmd}`: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod check_tests {
+    use super::*;
+
+    fn task(pass_if: PassIf) -> Task {
+        Task {
+            id: "T".into(),
+            kind: "edit".into(),
+            prompt: String::new(),
+            plan_only: false,
+            mode: None,
+            verify_filter: None,
+            model: None,
+            effort: None,
+            style: None,
+            requires_env: vec![],
+            permission: None,
+            requires_sandbox: false,
+            on_ask: None,
+            budget: Budget::default(),
+            pass_if,
         }
     }
-    c.arg(filter).current_dir(ws);
-    c.status().map(|s| s.success()).unwrap_or(false)
+
+    #[test]
+    fn checks_explain_each_failure() {
+        let fx = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        std::fs::write(fx.path().join("a.py"), "x = 1\n").unwrap();
+        std::fs::write(ws.path().join("a.py"), "x = 2\n").unwrap();
+        std::fs::write(fx.path().join("keep.md"), "same").unwrap();
+        std::fs::write(ws.path().join("keep.md"), "same").unwrap();
+        let t = task(PassIf {
+            grep: vec![
+                GrepCheck { path: "a.py".into(), pattern: r"x = 2".into() },
+                GrepCheck { path: "a.py".into(), pattern: r"y = \d".into() },
+                GrepCheck { path: "missing.py".into(), pattern: "z".into() },
+            ],
+            unchanged: vec!["keep.md".into(), "a.py".into()],
+            report_mentions: vec!["calc.py".into(), "BUG".into()],
+            max_report_chars: Some(10),
+            ..Default::default()
+        });
+        let report = "Found a bug in calc.py, fixed it.";
+        let checks = check_all(&t, ws.path(), fx.path(), report, "", "");
+        let summary: Vec<(&str, bool, &str)> = checks.iter().map(|c| (c.kind.as_str(), c.ok, c.detail.as_str())).collect();
+        assert_eq!(
+            summary,
+            [
+                ("max_report_chars", false, "report has 33 chars"),
+                ("unchanged", true, ""),
+                ("unchanged", false, "file differs from the fixture"),
+                ("grep", true, ""),
+                ("grep", false, "pattern not found in the file"),
+                ("grep", false, "file not found"),
+                ("report_mentions", true, ""),
+                ("report_mentions", true, ""),
+            ]
+        );
+        let json = serde_json::to_value(&checks[1]).unwrap();
+        assert!(json.get("detail").is_none(), "empty detail is not written: {json}");
+
+        let audit = r#"{"kind":"tool","tool":"shell"}"#;
+        let p = PassIf { audit_matches: vec!["tool\\.blocked".into()], audit_absent: vec!["shell".into(), "(".into()], ..Default::default() };
+        let a = audit_checks(&p, audit);
+        assert_eq!(a[0].detail, "no audit line matches");
+        assert!(a[1].detail.starts_with("matched: {\"kind\":\"tool\""));
+        assert!(a[2].detail.starts_with("bad regex"));
+    }
+
+    #[test]
+    fn report_lang_check() {
+        let (ws, fx) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let t = task(PassIf { report_lang: Some("vi".into()), ..Default::default() });
+        let kinds = |report: &str| {
+            check_all(&t, ws.path(), fx.path(), report, "", "")
+                .into_iter()
+                .map(|c| (c.ok, c.detail))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(kinds("`mean([])` chia cho 0 nên ném ZeroDivisionError."), [(true, String::new())]);
+        assert_eq!(
+            kinds("`mean([])` divides by zero, so it raises ZeroDivisionError and the test fails."),
+            [(false, "report is in English".to_string())]
+        );
+        assert_eq!(kinds("ok"), [(false, "report language unclear".to_string())]);
+    }
+
+    #[test]
+    fn failed_verify_returns_the_output_tail() {
+        let ws = tempfile::tempdir().unwrap();
+        let (ok, tail) = run_verify(ws.path(), "", "x");
+        assert!(ok && tail.is_empty(), "no verify_cmd = pass");
+        let (ok, tail) = run_verify(ws.path(), "definitely-not-a-binary-5ilence", "x");
+        assert!(!ok && tail.starts_with("could not run"), "{tail}");
+    }
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
@@ -1191,6 +1519,8 @@ mod tests {
             usd: 0.0,
             slot: String::new(),
             baseline_usd: 0.0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
         }
     }
 
@@ -1266,6 +1596,53 @@ mod tests {
         assert_eq!(m.tool_calls_by_name["grep"], 2);
         assert_eq!(m.tool_calls_by_name["read"], 1);
         assert_eq!(m.tool_output_bytes, 16);
+    }
+
+    #[test]
+    fn budget_and_cost_cap_stop_an_attempt() {
+        let ev = |i: u32, usd: f64| SessionEvent::Cost {
+            input_tokens: i,
+            output_tokens: 10,
+            usd,
+            slot: String::new(),
+            baseline_usd: 0.0,
+            cache_read_tokens: i / 2,
+            cache_write_tokens: 0,
+        };
+        let budget: Budget = serde_yaml::from_str("max_turns: 2\nmax_input_tokens: 5000").unwrap();
+        let limits = Limits { budget, cost_cap: Some(0.05) };
+        let mut m = TaskMetrics::new("T", "edit");
+        m.observe(&ev(1000, 0.01));
+        m.observe(&ev(1000, 0.01));
+        assert!(m.over_limits(&limits).is_none());
+        assert_eq!(m.cache_read_tokens, 1000);
+        assert!((m.cache_hit_rate() - 0.5).abs() < 1e-9);
+        m.observe(&ev(1000, 0.01));
+        let (code, why) = m.over_limits(&limits).unwrap();
+        assert!(code.is_none() && why.contains("max_turns 2"), "{why}");
+
+        let no_turn_cap = Limits { budget: Budget { max_turns: None, ..budget }, cost_cap: Some(0.05) };
+        m.observe(&ev(4000, 0.01));
+        let (_, why) = m.over_limits(&no_turn_cap).unwrap();
+        assert!(why.contains("max_input_tokens"), "{why}");
+
+        let only_cost = Limits { budget: Budget::default(), cost_cap: Some(0.05) };
+        m.observe(&ev(10, 0.02));
+        let (code, _) = m.over_limits(&only_cost).unwrap();
+        assert_eq!(code.as_deref(), Some(MAX_COST_CODE));
+        // Infra error (not an agent failure), and it stops the run.
+        assert_eq!(attempt_status(false, code.as_deref()), Status::Error);
+        assert!(is_fatal_error(MAX_COST_CODE));
+    }
+
+    #[test]
+    fn shipped_manifests_parse_budgets() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for suite in ["v0", "modes"] {
+            let text = std::fs::read_to_string(repo.join("evals").join(suite).join("manifest.yaml")).unwrap();
+            let m: Manifest = serde_yaml::from_str(&text).unwrap();
+            assert!(!m.tasks.is_empty());
+        }
     }
 
     #[test]
@@ -1365,7 +1742,7 @@ mod tests {
     #[test]
     fn cost_prefers_provider_usd_else_catalog_price() {
         let mut m = TaskMetrics::new("t", "edit");
-        m.observe(&SessionEvent::Cost { input_tokens: 1_000_000, output_tokens: 100_000, usd: 0.123, slot: String::new(), baseline_usd: 0.0 });
+        m.observe(&SessionEvent::Cost { input_tokens: 1_000_000, output_tokens: 100_000, usd: 0.123, slot: String::new(), baseline_usd: 0.0, cache_read_tokens: 0, cache_write_tokens: 0 });
         m.finish();
         m.finalize_cost(|_| Some((0.10, 0.50)));
         assert!((m.cost_usd - 0.123).abs() < 1e-9);
@@ -1376,7 +1753,7 @@ mod tests {
         assert!((est.cost_usd - 6.0).abs() < 1e-9);
 
         let mut cli = TaskMetrics::new("t", "edit");
-        cli.observe(&SessionEvent::Cost { input_tokens: 10, output_tokens: 1, usd: 0.5, slot: String::new(), baseline_usd: 0.0 });
+        cli.observe(&SessionEvent::Cost { input_tokens: 10, output_tokens: 1, usd: 0.5, slot: String::new(), baseline_usd: 0.0, cache_read_tokens: 0, cache_write_tokens: 0 });
         cli.finalize_cost(|_| Some((0.0, 0.0)));
         assert!((cli.cost_usd - 0.5).abs() < 1e-9);
     }
@@ -1397,7 +1774,7 @@ mod tests {
         m.observe(&route("sonnet"));
         m.observe(&cost(0, 0));
         m.observe(&route("opus"));
-        m.observe(&SessionEvent::Cost { input_tokens: 5, output_tokens: 5, usd: 0.25, slot: "frontier".into(), baseline_usd: 0.25 });
+        m.observe(&SessionEvent::Cost { input_tokens: 5, output_tokens: 5, usd: 0.25, slot: "frontier".into(), baseline_usd: 0.25, cache_read_tokens: 0, cache_write_tokens: 0 });
         m.observe(&cost(0, 0));
         m.finish();
         let price = |model: &str| match model {
@@ -1472,7 +1849,7 @@ mod tests {
         m.observe(&route("agent", "strong", false));
         m.observe(&route("subagent:explore", "small", false));
         m.observe(&route("agent", "frontier", true));
-        m.observe(&SessionEvent::Cost { input_tokens: 1, output_tokens: 1, usd: 0.2, slot: "frontier".into(), baseline_usd: 0.2 });
+        m.observe(&SessionEvent::Cost { input_tokens: 1, output_tokens: 1, usd: 0.2, slot: "frontier".into(), baseline_usd: 0.2, cache_read_tokens: 0, cache_write_tokens: 0 });
         assert_eq!(m.slots, vec!["strong", "frontier"]);
         assert_eq!(m.model, "m-frontier");
         assert!(m.escalated);

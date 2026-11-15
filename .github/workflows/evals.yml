@@ -1,6 +1,7 @@
 name: nightly-evals
 
 # Lịch và ngân sách: evals/README.md → Lịch chạy và ngân sách.
+# Nguồn model, bật/tắt CI và trần chi: evals/config.yaml (Studio → Evals → Cấu hình). CI tắt sẵn.
 on:
   workflow_dispatch:
     inputs:
@@ -9,6 +10,11 @@ on:
         type: choice
         options: [nightly, weekly]
         default: nightly
+      source:
+        description: "Nguồn model: config = ci.source trong evals/config.yaml; hoặc chọn riêng cho lần chạy tay này"
+        type: choice
+        options: [config, claude-api, company-gateway]
+        default: config
   schedule:
     - cron: "0 17 * * 0-5" # Đêm: 0h giờ VN, trừ đêm có lượt Tuần
     - cron: "0 17 * * 6" # Tuần: 0h Chủ nhật giờ VN
@@ -16,50 +22,64 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: read # gh run list: commit của lượt eval thành công gần nhất
 
 jobs:
   evals:
     runs-on: windows-latest
     env:
+      # Khoá của nguồn đã chọn phải có ở Settings → Secrets and variables → Actions.
       SILENCE_API_KEY: ${{ secrets.SILENCE_API_KEY }}
       SILENCE_API_BASE: ${{ secrets.SILENCE_API_BASE }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # --affected-since cần lịch sử để diff
       - uses: dtolnay/rust-toolchain@stable
       - name: Pick profile
         id: p
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then p="${{ inputs.profile }}"
           elif [ "${{ github.event.schedule }}" = "0 17 * * 6" ]; then p=weekly
           else p=nightly; fi
           echo "profile=$p" >> "$GITHUB_OUTPUT"
+          # Lượt Đêm theo lịch chỉ chạy task bị ảnh hưởng bởi commit kể từ lượt eval thành công
+          # gần nhất (evals/affects.yaml). Bấm tay thì chạy đủ, không lọc.
+          since=""
+          if [ "$p" = nightly ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            since=$(gh run list --workflow evals.yml --status success --limit 1 --json headSha -q '.[0].headSha' || true)
+          fi
+          echo "since=$since" >> "$GITHUB_OUTPUT"
+          if [ -n "$since" ]; then echo "affected=--affected-since $since" >> "$GITHUB_OUTPUT"; else echo "affected=" >> "$GITHUB_OUTPUT"; fi
       - name: Build engine
         run: cargo build -p silence-engine
 
-      - name: Nightly (tasks pinned to Haiku)
-        if: steps.p.outputs.profile == 'nightly'
-        run: cargo run -p silence-engine -- evals --dir evals/v0 --repo-root . --pinned claude-haiku --retry-failed --max-cost 0.3 --profile nightly
-        continue-on-error: true
+      # evals/config.yaml: CI tắt (ci.enabled: false) thì in skip=true và không chạy gì (job xanh).
+      # Bật mà thiếu khoá của nguồn CI thì bước này đỏ với lời nhắn rõ, trước khi gọi model.
+      - name: Check config and source
+        id: check
+        shell: bash
+        run: |
+          src=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.source }}" != "config" ]; then src=(--source "${{ inputs.source }}"); fi
+          echo "src=${src[*]}" >> "$GITHUB_OUTPUT"
+          ./target/debug/silence-engine evals-profile --profile "${{ steps.p.outputs.profile }}" --ci --check "${src[@]}" --repo-root . | tee check.txt
+          grep -E '^skip=' check.txt >> "$GITHUB_OUTPUT"
+          { echo "### Eval: ${{ steps.p.outputs.profile }}"; grep -v '^skip=' check.txt; } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Weekly v0 (full suite, pinned models)
-        if: steps.p.outputs.profile == 'weekly'
-        run: cargo run -p silence-engine -- evals --dir evals/v0 --repo-root . --max-cost 1.2 --history --profile weekly
-        continue-on-error: true
-      - name: Weekly modes
-        if: steps.p.outputs.profile == 'weekly'
-        run: cargo run -p silence-engine -- evals --dir evals/modes --repo-root . --only M01-ask-no-edit,M02-review-finds-bugs,M03-debug-fixes-with-evidence,M04-plan-no-edit,M05-multitask-two-fixes --max-cost 0.3 --history --profile weekly
-        continue-on-error: true
-      # Model Auto (A0x) có trần riêng: A01 chạy Opus, A03 có thể leo lên Opus, không được ăn
-      # vào trần của các task mode. Thử lại một lần vì A03 phụ thuộc model sửa đúng ngay hay không.
-      - name: Weekly Auto model
-        if: steps.p.outputs.profile == 'weekly'
-        run: cargo run -p silence-engine -- evals --dir evals/modes --repo-root . --only A01-auto-plan-frontier,A02-auto-ask-strong,A03-auto-agent-bugfix --retry-failed --max-cost 0.5 --history --profile weekly
+      # Cùng các bước như `npm run evals:nightly|weekly` trên máy (crates/runtime/src/eval_config.rs::steps).
+      - name: Run profile
+        if: steps.check.outputs.skip == 'false'
+        run: cargo run -p silence-engine -- evals-profile --profile ${{ steps.p.outputs.profile }} --ci ${{ steps.check.outputs.src }} ${{ steps.p.outputs.affected }} --repo-root .
         continue-on-error: true
       # Không push thẳng main: mở PR chứa lịch sử, squash merge như PR thường.
       # Cần bật Settings → Actions → "Allow GitHub Actions to create and approve pull requests".
       - name: Open history PR
-        if: always() && steps.p.outputs.profile == 'weekly'
+        if: always() && steps.p.outputs.profile == 'weekly' && steps.check.outputs.skip == 'false'
         uses: peter-evans/create-pull-request@v7
         with:
           branch: chore/eval-history-${{ github.run_id }}

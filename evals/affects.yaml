@@ -1,0 +1,74 @@
+# Thay đổi nào cần chạy lại task eval nào: `evals --affected-since <sha>` (lượt Đêm trên CI).
+#
+# Mỗi file đổi chỉ được quyết bởi rule ĐẦU TIÊN có `paths` khớp, nên rule hẹp đặt trước rule rộng.
+# `tasks`: tiền tố id task (`R` = mọi task R.., `M06` = đúng task đó), `*` = cả bộ,
+# `[]` = không cần eval. File không khớp rule nào cũng không cần eval (docs, UI Studio…).
+# Glob: `**` = mọi cấp thư mục, `*` = trong một cấp. Cách dùng: evals/README.md → Lịch chạy.
+
+rules:
+  # Không ảnh hưởng hành vi agent: code của chính bộ eval (trừ runner), docs, UI.
+  - paths:
+      - "crates/runtime/src/eval_history.rs"
+      - "crates/runtime/src/eval_rpc.rs"
+      - "crates/runtime/src/eval_calibrate.rs"
+      - "crates/runtime/src/eval_affects.rs"
+      - "crates/runtime/src/eval_config.rs"
+      - "crates/runtime/src/eval_profile.rs"
+      - "crates/runtime/src/eval_trace.rs"
+      - "crates/runtime/src/rpc.rs"
+      - "crates/runtime/src/bind_policy.rs"
+      - "crates/runtime/src/pty.rs"
+      - "crates/runtime/tests/**"
+      - "evals/history/**"
+      - "evals/DECISIONS.md"
+      - "evals/README.md"
+      - "evals/affects.yaml"
+      - "evals/config.yaml"
+      - ".github/workflows/evals.yml"
+      - "docs/**"
+      - "apps/**"
+      - ".claude/**"
+      - ".cursor/**"
+      - "*.md"
+    tasks: []
+
+  # Risk engine / sandbox: task bảo mật và task chạy lệnh.
+  - paths: ["crates/runtime/src/risk/**", "crates/sandbox/**", "crates/runtime/src/permissions.rs"]
+    tasks: ["R", "V", "S23", "S24"]
+
+  # Prompt theo mode và answer style.
+  - paths: ["crates/runtime/src/agent/modes.rs"]
+    tasks: ["M", "S01-style", "P", "L"]
+
+  # Turn context (mode/style/env ở cuối mỗi lần gọi) và ngôn ngữ trả lời.
+  - paths: ["crates/runtime/src/agent/env.rs", "crates/runtime/src/lang.rs"]
+    tasks: ["M06", "L", "S01-style"]
+
+  # Model Auto (slot, leo thang).
+  - paths: ["crates/runtime/src/agent/auto.rs"]
+    tasks: ["A"]
+
+  # Nguồn model riêng.
+  - paths: ["crates/runtime/src/agent/cli.rs"]
+    tasks: ["S02"]
+  - paths: ["crates/runtime/src/gateway/claude_api.rs"]
+    tasks: ["S01-source"]
+
+  # Tool chạy tiến trình / HTTP.
+  - paths: ["crates/tools/src/procs.rs", "crates/tools/src/http.rs", "crates/runtime/src/agent/procs.rs"]
+    tasks: ["V"]
+  - paths: ["crates/tools/src/image.rs", "crates/runtime/src/images.rs"]
+    tasks: ["X23", "X24", "X25"]
+
+  # Task mới hoặc sửa task: chạy cả bộ (đơn giản; trần chi của lượt vẫn giữ).
+  - paths: ["evals/**"]
+    tasks: ["*"]
+
+  # Còn lại trong vòng agent, gateway, tool, router, protocol, catalog model, kit agent, dependency.
+  - paths:
+      - "crates/**"
+      - "config/models.yaml"
+      - "templates/silence/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+    tasks: ["*"]

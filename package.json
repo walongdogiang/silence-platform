@@ -18,6 +18,9 @@
     "evals": "cargo run -p silence-engine -- evals --dir evals/v0 --repo-root . --history",
     "evals:calibrate": "cargo run -p silence-engine -- evals-calibrate --dir evals/v0 --repo-root . --history",
     "evals:report": "cargo run -p silence-engine -- evals-report --repo-root .",
+    "evals:smoke": "cargo run -p silence-engine -- evals-profile --profile smoke --repo-root .",
+    "evals:nightly": "cargo run -p silence-engine -- evals-profile --profile nightly --repo-root .",
+    "evals:weekly": "cargo run -p silence-engine -- evals-profile --profile weekly --repo-root .",
     "check:rules": "node scripts/check-rules-sync.mjs",
     "check:docs": "node scripts/check-docs-meta.mjs"
   }

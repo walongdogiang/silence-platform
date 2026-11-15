@@ -289,7 +289,9 @@ pub fn classify(tool: &str, args: &Value, ctx: &RiskCtx) -> Verdict {
                 v.add("TAINTED_CONTEXT");
             }
         }
-        "read" | "outline" | "glob" | "grep" | "view_image" | "git_status" | "git_diff" => {
+        "read" | "outline" | "glob" | "grep" | "view_image" | "git_status" | "git_diff"
+        // `skill`: a workspace SKILL.md body already loaded by `org::load`.
+        | "skill" => {
             v.add("READ_WS");
             for p in arg_paths(args) {
                 check_path(&p, ctx.workspace, PathUse::Read, &mut v);

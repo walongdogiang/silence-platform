@@ -40,13 +40,17 @@ pub(super) async fn run_cli_turn(
     let (system, tools, effort, resume, prior, workspace, sid) = {
         let s = session_arc.lock().await;
         let prof = profile(s.mode);
-        let msgs = with_mode_system(&s.messages, &turn_system(prof.system, &s.style));
+        let effort = model.effective_effort(&s.effort);
+        let env = RuntimeEnv::new(&ctx.catalog, &s, &model, &pick, effort.as_deref());
+        // The CLI takes one appended system prompt: the turn context goes at its end (the CLI
+        // keeps its own conversation, so there is no history tail to put it after).
+        let msgs = with_mode_system(&s.messages, &turn_context(&turn_system(prof.system, &s.style), &env));
         let system = msgs
             .first()
             .filter(|m| m["role"] == "system")
             .map(|m| crate::images::content_text(m))
             .unwrap_or_default();
-        let mut tools = builtin_tools(s.mode);
+        let mut tools = session_tools(&s);
         if let Some(arr) = tools.as_array_mut() {
             // Images cannot travel back through an MCP text result in this backend.
             arr.retain(|t| !matches!(t["function"]["name"].as_str(), Some("view_image" | "browser_screenshot")));
@@ -55,7 +59,7 @@ pub(super) async fn run_cli_turn(
         (
             system,
             tools,
-            model.effective_effort(&s.effort),
+            effort,
             s.cli_session.clone(),
             prior,
             s.workspace.root.clone(),
@@ -112,6 +116,8 @@ pub(super) async fn run_cli_turn(
             usd: out.usd,
             slot: pick.slot_str(),
             baseline_usd: cli_baseline(&ctx.catalog, &pick, out.input_tokens, out.output_tokens, out.usd),
+            cache_read_tokens: out.cache_read_tokens,
+            cache_write_tokens: out.cache_write_tokens,
         },
     );
     let _ = ctx
@@ -220,6 +226,9 @@ pub(crate) struct CliOutcome {
     pub session_id: Option<String>,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Part of `input_tokens` read from / written to the prompt cache.
+    pub cache_read_tokens: u32,
+    pub cache_write_tokens: u32,
     pub usd: f64,
 }
 
@@ -420,16 +429,30 @@ impl CliStream {
             session_id: self.session_id,
             input_tokens: n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens"),
             output_tokens: n("output_tokens"),
+            cache_read_tokens: n("cache_read_input_tokens"),
+            cache_write_tokens: n("cache_creation_input_tokens"),
             usd: r["total_cost_usd"].as_f64().unwrap_or(0.0),
         })
     }
+}
+
+/// Subscription window exhausted: "You've hit your 5-hour limit · resets 12pm", "Claude usage
+/// limit reached", "weekly limit reached". `d` is lower-cased.
+fn is_usage_limit(d: &str) -> bool {
+    d.contains("usage limit")
+        || (d.contains("hit your") && d.contains("limit"))
+        || (d.contains("limit reached") && !d.contains("rate limit"))
+        || d.contains("5-hour limit")
+        || d.contains("weekly limit")
 }
 
 fn cli_error(detail: &str, _exited_ok: bool) -> ProviderError {
     let d = detail.to_lowercase();
     let code = if d.contains("login") || d.contains("not logged in") || d.contains("api key") || d.contains("authenticat") {
         ErrorCode::CliAuth
-    } else if d.contains("rate limit") || d.contains("usage limit") {
+    } else if is_usage_limit(&d) {
+        ErrorCode::CliLimit
+    } else if d.contains("rate limit") {
         ErrorCode::ProviderRate
     } else if d.contains("overloaded") {
         ErrorCode::ProviderUnavailable
@@ -513,12 +536,18 @@ async fn handle_mcp(b: &BridgeCtx, req: &Value) -> Option<Value> {
                 Ok(json!({"content": [{"type": "text", "text": format!("unknown tool {name}")}], "isError": true}))
             } else {
                 let args = req["params"]["arguments"].clone();
-                let tc = ToolCall {
+                let tc = expand_grouped_call(ToolCall {
                     id: format!("cli-{}", Uuid::new_v4()),
                     name,
                     arguments: if args.is_object() { args.to_string() } else { "{}".into() },
+                });
+                // Images cannot travel back through an MCP text result in this backend.
+                let result = if tc.name == "browser_screenshot" {
+                    Err(anyhow!("op screenshot is not available on the Claude CLI source; use op snapshot"))
+                } else {
+                    dispatch_tool(&b.ctx, &b.session, &b.tx, &tc).await
                 };
-                let (text, is_error) = match dispatch_tool(&b.ctx, &b.session, &b.tx, &tc).await {
+                let (text, is_error) = match result {
                     Ok(t) => (t, false),
                     Err(e) => (format!("ERROR: {e}"), true),
                 };
@@ -627,6 +656,23 @@ mod tests {
         assert_eq!(err.downcast_ref::<ProviderError>().unwrap().code, ErrorCode::CliAuth);
         let err = CliStream::default().finish(false, "").unwrap_err();
         assert_eq!(err.downcast_ref::<ProviderError>().unwrap().code, ErrorCode::Unknown);
+    }
+
+    #[test]
+    fn usage_limit_maps_to_cli_limit_not_retryable() {
+        for msg in [
+            "You've hit your 5-hour limit · resets 12pm (Asia/Bangkok)",
+            "Claude usage limit reached. Your limit will reset at 3pm",
+            "You've hit your weekly limit",
+        ] {
+            let e = cli_error(msg, true);
+            assert_eq!(e.code, ErrorCode::CliLimit, "{msg}");
+            assert!(!e.code.retryable());
+            assert_eq!(e.code.as_str(), "CLI_LIMIT");
+        }
+        // A plain rate limit stays transient; a login problem stays auth.
+        assert_eq!(cli_error("API rate limit exceeded", true).code, ErrorCode::ProviderRate);
+        assert_eq!(cli_error("Not logged in · Please run /login", true).code, ErrorCode::CliAuth);
     }
 
     #[test]

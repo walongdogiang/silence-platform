@@ -139,6 +139,30 @@ pub async fn cli_info(catalog: &Catalog, audit: &AuditLog) -> Result<CliInfo> {
     Ok(info)
 }
 
+/// Nguồn `id` dùng được ngay trên máy này chưa: có khoá, hoặc Claude CLI đã cài và đã đăng nhập.
+/// `Err` = lý do, để báo một lần trước khi chạy eval thay vì mỗi task một lỗi.
+pub async fn source_ready(catalog: &Catalog, id: &str) -> std::result::Result<(), String> {
+    let p = catalog.provider(id).map_err(|e| e.to_string())?;
+    if p.is_cli() {
+        let Some((program, _)) = resolve_cli(&p.command).await else {
+            return Err("chưa cài Claude CLI (lệnh `claude`) trên máy này".into());
+        };
+        // Không đọc được trạng thái đăng nhập (bản CLI cũ) thì cho chạy: lỗi thật sẽ ra CLI_AUTH.
+        if cli_account(&program).await.is_some_and(|a| !a.logged_in) {
+            return Err("Claude CLI chưa đăng nhập: mở terminal, chạy `claude` rồi `/login`".into());
+        }
+        return Ok(());
+    }
+    if !p.api_key_env.is_empty() && catalog.api_key(p).is_empty() {
+        return Err(format!(
+            "thiếu khoá {} (biến môi trường {}): đặt biến này, hoặc chọn nguồn khác",
+            p.display_label(),
+            p.api_key_env
+        ));
+    }
+    Ok(())
+}
+
 async fn provider_status(catalog: &Catalog, p: &Provider) -> Value {
     let needs_key = !p.api_key_env.is_empty();
     let has_key = needs_key && !catalog.api_key(p).is_empty();

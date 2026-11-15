@@ -186,6 +186,8 @@ pub(crate) async fn record_aux_cost(ctx: &AppCtx, session_id: &str, pick: &Pick,
             usd,
             slot: pick.slot_str(),
             baseline_usd: baseline_usd(&ctx.catalog, pick, r, usd),
+            cache_read_tokens: r.cache_read_tokens,
+            cache_write_tokens: r.cache_write_tokens,
         },
     );
 }
@@ -560,7 +562,7 @@ models:
                 .append(
                     &id,
                     LogBody::Event {
-                        event: SessionEvent::Cost { input_tokens: 1, output_tokens: 1, usd, slot: "strong".into(), baseline_usd: usd },
+                        event: SessionEvent::Cost { input_tokens: 1, output_tokens: 1, usd, slot: "strong".into(), baseline_usd: usd, cache_read_tokens: 0, cache_write_tokens: 0 },
                     },
                 )
                 .await

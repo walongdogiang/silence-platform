@@ -66,6 +66,8 @@ pub struct CalibrateOptions {
     pub repeat: u32,
     pub max_cost: f64,
     pub history: bool,
+    /// Run each ladder model on this source (same family there); pins keep the base id.
+    pub source: Option<String>,
 }
 
 pub async fn calibrate(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: &CalibrateOptions) -> Result<i32> {
@@ -110,10 +112,17 @@ pub async fn calibrate(dir: &Path, catalog_path: &Path, repo_root: &Path, opts: 
                     stopped = Some(format!("đạt trần chi ${:.2}", opts.max_cost));
                     break 'ladder;
                 }
+                let on = match suite.model_on(model, opts.source.as_deref()) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        stopped = Some(format!("{model} không có trên nguồn đã chọn: {e}"));
+                        break 'ladder;
+                    }
+                };
                 n += 1;
-                let m = suite.attempt(task, model, n, &AttemptOpts::default()).await?;
+                let m = suite.attempt(task, &on, n, &AttemptOpts { source: opts.source.clone(), ..Default::default() }).await?;
                 spent += m.cost_usd;
-                println!("  {} {} {} ${:.4}", m.status.as_str(), task.id, model, m.cost_usd);
+                println!("  {} {} {} ${:.4}", m.status.as_str(), task.id, on, m.cost_usd);
                 let status = m.status;
                 if let Some(code) = m.error_code.as_deref().filter(|c| is_fatal_error(c)) {
                     stopped = Some(format!("{code}: dừng hiệu chỉnh"));

@@ -75,6 +75,9 @@ fn file_tools_respect_workspace_and_policy_files() {
     assert_eq!((v.tier, v.primary()), (Tier::Ask, "SECRET_READ"));
     let v = classify("submit_plan", &json!({"markdown": "x"}), &ctx);
     assert_eq!(v.tier, Tier::Auto);
+    // `skill` only returns a SKILL.md body loaded at session start: read-only tier.
+    let v = classify("skill", &json!({"name": "release-notes"}), &ctx);
+    assert_eq!((v.tier, v.primary()), (Tier::Auto, "READ_WS"));
     let v = classify("frobnicate", &json!({}), &ctx);
     assert_eq!((v.tier, v.primary()), (Tier::Ask, "UNKNOWN_TOOL"));
 }

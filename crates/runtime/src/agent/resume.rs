@@ -63,6 +63,7 @@ pub async fn resume_session(ctx: &AppCtx, session_id: &str) -> Result<SessionRes
             model: summary.model.clone(),
             effort: "auto".into(),
             style: "default".into(),
+            reply_lang: None,
             cli_session: None,
             logged_len: messages.len(),
             messages,

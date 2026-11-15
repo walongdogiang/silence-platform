@@ -1,0 +1,19 @@
+# Cấu hình eval. Sửa ở Studio → Evals → Cấu hình, hoặc sửa tay (evals/README.md → Cấu hình).
+# source: nguồn khi chạy trên máy (npm run evals, evals:smoke|nightly|weekly, Studio, calibrate):
+#   claude-cli | claude-api | company-gateway (OpenRouter) | per-task (mỗi task theo model ghim).
+# ci: lượt tự chạy trên GitHub Actions; bật khi đã đặt secret khoá của ci.source. Không ghi khoá ở đây.
+source: claude-cli
+profiles:
+  smoke:
+    max_cost: 0.5
+  nightly:
+    max_cost: 0.3
+  weekly:
+    v0_max_cost: 1.2
+    modes_max_cost: 0.3
+    auto_max_cost: 0.5
+ci:
+  enabled: false
+  source: claude-api
+  nightly: true
+  weekly: true

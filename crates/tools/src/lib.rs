@@ -11,6 +11,7 @@ pub mod browser;
 pub mod http;
 pub mod image;
 pub mod procs;
+pub mod unicode;
 pub use image::{read_image, ImageFile};
 
 /// Hard cap on any tool output handed back to the model (bytes). Longer output is cut with a note.
@@ -75,7 +76,12 @@ impl Workspace {
         // dunce keeps `\\?\` on paths too long to simplify; compare the plain form with the root.
         let canon = strip_extended(&canon);
         if !canon.starts_with(&self.root) {
-            return Err(anyhow!("path escapes workspace: {}", canon.display()));
+            return Err(anyhow!(
+                "path escapes workspace: {} (workspace root: {}). Use a path inside the workspace, \
+                 relative to its root.",
+                canon.display(),
+                self.root.display()
+            ));
         }
         // The jail check above uses the plain path; only the returned IO path is extended.
         Ok(extended_path(canon))
@@ -239,11 +245,17 @@ fn spec_outline() -> ToolSpec {
 fn spec_write() -> ToolSpec {
     ToolSpec {
         name: "write".into(),
-        description: "Write entire file contents (create or overwrite).".into(),
+        description: "Create a new file, or replace an existing file's entire contents. Missing parent \
+            directories are created. To change part of an existing file use edit instead (smaller, \
+            reviewable diff); if you do overwrite a file, read it first, because its old contents are \
+            replaced completely. `path` is relative to the workspace root (an absolute path inside the \
+            workspace also works; paths outside it are refused). `contents` is written exactly as given \
+            (UTF-8): never include the `  12|` line-number prefixes that read shows."
+            .into(),
         parameters: obj(
             json!({
-                "path": {"type": "string"},
-                "contents": {"type": "string"}
+                "path": {"type": "string", "description": "File path relative to the workspace root, e.g. src/util.py"},
+                "contents": {"type": "string", "description": "The complete new file contents."}
             }),
             &["path", "contents"],
         ),
@@ -253,13 +265,20 @@ fn spec_write() -> ToolSpec {
 fn spec_edit() -> ToolSpec {
     ToolSpec {
         name: "edit".into(),
-        description: "Replace exact old_string with new_string. Fails if not unique unless replace_all.".into(),
+        description: "Replace text in an existing file. Read the target lines first. `old_string` must \
+            match the current file exactly (spaces, tabs, indentation, blank lines) without the `  12|` \
+            line-number prefixes that read shows, and, unless replace_all is true, must occur exactly \
+            once: include 2-3 neighbouring lines to make it unique. `new_string` replaces it verbatim; \
+            an empty new_string deletes it. One call per separate change. To create a file, or rewrite \
+            most of one, use write. Matching tolerates Unicode normalization (NFC/NFD) and CRLF vs LF \
+            line endings; the file keeps its own form."
+            .into(),
         parameters: obj(
             json!({
-                "path": {"type": "string"},
-                "old_string": {"type": "string"},
-                "new_string": {"type": "string"},
-                "replace_all": {"type": "boolean"}
+                "path": {"type": "string", "description": "File path relative to the workspace root."},
+                "old_string": {"type": "string", "description": "Exact existing text to replace (non-empty)."},
+                "new_string": {"type": "string", "description": "Replacement text (may be empty to delete)."},
+                "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring exactly one (default false)."}
             }),
             &["path", "old_string", "new_string"],
         ),
@@ -269,11 +288,17 @@ fn spec_edit() -> ToolSpec {
 fn spec_glob() -> ToolSpec {
     ToolSpec {
         name: "glob".into(),
-        description: "Find files by glob relative to workspace.".into(),
+        description: "Find files by path pattern; returns workspace-relative paths, one per line \
+            (respects .gitignore; case-insensitive). `*` matches inside one path segment, `**` across \
+            any number of directories, `?` one character. A pattern matches either the whole path from \
+            the workspace root (`src/**/*.ts`) or just the file name (`*.rs` and `Cargo.toml` find files \
+            at any depth). No `{a,b}` alternation or `!` negation: call once per pattern. Use it to \
+            locate files before read; to search file contents use grep."
+            .into(),
         parameters: obj(
             json!({
-                "pattern": {"type": "string"},
-                "head_limit": {"type": "integer"}
+                "pattern": {"type": "string", "description": "e.g. **/*.rs, src/**/test_*.py, package.json"},
+                "head_limit": {"type": "integer", "description": "Max paths returned (default 200)."}
             }),
             &["pattern"],
         ),
@@ -285,12 +310,14 @@ fn spec_grep() -> ToolSpec {
         name: "grep".into(),
         description: "Regex search in workspace text files (respects .gitignore). Output modes: \
             `content` (path:line:text, default), `files` (matching paths only), `count` (path:matches). \
-            Use `context` for surrounding lines instead of re-reading the file."
+            Use `context` for surrounding lines instead of re-reading the file. Rust regex syntax: \
+            escape literal `( ) [ ] { } . * + ? | ^ $ \\` with a backslash; no lookaround or \
+            backreferences. `glob` works like the glob tool (`*.rs` = any depth)."
             .into(),
         parameters: obj(
             json!({
                 "pattern": {"type": "string"},
-                "glob": {"type": "string", "description": "Filter files, e.g. **/*.rs"},
+                "glob": {"type": "string", "description": "Filter files, e.g. *.rs or src/**/*.ts"},
                 "output_mode": {"type": "string", "enum": ["content", "files", "count"]},
                 "context": {"type": "integer", "description": "Lines of context around each match (0-5, content mode)."},
                 "case_insensitive": {"type": "boolean"},
@@ -301,14 +328,45 @@ fn spec_grep() -> ToolSpec {
     }
 }
 
+/// `shell` on Windows: exactly what `shell_command` runs (Windows PowerShell 5.1, not pwsh 7).
+const SHELL_DESC_WINDOWS: &str = "Run one command in Windows PowerShell 5.1 \
+(`powershell -NoProfile -NonInteractive -Command`): PowerShell syntax, not bash and not cmd. \
+cwd is the workspace root; output is UTF-8 (stdout, then stderr after `STDERR:`); stdin is closed, so \
+anything that prompts fails; default timeout 120000 ms. Use it for builds, tests, git and package \
+managers. Do not use it to read, search or edit files (use read, grep, glob, edit, write) or for \
+servers/watchers that keep running (use proc_start). PowerShell 5.1 traps:\n\
+- `&&` and `||` do not exist (parse error). Run B only if A succeeded: `A; if ($?) { B }`. Always run both: `A; B`.\n\
+- Env vars: `$env:NAME = 'value'; cmd`, not `export NAME=value` or `NAME=value cmd`.\n\
+- No head, tail, grep, wc, touch, which, `rm -rf`, `mkdir -p`: use `Select-Object -First N` / `-Last N`, \
+`Select-String`, `Measure-Object -Line`, `New-Item -ItemType File`, `Get-Command`, \
+`Remove-Item -Recurse -Force`, `New-Item -ItemType Directory -Force`.\n\
+- Quote paths containing spaces; to run an exe from a quoted path use the call operator: \
+`& \"C:\\Program Files\\Tool\\tool.exe\" arg`.\n\
+- Do not append `2>&1` to native programs (git, cargo, npm, python): 5.1 turns each stderr line into an \
+error record and the command looks failed. stderr is already captured.\n\
+- `/dev/null` is `$null`; a native program's exit code is `$LASTEXITCODE`; no `<<EOF` heredocs: use a \
+here-string `@'...'@` whose closing `'@` starts its own line.";
+
+/// `shell` elsewhere: `bash -lc`.
+const SHELL_DESC_UNIX: &str = "Run one command with `bash -lc`. cwd is the workspace root; stdout, \
+then stderr after `STDERR:`; stdin is closed, so anything that prompts fails; default timeout 120000 ms. \
+Use it for builds, tests, git and package managers. Do not use it to read, search or edit files (use \
+read, grep, glob, edit, write) or for servers/watchers that keep running (use proc_start). Quote paths \
+that contain spaces.";
+
 fn spec_shell() -> ToolSpec {
+    let command_desc = if cfg!(windows) {
+        "PowerShell 5.1 command line. Chain with `;` or `A; if ($?) { B }`, never `&&`."
+    } else {
+        "bash command line."
+    };
     ToolSpec {
         name: "shell".into(),
-        description: "Run a command in PowerShell (Windows) or bash. cwd must stay in workspace.".into(),
+        description: if cfg!(windows) { SHELL_DESC_WINDOWS } else { SHELL_DESC_UNIX }.into(),
         parameters: obj(
             json!({
-                "command": {"type": "string"},
-                "timeout_ms": {"type": "integer"}
+                "command": {"type": "string", "description": command_desc},
+                "timeout_ms": {"type": "integer", "description": "Kill the command after this many ms (default 120000)."}
             }),
             &["command"],
         ),
@@ -337,7 +395,9 @@ fn spec_http_check() -> ToolSpec {
 fn spec_git_status() -> ToolSpec {
     ToolSpec {
         name: "git_status".into(),
-        description: "git status --porcelain=v1.".into(),
+        description: "Show changed and untracked files in the workspace repo (`git status --porcelain=v1`: \
+            two status letters, then the path). Read-only; use it instead of running git status in shell."
+            .into(),
         parameters: obj(json!({}), &[]),
     }
 }
@@ -345,8 +405,14 @@ fn spec_git_status() -> ToolSpec {
 fn spec_git_diff() -> ToolSpec {
     ToolSpec {
         name: "git_diff".into(),
-        description: "git diff (optionally a path).".into(),
-        parameters: obj(json!({ "path": {"type": "string"} }), &[]),
+        description: "Show unstaged changes in the workspace repo (`git diff`), for the whole repo or one \
+            path. Read-only; use it to review your edits before answering. New untracked files are not \
+            included (see git_status)."
+            .into(),
+        parameters: obj(
+            json!({ "path": {"type": "string", "description": "Limit the diff to this file or directory."} }),
+            &[],
+        ),
     }
 }
 
@@ -399,7 +465,7 @@ pub fn mutates(name: &str) -> bool {
 
 fn read(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let path = ws.resolve(args["path"].as_str().unwrap_or(""))?;
-    let text = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
+    let text = read_text(ws, &path)?;
     let lines: Vec<&str> = text.lines().collect();
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
     let start = offset.saturating_sub(1).min(lines.len());
@@ -431,13 +497,31 @@ fn read(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
 fn write(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let rel = args["path"].as_str().unwrap_or("");
     // Jail check first (folds `..`, follows symlinks); only then create directories.
+    if rel.trim().is_empty() {
+        return Err(anyhow!("path is empty: give the file path relative to the workspace root, e.g. src/util.py"));
+    }
     let path = resolve_write_target(ws, rel)?;
+    if path.is_dir() {
+        return Err(anyhow!(
+            "{} is a directory; write needs a file path inside it, e.g. {}/new_file.txt",
+            ws.rel(&path),
+            ws.rel(&path)
+        ));
+    }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        // The runtime shows the model `err.to_string()`, so the cause goes in the message itself.
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow!("cannot create directory {}: {e}", ws.rel(parent)))?;
     }
     let before = std::fs::read_to_string(&path).unwrap_or_default();
     let after = args["contents"].as_str().unwrap_or("").to_string();
-    std::fs::write(&path, &after)?;
+    std::fs::write(&path, &after).map_err(|e| {
+        anyhow!(
+            "cannot write {}: {e}. The file may be read-only or locked by another program (stop it \
+             first, e.g. with proc_stop).",
+            ws.rel(&path)
+        )
+    })?;
     Ok(ToolOutput {
         ok: true,
         output: format!("wrote {}", ws.rel(&path)),
@@ -449,30 +533,119 @@ fn write(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     })
 }
 
-fn edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
-    let path = ws.resolve(args["path"].as_str().unwrap_or(""))?;
-    let before = std::fs::read_to_string(&path)?;
+/// `before` with `old_string` replaced by `new_string` (`edit` and `stage_edit`). Exact match
+/// first. When that finds nothing, match again ignoring Unicode normalization (Vietnamese typed
+/// NFC by the model vs. stored NFD in the file, or the reverse) and write `new_string` in the
+/// form the file uses at that spot.
+fn apply_edit(before: &str, args: &Value) -> Result<String> {
     let old = args["old_string"].as_str().unwrap_or("");
     let new = args["new_string"].as_str().unwrap_or("");
     let replace_all = args
         .get("replace_all")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let count = before.matches(old).count();
     if old.is_empty() {
-        return Err(anyhow!("old_string empty"));
+        return Err(anyhow!(
+            "old_string is empty. To create a file use write. To insert text, set old_string to an \
+             existing line next to the insertion point and repeat that line in new_string."
+        ));
     }
-    if count == 0 {
-        return Err(anyhow!("old_string not found"));
-    }
-    if count > 1 && !replace_all {
-        return Err(anyhow!("old_string found {count} times; set replace_all"));
-    }
-    let after = if replace_all {
-        before.replace(old, new)
+    // `read` strips `\r`, so a multi-line old_string typed from it has LF endings. In a CRLF file
+    // match (and write) the CRLF form instead.
+    let crlf = before.contains("\r\n") && old.contains('\n') && !old.contains("\r\n");
+    let (old, new) = if crlf && !before.contains(old) {
+        (
+            std::borrow::Cow::Owned(old.replace('\n', "\r\n")),
+            std::borrow::Cow::Owned(new.replace("\r\n", "\n").replace('\n', "\r\n")),
+        )
     } else {
-        before.replacen(old, new, 1)
+        (std::borrow::Cow::Borrowed(old), std::borrow::Cow::Borrowed(new))
     };
+    let (old, new) = (old.as_ref(), new.as_ref());
+    let starts: Vec<usize> = before.match_indices(old).map(|(i, _)| i).collect();
+    if !starts.is_empty() {
+        if starts.len() > 1 && !replace_all {
+            return Err(too_many_matches(before, &starts, ""));
+        }
+        return Ok(if replace_all {
+            before.replace(old, new)
+        } else {
+            before.replacen(old, new, 1)
+        });
+    }
+    let ranges = unicode::find_nfc(before, old);
+    if ranges.is_empty() {
+        return Err(not_found(before, old));
+    }
+    if ranges.len() > 1 && !replace_all {
+        let starts: Vec<usize> = ranges.iter().map(|r| r.start).collect();
+        return Err(too_many_matches(before, &starts, " (ignoring Unicode normalization)"));
+    }
+    let mut after = String::with_capacity(before.len() + new.len());
+    let mut last = 0;
+    for r in ranges {
+        after.push_str(&before[last..r.start]);
+        after.push_str(&unicode::like(&before[r.clone()], new));
+        last = r.end;
+    }
+    after.push_str(&before[last..]);
+    Ok(after)
+}
+
+/// 1-based line number of byte offset `at` in `text`.
+fn line_of(text: &str, at: usize) -> usize {
+    text[..at].matches('\n').count() + 1
+}
+
+fn too_many_matches(before: &str, starts: &[usize], how: &str) -> anyhow::Error {
+    const SHOW: usize = 10;
+    let mut lines: Vec<String> = starts.iter().take(SHOW).map(|&s| line_of(before, s).to_string()).collect();
+    if starts.len() > SHOW {
+        lines.push("…".into());
+    }
+    anyhow!(
+        "old_string found {} times{how} (lines {}). Add surrounding lines to old_string so it matches \
+         only the place you mean, or set replace_all=true to change every occurrence.",
+        starts.len(),
+        lines.join(", ")
+    )
+}
+
+/// `old_string not found`, plus the most likely reason when one can be told from the text.
+fn not_found(before: &str, old: &str) -> anyhow::Error {
+    let mut msg = String::from("old_string not found in the file.");
+    let prefix = Regex::new(r"(?m)^\s*\d+\|").expect("static regex");
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let first = old.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if prefix.is_match(old) {
+        msg.push_str(
+            " It contains read's line-number prefixes (`  12|`): remove them and keep only the text after `|`.",
+        );
+    } else if squash(&unicode::nfc(before)).contains(&squash(&unicode::nfc(old))) {
+        msg.push_str(
+            " The same text exists with different whitespace (indentation, tabs vs spaces, or line breaks): \
+             copy it exactly from a fresh read.",
+        );
+    } else if !first.is_empty() && first.len() < old.trim().len() {
+        if let Some(at) = before.find(first) {
+            msg.push_str(&format!(
+                " Its first line occurs at line {}, but the following lines differ: the file may have \
+                 changed; re-read from there.",
+                line_of(before, at)
+            ));
+        }
+    }
+    msg.push_str(
+        " old_string must match the current contents exactly. Re-read the lines (read with offset/limit, \
+         or grep for a distinctive part), then copy the text as it is now.",
+    );
+    anyhow!(msg)
+}
+
+fn edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
+    let path = ws.resolve(args["path"].as_str().unwrap_or(""))?;
+    let before = read_for_edit(ws, &path)?;
+    let after = apply_edit(&before, args)?;
     std::fs::write(&path, &after)?;
     Ok(ToolOutput {
         ok: true,
@@ -483,6 +656,43 @@ fn edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
             after,
         }),
     })
+}
+
+/// The file `edit` changes, with an error that says what to do instead.
+fn read_for_edit(ws: &Workspace, path: &Path) -> Result<String> {
+    let rel = ws.rel(path);
+    if !path.exists() {
+        return Err(anyhow!(
+            "{rel} does not exist. edit only changes existing files: create it with write, or find \
+             the right path with glob."
+        ));
+    }
+    if path.is_dir() {
+        return Err(anyhow!("{rel} is a directory; edit needs a file path (use glob to list files)."));
+    }
+    read_text(ws, path)
+}
+
+/// A UTF-8 text file for read/outline/edit. The runtime shows the model `err.to_string()` only,
+/// so the cause and the next step go in the message itself (no `.context`).
+fn read_text(ws: &Workspace, path: &Path) -> Result<String> {
+    let rel = ws.rel(path);
+    std::fs::read_to_string(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => {
+            anyhow!("{rel} not found. Check the path with glob (e.g. pattern `{}`).", file_name_glob(path))
+        }
+        std::io::ErrorKind::InvalidData => {
+            anyhow!("{rel} is not UTF-8 text (binary, image, or another encoding).")
+        }
+        _ if path.is_dir() => anyhow!("{rel} is a directory; give a file path (glob `{rel}/*` lists it)."),
+        _ => anyhow!("cannot read {rel}: {e}"),
+    })
+}
+
+fn file_name_glob(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "**/*".into())
 }
 
 /// Resolve a write path under the workspace without creating parents (stage-safe).
@@ -511,28 +721,8 @@ pub fn stage_write(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
 /// Propose an edit without committing bytes to disk.
 pub fn stage_edit(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let path = ws.resolve(args["path"].as_str().unwrap_or(""))?;
-    let before = std::fs::read_to_string(&path)?;
-    let old = args["old_string"].as_str().unwrap_or("");
-    let new = args["new_string"].as_str().unwrap_or("");
-    let replace_all = args
-        .get("replace_all")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let count = before.matches(old).count();
-    if old.is_empty() {
-        return Err(anyhow!("old_string empty"));
-    }
-    if count == 0 {
-        return Err(anyhow!("old_string not found"));
-    }
-    if count > 1 && !replace_all {
-        return Err(anyhow!("old_string found {count} times; set replace_all"));
-    }
-    let after = if replace_all {
-        before.replace(old, new)
-    } else {
-        before.replacen(old, new, 1)
-    };
+    let before = read_for_edit(ws, &path)?;
+    let after = apply_edit(&before, args)?;
     Ok(ToolOutput {
         ok: true,
         output: format!("proposed edit {}", ws.rel(&path)),
@@ -573,18 +763,40 @@ fn glob_files(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
             continue;
         }
         let rel = ws.rel(entry.path());
-        if glob.is_match(&rel) || glob.is_match(entry.path().file_name().unwrap().to_string_lossy().as_ref()) {
+        if glob_matches(&glob, &rel) {
             matches.push(rel);
             if matches.len() >= limit {
                 break;
             }
         }
     }
+    let mut output = matches.join("\n");
+    if matches.is_empty() {
+        output = format!("No files match `{pattern}`.");
+        if pattern.contains('{') {
+            output.push_str(" `{a,b}` alternation is not supported: call glob once per pattern.");
+        } else if pattern.contains('/') && !pattern.starts_with("**") {
+            output.push_str(&format!(
+                " A pattern with `/` is matched from the workspace root; try `**/{pattern}` or just the file name."
+            ));
+        } else {
+            output.push_str(" Files ignored by .gitignore are not listed. Try a broader pattern, e.g. `**/*name*`.");
+        }
+    } else if matches.len() >= limit {
+        output.push_str(&format!(
+            "\n…[head_limit {limit} reached; narrow the pattern or raise head_limit]"
+        ));
+    }
     Ok(ToolOutput {
         ok: true,
-        output: matches.join("\n"),
+        output,
         diff: None,
     })
+}
+
+/// A glob pattern matches the workspace-relative path or the bare file name (`*.rs` = any depth).
+fn glob_matches(glob: &Regex, rel: &str) -> bool {
+    glob.is_match(rel) || rel.rsplit('/').next().is_some_and(|name| glob.is_match(name))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -595,15 +807,22 @@ enum GrepMode {
 }
 
 fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
-    let pattern = args["pattern"].as_str().unwrap_or("");
+    // NFC pattern, and lines not in NFC are also tried in NFC: Vietnamese stored decomposed
+    // (NFD) is found by the same text the model types (see `unicode`). Output keeps the line.
+    let pattern = unicode::nfc(args["pattern"].as_str().unwrap_or(""));
     let case_insensitive = args
         .get("case_insensitive")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let re = regex::RegexBuilder::new(pattern)
+    let re = regex::RegexBuilder::new(&pattern)
         .case_insensitive(case_insensitive)
         .build()
-        .context("invalid regex")?;
+        .map_err(|e| {
+            anyhow!(
+                "invalid regex `{pattern}`: {e}\nRust regex syntax: escape literal `( ) [ ] {{ }} . * + ? | ^ $ \\` \
+                 with a backslash (e.g. `foo\\(` to find `foo(`); lookaround and backreferences are not supported."
+            )
+        })?;
     let glob_pat = args.get("glob").and_then(|v| v.as_str());
     let glob = glob_pat.map(glob_to_regex).transpose()?;
     let limit = args
@@ -627,6 +846,7 @@ fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let mut emitted = 0usize;
     let mut skipped_large = 0usize;
     let mut hit_limit = false;
+    let mut searched = 0usize;
     let walker = ignore::WalkBuilder::new(&ws.root)
         .hidden(false)
         .git_ignore(true)
@@ -637,10 +857,11 @@ fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         }
         let rel = ws.rel(entry.path());
         if let Some(g) = &glob {
-            if !g.is_match(&rel) {
+            if !glob_matches(g, &rel) {
                 continue;
             }
         }
+        searched += 1;
         if entry.metadata().map(|m| m.len()).unwrap_or(0) > GREP_MAX_FILE_BYTES {
             skipped_large += 1;
             continue;
@@ -655,7 +876,7 @@ fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         let matches: Vec<usize> = lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| re.is_match(l))
+            .filter(|(_, l)| re.is_match(l) || (!unicode::is_nfc(l) && re.is_match(&unicode::nfc(l))))
             .map(|(i, _)| i)
             .collect();
         if matches.is_empty() {
@@ -706,7 +927,13 @@ fn grep(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         }
     }
     if out.is_empty() {
-        out.push("No matches.".into());
+        out.push(match glob_pat {
+            Some(g) if searched == 0 => format!(
+                "No files match glob `{g}`, so nothing was searched. Check it with the glob tool, or drop `glob`."
+            ),
+            _ if case_insensitive => "No matches.".into(),
+            _ => "No matches. (Case-sensitive: set case_insensitive=true, or shorten/loosen the pattern.)".into(),
+        });
     }
     if hit_limit {
         out.push(format!(
@@ -755,7 +982,7 @@ fn outline(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
         }
     }?;
     let markdown = matches!(ext.as_str(), "md" | "markdown" | "mdx");
-    let text = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
+    let text = read_text(ws, &path)?;
     let total = text.lines().count();
     let mut out = vec![format!("{} ({total} lines)", ws.rel(&path))];
     let mut in_fence = false;
@@ -788,7 +1015,8 @@ fn outline(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
 
 fn glob_to_regex(pattern: &str) -> Result<Regex> {
     let mut out = String::from("(?i)^");
-    let chars: Vec<char> = pattern.replace('\\', "/").chars().collect();
+    let pattern = pattern.replace('\\', "/");
+    let chars: Vec<char> = pattern.trim_start_matches("./").chars().collect();
     let mut i = 0;
     while i < chars.len() {
         match chars[i] {
@@ -855,29 +1083,47 @@ pub fn shell_command(ws: &Workspace, command: &str) -> Command {
 
 async fn shell(ws: &Workspace, args: &Value) -> Result<ToolOutput> {
     let command = args["command"].as_str().unwrap_or("");
-    if command.is_empty() {
-        return Err(anyhow!("empty command"));
+    if command.trim().is_empty() {
+        return Err(anyhow!("command is empty: pass the command line to run in `command`."));
     }
-    let timeout = Duration::from_millis(
-        args.get("timeout_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(120_000),
-    );
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(120_000);
     let mut cmd = shell_command(ws, command);
-    let child = cmd.spawn().context("spawn shell")?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| anyhow!("cannot start {}: {e}", if cfg!(windows) { "powershell" } else { "bash" }))?;
     let pid = child.id().unwrap_or(0);
     let _guard = silence_sandbox::wrap_pid(pid).ok();
-    let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
+    let result = tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await;
     let output = match result {
         Ok(Ok(o)) => o,
-        Ok(Err(e)) => return Err(e.into()),
-        Err(_) => return Err(anyhow!("shell timed out")),
+        Ok(Err(e)) => return Err(anyhow!("shell failed while waiting for the command: {e}")),
+        Err(_) => {
+            return Err(anyhow!(
+                "shell timed out after {timeout_ms} ms and the command was killed. If it waits for \
+                 input, make it non-interactive (stdin is closed; pass flags such as -y/--yes). A server \
+                 or watcher that keeps running belongs in proc_start. For a slow build or test, raise \
+                 timeout_ms."
+            ))
+        }
     };
+    let stderr = String::from_utf8_lossy(&output.stderr);
     let mut text = String::new();
+    // Hint first: `execute` caps output from the end, and the hint matters more than the tail.
+    if !output.status.success() {
+        if let Some(hint) = shell_hint(command, &stderr, cfg!(windows)) {
+            text.push_str(&format!("[hint] {hint}\n"));
+        }
+    }
     text.push_str(&String::from_utf8_lossy(&output.stdout));
-    if !output.stderr.is_empty() {
+    if !stderr.is_empty() {
         text.push_str("\nSTDERR:\n");
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        text.push_str(&stderr);
+    }
+    if let (false, Some(code)) = (output.status.success(), output.status.code()) {
+        text.push_str(&format!("\n[exit code {code}]"));
     }
     // Total size is capped in `execute` (MAX_OUTPUT_BYTES).
     Ok(ToolOutput {
@@ -978,6 +1224,75 @@ mod sandbox_quote_tests {
     }
 }
 
+/// Bash/Unix habits that fail in Windows PowerShell 5.1, with their PowerShell form.
+const PS_MISSING_COMMANDS: &[(&str, &str)] = &[
+    ("head", "`Select-Object -First N` (or `Get-Content file -TotalCount N`)"),
+    ("tail", "`Select-Object -Last N` (or `Get-Content file -Tail N`)"),
+    ("grep", "`Select-String -Pattern 'x'` (or the grep tool for files)"),
+    ("export", "`$env:NAME = 'value'`"),
+    ("touch", "`New-Item -ItemType File path`"),
+    ("which", "`(Get-Command name).Source`"),
+    ("wc", "`Measure-Object -Line`"),
+    ("sed", "`(Get-Content f) -replace 'a','b' | Set-Content f` (or the edit tool)"),
+    ("awk", "`ForEach-Object { $_.Split()[0] }`"),
+    ("xargs", "`ForEach-Object { … }`"),
+    ("source", "`. .\\script.ps1`"),
+];
+
+/// A one-line fix for a failed `shell` call, judged from the command and its stderr. Only
+/// PowerShell 5.1 traps for now (`windows`); bash errors are already clear to models.
+fn shell_hint(command: &str, stderr: &str, windows: bool) -> Option<String> {
+    if !windows {
+        return None;
+    }
+    // PowerShell wraps error text at the console width; match on one line.
+    let flat = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    let stderr = flat.as_str();
+    if stderr.contains("is not a valid statement separator")
+        || (stderr.contains("ParserError") && (command.contains("&&") || command.contains("||")))
+    {
+        return Some(
+            "Windows PowerShell 5.1 has no `&&`/`||`. Use `A; if ($?) { B }` to run B only when A \
+             succeeded, or `A; B` to run both."
+                .into(),
+        );
+    }
+    if stderr.contains("is not recognized as the name of a cmdlet") {
+        // PowerShell quotes the missing name: "The term 'head' is not recognized …".
+        let name = stderr
+            .split("The term '")
+            .nth(1)
+            .and_then(|s| s.split('\'').next())
+            .unwrap_or("");
+        if let Some((_, fix)) = PS_MISSING_COMMANDS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
+            return Some(format!("`{name}` does not exist in PowerShell; use {fix}."));
+        }
+        if name.contains('=') {
+            return Some("`NAME=value cmd` is bash syntax; in PowerShell use `$env:NAME = 'value'; cmd`.".into());
+        }
+        if name.contains(' ') || name.contains('\\') || name.contains('/') {
+            return Some(format!(
+                "To run a program whose path is quoted or has spaces, use the call operator: `& \"{name}\" args`."
+            ));
+        }
+        return Some(format!(
+            "`{name}` is not a PowerShell command or a program on PATH. Check the name, or find it with \
+             `Get-Command {name}*`."
+        ));
+    }
+    if stderr.contains("NativeCommandError") && command.contains("2>&1") {
+        return Some(
+            "In Windows PowerShell 5.1 `2>&1` on a native program turns its stderr into errors. Drop \
+             `2>&1`: stderr is already captured, and check `$LASTEXITCODE` for the real result."
+                .into(),
+        );
+    }
+    if stderr.contains("Missing file specification after redirection operator") && command.contains("<<") {
+        return Some("PowerShell has no `<<EOF` heredoc: use a here-string `@'…'@` with `'@` at the start of its own line.".into());
+    }
+    None
+}
+
 async fn git(ws: &Workspace, args: &[&str]) -> Result<ToolOutput> {
     let mut cmd = Command::new("git");
     cmd.args(args)
@@ -1053,6 +1368,49 @@ mod tests {
         assert!(text.contains("5ilence"));
     }
 
+    /// A file whose Vietnamese is stored decomposed (NFD), as macOS and some IMEs write it.
+    fn nfd_ws() -> (tempfile::TempDir, Workspace, String) {
+        use unicode_normalization::UnicodeNormalization;
+        let dir = tempfile::tempdir().unwrap();
+        let text: String = "// Tiêu đề trang\nconst title = \"Xin chào\";\n// tiêu đề phụ\n".nfd().collect();
+        std::fs::write(dir.path().join("v.ts"), &text).unwrap();
+        let ws = Workspace::new(dir.path()).unwrap();
+        (dir, ws, text)
+    }
+
+    #[test]
+    fn edit_matches_nfc_text_in_an_nfd_file_and_keeps_its_form() {
+        use unicode_normalization::UnicodeNormalization;
+        let (_d, ws, before) = nfd_ws();
+        // The model writes NFC.
+        edit(&ws, &json!({"path":"v.ts","old_string":"\"Xin chào\"","new_string":"\"Chào bạn\""})).unwrap();
+        let after = std::fs::read_to_string(ws.root.join("v.ts")).unwrap();
+        let expected = before.replace(&"\"Xin chào\"".nfd().collect::<String>(), &"\"Chào bạn\"".nfd().collect::<String>());
+        assert_eq!(after, expected, "only the edited span changes, in the file's own (NFD) form");
+        assert!(!unicode::is_nfc(&after));
+    }
+
+    #[test]
+    fn nfc_fallback_still_requires_a_unique_match() {
+        let (_d, ws, before) = nfd_ws();
+        let err = edit(&ws, &json!({"path":"v.ts","old_string":"đề","new_string":"x"})).unwrap_err();
+        assert!(err.to_string().contains("found 2 times (ignoring Unicode normalization)"), "{err}");
+        assert_eq!(std::fs::read_to_string(ws.root.join("v.ts")).unwrap(), before);
+        edit(&ws, &json!({"path":"v.ts","old_string":"đề","new_string":"đề mục","replace_all":true})).unwrap();
+        let after = std::fs::read_to_string(ws.root.join("v.ts")).unwrap();
+        assert_eq!(unicode::nfc(&after).matches("đề mục").count(), 2);
+        assert_ne!(after, before);
+    }
+
+    #[test]
+    fn grep_finds_nfc_pattern_in_nfd_file() {
+        let (_d, ws, _) = nfd_ws();
+        let out = grep(&ws, &json!({"pattern":"Xin chào"})).unwrap();
+        assert!(out.output.contains("v.ts:2:"), "{}", out.output);
+        let out = grep(&ws, &json!({"pattern":"tiêu đề", "case_insensitive": true, "output_mode":"count"})).unwrap();
+        assert_eq!(out.output.trim(), "v.ts:2");
+    }
+
     #[test]
     fn jail_blocks_escape() {
         let (_d, ws) = tmp_ws();
@@ -1118,7 +1476,7 @@ mod tests {
         let ctx = grep(&ws, &json!({"pattern":"there","glob":"b.txt","context":1})).unwrap().output;
         assert_eq!(ctx, "b.txt-1-x\nb.txt:2:Hello there\nb.txt-3-y");
         let none = grep(&ws, &json!({"pattern":"zzz-not-here"})).unwrap().output;
-        assert_eq!(none, "No matches.");
+        assert!(none.starts_with("No matches."), "{none}");
     }
 
     #[test]
@@ -1302,5 +1660,160 @@ mod tests {
         };
         let text = std::fs::read_to_string(&path).expect("read back long nested file");
         assert_eq!(text, contents);
+    }
+
+    // --- Tool descriptions and actionable errors -------------------------------------------
+
+    fn spec(name: &str) -> ToolSpec {
+        specs(false).into_iter().find(|s| s.name == name).unwrap()
+    }
+
+    #[test]
+    fn specs_say_when_to_use_each_tool() {
+        let write = spec("write").description;
+        assert!(write.contains("use edit instead"), "{write}");
+        let edit = spec("edit").description;
+        assert!(edit.contains("replace_all") && edit.contains("neighbouring lines"), "{edit}");
+        assert!(edit.contains("line-number prefixes"), "{edit}");
+        let glob = spec("glob").description;
+        assert!(glob.contains("`**`") && glob.contains("grep"), "{glob}");
+        for s in specs(false) {
+            assert!(s.description.len() >= 40, "{} description too terse: {}", s.name, s.description);
+        }
+    }
+
+    #[test]
+    fn shell_spec_names_the_shell_it_really_runs() {
+        let shell = spec("shell");
+        if cfg!(windows) {
+            // `shell_command` runs `powershell` (Windows PowerShell 5.1), not pwsh 7.
+            assert!(shell.description.contains("Windows PowerShell 5.1"));
+            for trap in ["`&&`", "$env:NAME", "Select-Object -First", "`2>&1`", "& \"C:\\Program Files"] {
+                assert!(shell.description.contains(trap), "missing {trap}: {}", shell.description);
+            }
+            let cmd = shell.parameters["properties"]["command"]["description"].as_str().unwrap();
+            assert!(cmd.contains("never `&&`"), "{cmd}");
+        } else {
+            assert!(shell.description.contains("bash -lc"));
+            assert!(!shell.description.contains("PowerShell"));
+        }
+        assert!(shell.description.contains("proc_start"));
+    }
+
+    #[test]
+    fn edit_ambiguous_match_lists_lines_and_both_fixes() {
+        let (_d, ws) = tmp_ws();
+        let err = edit(&ws, &json!({"path":"a.txt","old_string":"hello","new_string":"bye"}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("found 2 times (lines 1, 2)"), "{err}");
+        assert!(err.contains("surrounding lines") && err.contains("replace_all=true"), "{err}");
+    }
+
+    #[test]
+    fn edit_not_found_explains_the_likely_cause() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(ws.root.join("f.py"), "def f():\n    return 1\n").unwrap();
+        let err = |old: &str| {
+            edit(&ws, &json!({"path":"f.py","old_string":old,"new_string":"x"})).unwrap_err().to_string()
+        };
+        let prefixed = err("     1|def f():");
+        assert!(prefixed.contains("line-number prefixes"), "{prefixed}");
+        let spaces = err("def f():\n  return 1");
+        assert!(spaces.contains("different whitespace"), "{spaces}");
+        let stale = err("def f():\n    return 2");
+        assert!(stale.contains("first line occurs at line 1"), "{stale}");
+        let other = err("nothing like this");
+        assert!(other.starts_with("old_string not found") && other.contains("Re-read"), "{other}");
+        let empty = err("");
+        assert!(empty.contains("use write"), "{empty}");
+    }
+
+    #[test]
+    fn edit_multiline_lf_old_string_matches_crlf_file() {
+        let (_d, ws) = tmp_ws();
+        std::fs::write(ws.root.join("w.txt"), "one\r\ntwo\r\nthree\r\n").unwrap();
+        // What a model copies from `read` (which drops `\r`).
+        edit(&ws, &json!({"path":"w.txt","old_string":"one\ntwo","new_string":"uno\ndos"})).unwrap();
+        let after = std::fs::read_to_string(ws.root.join("w.txt")).unwrap();
+        assert_eq!(after, "uno\r\ndos\r\nthree\r\n", "file keeps CRLF");
+    }
+
+    #[test]
+    fn edit_and_write_path_errors_say_what_to_do() {
+        let (_d, ws) = tmp_ws();
+        let missing = edit(&ws, &json!({"path":"nope.txt","old_string":"a","new_string":"b"}))
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("does not exist") && missing.contains("write"), "{missing}");
+        std::fs::create_dir(ws.root.join("dir")).unwrap();
+        let dir = write(&ws, &json!({"path":"dir","contents":"x"})).unwrap_err().to_string();
+        assert!(dir.contains("is a directory") && dir.contains("dir/new_file.txt"), "{dir}");
+        let read_missing = read(&ws, &json!({"path":"src/nope.rs"})).unwrap_err().to_string();
+        assert!(read_missing.contains("not found") && read_missing.contains("nope.rs"), "{read_missing}");
+        let outside = write(&ws, &json!({"path":"../escape.txt","contents":"x"})).unwrap_err().to_string();
+        assert!(outside.contains("escapes workspace") && outside.contains("inside the workspace"), "{outside}");
+    }
+
+    #[test]
+    fn glob_matches_file_names_at_any_depth_and_explains_no_match() {
+        let (_d, ws) = tmp_ws();
+        std::fs::create_dir_all(ws.root.join("src/deep")).unwrap();
+        std::fs::write(ws.root.join("src/deep/m.rs"), "fn main() {}\n").unwrap();
+        let out = glob_files(&ws, &json!({"pattern":"*.rs"})).unwrap().output;
+        assert_eq!(out, "src/deep/m.rs");
+        let out = glob_files(&ws, &json!({"pattern":"./src/**/*.rs"})).unwrap().output;
+        assert_eq!(out, "src/deep/m.rs");
+        let none = glob_files(&ws, &json!({"pattern":"deep/*.rs"})).unwrap().output;
+        assert!(none.starts_with("No files match") && none.contains("**/deep/*.rs"), "{none}");
+        let braces = glob_files(&ws, &json!({"pattern":"*.{rs,ts}"})).unwrap().output;
+        assert!(braces.contains("alternation is not supported"), "{braces}");
+    }
+
+    #[test]
+    fn grep_glob_by_name_and_actionable_errors() {
+        let (_d, ws) = tmp_ws();
+        std::fs::create_dir_all(ws.root.join("src")).unwrap();
+        std::fs::write(ws.root.join("src/m.rs"), "fn call(x) {}\n").unwrap();
+        let out = grep(&ws, &json!({"pattern":"call","glob":"*.rs"})).unwrap().output;
+        assert_eq!(out, "src/m.rs:1:fn call(x) {}");
+        let bad = grep(&ws, &json!({"pattern":"call("})).unwrap_err().to_string();
+        assert!(bad.contains("invalid regex `call(`") && bad.contains("escape literal"), "{bad}");
+        let no_files = grep(&ws, &json!({"pattern":"x","glob":"*.zig"})).unwrap().output;
+        assert!(no_files.contains("No files match glob `*.zig`"), "{no_files}");
+        let case = grep(&ws, &json!({"pattern":"CALL"})).unwrap().output;
+        assert!(case.contains("case_insensitive=true"), "{case}");
+    }
+
+    #[test]
+    fn shell_hint_covers_powershell_traps() {
+        let amp = "At line:1 char:8\n+ echo a && echo b\nThe token '&&' is not a valid statement\nseparator in this version.";
+        assert!(shell_hint("echo a && echo b", amp, true).unwrap().contains("if ($?)"));
+        let head = "head : The term 'head' is not recognized as the name of a cmdlet, function, script file, or operable program.";
+        assert!(shell_hint("head -n 3 x", head, true).unwrap().contains("Select-Object -First"));
+        let env = "FOO=1 : The term 'FOO=1' is not recognized as the name of a cmdlet, function, script file, or\noperable program.";
+        assert!(shell_hint("FOO=1 node -v", env, true).unwrap().contains("$env:NAME"));
+        let unknown = "The term 'frobnicate' is not recognized as the name of a cmdlet";
+        assert!(shell_hint("frobnicate", unknown, true).unwrap().contains("Get-Command frobnicate*"));
+        let native = "git : fatal: bad\n+ CategoryInfo : NotSpecified\n+ FullyQualifiedErrorId : NativeCommandError";
+        assert!(shell_hint("git x 2>&1", native, true).unwrap().contains("$LASTEXITCODE"));
+        let heredoc = "Missing file specification after redirection operator.";
+        assert!(shell_hint("cat <<EOF", heredoc, true).unwrap().contains("here-string"));
+        assert!(shell_hint("echo a && echo b", amp, false).is_none(), "bash errors need no hint");
+        assert!(shell_hint("python t.py", "Traceback: boom", true).is_none());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn shell_failure_carries_hint_and_exit_code() {
+        let (_d, ws) = tmp_ws();
+        let out = shell(&ws, &json!({"command":"echo a && echo b"})).await.unwrap();
+        assert!(!out.ok);
+        assert!(out.output.starts_with("[hint] Windows PowerShell 5.1 has no `&&`"), "{}", out.output);
+        assert!(out.output.trim_end().ends_with("[exit code 1]"), "{}", out.output);
+        let ok = shell(&ws, &json!({"command":"echo a; if ($?) { echo b }"})).await.unwrap();
+        assert!(ok.ok && !ok.output.contains("[hint]"), "{}", ok.output);
+        let slow = shell(&ws, &json!({"command":"Start-Sleep -Seconds 5","timeout_ms":300})).await.unwrap_err();
+        assert!(slow.to_string().contains("timed out after 300 ms") && slow.to_string().contains("proc_start"));
     }
 }

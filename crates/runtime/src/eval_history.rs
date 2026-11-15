@@ -27,10 +27,37 @@ pub struct HistoryTask {
     pub flaky: bool,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Part of `input_tokens` read from the prompt cache (absent in older lines).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cache_read_tokens: u64,
+    /// Model calls (agent steps) of the task (absent in older lines).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub model_calls: u32,
     pub cost_usd: f64,
     pub duration_secs: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
+}
+
+impl HistoryLine {
+    /// Share of the run's input tokens served from the prompt cache.
+    pub fn cache_hit_rate(&self) -> f64 {
+        let input: u64 = self.tasks.iter().map(|t| t.input_tokens).sum();
+        let read: u64 = self.tasks.iter().map(|t| t.cache_read_tokens).sum();
+        if input == 0 {
+            0.0
+        } else {
+            read as f64 / input as f64
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -84,6 +111,8 @@ impl From<&RunMetrics> for HistoryLine {
                     flaky: t.flaky,
                     input_tokens: t.input_tokens,
                     output_tokens: t.output_tokens,
+                    cache_read_tokens: t.cache_read_tokens,
+                    model_calls: t.model_calls,
                     cost_usd: round(t.cost_usd, 4),
                     duration_secs: round(t.duration_secs, 1),
                     error_code: t.error_code.clone(),
@@ -219,12 +248,12 @@ pub fn render_summary(lines: &[HistoryLine]) -> String {
 
     s.push_str(&format!(
         "\n## {RECENT_RUNS} lần chạy gần nhất\n\n\
-         | Run | Bộ | Profile | Commit | ✓ | ✗ | ⚠ | – | Chi (USD) | Dừng sớm |\n\
-         |---|---|---|---|---:|---:|---:|---:|---:|---|\n"
+         | Run | Bộ | Profile | Commit | ✓ | ✗ | ⚠ | – | Chi (USD) | Cache | Dừng sớm |\n\
+         |---|---|---|---|---:|---:|---:|---:|---:|---:|---|\n"
     ));
     for l in lines.iter().rev().take(RECENT_RUNS) {
         s.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {:.4} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {:.4} | {:.0}% | {} |\n",
             l.run_id,
             l.suite,
             l.profile,
@@ -234,6 +263,7 @@ pub fn render_summary(lines: &[HistoryLine]) -> String {
             l.error,
             l.skip,
             l.total_cost_usd,
+            l.cache_hit_rate() * 100.0,
             l.stopped.as_deref().unwrap_or("")
         ));
     }
@@ -276,6 +306,25 @@ struct MetricsTask {
     status: Status,
     #[serde(default)]
     cost_usd: f64,
+}
+
+/// Judged runs (pass/fail, calibration excluded) of `id` in `suite` that failed in a row,
+/// counting back from the newest. `obs` is newest first ([`load_observations`]).
+pub fn fail_streak(obs: &[Observation], suite: &str, id: &str) -> usize {
+    obs.iter()
+        .filter(|o| o.suite == suite && o.id == id && o.profile != CALIBRATE_PROFILE)
+        .filter(|o| matches!(o.status, Status::Pass | Status::Fail))
+        .take_while(|o| o.status == Status::Fail)
+        .count()
+}
+
+/// Run id of the newest non-skipped run of `id` in `suite` (`None` = never ran). Run ids are
+/// `YYYYMMDD-HHMMSS`, so they sort by time.
+pub fn last_run(obs: &[Observation], suite: &str, id: &str) -> Option<String> {
+    obs.iter()
+        .filter(|o| o.suite == suite && o.id == id && o.status != Status::Skip)
+        .map(|o| o.run_id.clone())
+        .max()
 }
 
 /// Every observation from history and metrics files, newest run first, one per (run, task).
@@ -399,6 +448,50 @@ mod tests {
             repeat: 1,
         };
         RunMetrics::new(meta, tasks, None)
+    }
+
+    fn obs(run_id: &str, profile: &str, id: &str, status: Status) -> Observation {
+        Observation {
+            run_id: run_id.into(),
+            suite: "v0".into(),
+            profile: profile.into(),
+            id: id.into(),
+            kind: "edit".into(),
+            model: "claude-haiku".into(),
+            status,
+            cost_usd: 0.01,
+        }
+    }
+
+    #[test]
+    fn fail_streak_counts_judged_failures_from_the_newest() {
+        // Newest first; skips, errors and calibration runs do not break or extend the streak.
+        let o = vec![
+            obs("5", "nightly", "T", Status::Fail),
+            obs("4", "nightly", "T", Status::Skip),
+            obs("3", "nightly", "T", Status::Error),
+            obs("3", CALIBRATE_PROFILE, "T", Status::Pass),
+            obs("2", "weekly", "T", Status::Fail),
+            obs("1", "weekly", "T", Status::Pass),
+            obs("0", "weekly", "T", Status::Fail),
+            obs("5", "nightly", "U", Status::Pass),
+        ];
+        assert_eq!(fail_streak(&o, "v0", "T"), 2);
+        assert_eq!(fail_streak(&o, "v0", "U"), 0);
+        assert_eq!(fail_streak(&o, "modes", "T"), 0);
+    }
+
+    #[test]
+    fn last_run_ignores_skips_and_orders_never_run_first() {
+        let o = vec![
+            obs("20261115-010000", "nightly", "A", Status::Skip),
+            obs("20261114-010000", "nightly", "A", Status::Fail),
+            obs("20261113-010000", "nightly", "B", Status::Pass),
+        ];
+        assert_eq!(last_run(&o, "v0", "A").as_deref(), Some("20261114-010000"));
+        let mut ids = vec!["A", "B", "C"];
+        ids.sort_by_cached_key(|id| last_run(&o, "v0", id));
+        assert_eq!(ids, ["C", "B", "A"]);
     }
 
     #[test]

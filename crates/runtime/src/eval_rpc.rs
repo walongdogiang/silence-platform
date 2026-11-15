@@ -150,6 +150,47 @@ impl EvalHost {
         Ok(json!({"available": true, "suites": out, "sources": sources, "running": self.is_running()}))
     }
 
+    /// `eval.config.get`: `evals/config.yaml` plus every source with whether it works on this PC
+    /// right now (key set, or Claude CLI installed and logged in) and whether CI can use it.
+    pub async fn config_get(&self, catalog: &Catalog) -> Result<Value> {
+        let settings = crate::eval_config::load(&self.repo_root)?;
+        let mut sources = Vec::new();
+        for p in &catalog.raw.providers {
+            let ready = crate::providers::source_ready(catalog, &p.id).await;
+            sources.push(json!({
+                "id": p.id,
+                "label": p.display_label(),
+                "env": p.api_key_env,
+                "cli": p.is_cli(),
+                "ready": ready.is_ok(),
+                "reason": ready.err().unwrap_or_default(),
+            }));
+        }
+        Ok(json!({
+            "settings": settings,
+            "sources": sources,
+            "path": "evals/config.yaml",
+            "exists": crate::eval_config::path(&self.repo_root).exists(),
+            "max_cap_usd": crate::eval_config::MAX_CAP_USD,
+        }))
+    }
+
+    /// `eval.config.set`: validate and write `evals/config.yaml`. Never a key.
+    pub fn config_set(&self, params: Value, catalog: &Catalog) -> Result<Value> {
+        let settings: crate::eval_config::EvalSettings = serde_json::from_value(params)?;
+        let path = settings.save(&self.repo_root, catalog)?;
+        Ok(json!({"ok": true, "path": path.to_string_lossy()}))
+    }
+
+    /// The config with its source resolved: no source = `source` of `evals/config.yaml`,
+    /// `per-task` = each task's pinned model.
+    fn resolved(&self, cfg: &EvalConfig) -> Result<EvalConfig> {
+        let settings = crate::eval_config::load(&self.repo_root)?;
+        let mut out = cfg.clone();
+        out.source = crate::eval_config::resolve_source(cfg.source.as_deref(), &settings.source);
+        Ok(out)
+    }
+
     /// Check a config against the suite and catalog; returns the loaded suite.
     fn validate(&self, cfg: &EvalConfig, catalog: &Catalog) -> Result<Suite> {
         let suite = self.load(&cfg.suite)?;
@@ -193,11 +234,14 @@ impl EvalHost {
             profile: "studio".into(),
             source: cfg.source.clone(),
             effort: cfg.effort.clone().filter(|e| e != "auto"),
+            rotate: false,
+            affected_since: None,
         }
     }
 
     /// `eval.estimate`: the model each task would use (or why it would be skipped) and the cost.
     pub fn estimate(&self, cfg: &EvalConfig, catalog: &Catalog) -> Result<Value> {
+        let cfg = &self.resolved(cfg)?;
         let suite = self.validate(cfg, catalog)?;
         let mut planned = Vec::new();
         let mut skipped = Vec::new();
@@ -215,6 +259,7 @@ impl EvalHost {
     /// `eval.start`: run in the background; progress comes through the returned receiver.
     /// A second run while one is going is refused.
     pub fn start(self: &Arc<Self>, cfg: &EvalConfig, catalog: &Catalog) -> Result<mpsc::UnboundedReceiver<EvalProgress>> {
+        let cfg = &self.resolved(cfg)?;
         let suite = self.validate(cfg, catalog)?;
         let cancel = CancelFlag::default();
         {
@@ -334,9 +379,16 @@ impl EvalHost {
             .collect();
         let ws = dir.join("workspace");
         let files = changed_files(&s.fixture, &ws);
+        // Older attempts (before checks/trace were written) give null / [].
+        let checks: Value = std::fs::read_to_string(dir.join("checks.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(Value::Null);
+        let trace = crate::eval_trace::read(&dir.join("trace.jsonl"));
         Ok(json!({
             "suite": suite, "task_id": task_id, "attempt": n, "attempts": attempts,
             "workspace": ws.to_string_lossy(), "report": report, "audit": audit, "files": files,
+            "checks": checks, "trace": trace,
         }))
     }
 }
@@ -443,6 +495,51 @@ mod tests {
             max_cost: None,
             history: false,
         }
+    }
+
+    /// A host on a scratch repo (own `evals/`), so `eval.config.set` never touches the real file.
+    fn scratch_host() -> (EvalHost, tempfile::TempDir, Catalog) {
+        let real = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("evals")).unwrap();
+        let catalog = Catalog::load(real.join("config/models.yaml")).unwrap();
+        (EvalHost::new(dir.path().to_path_buf(), real.join("config/models.yaml")), dir, catalog)
+    }
+
+    #[tokio::test]
+    async fn config_get_lists_every_source_and_set_round_trips() {
+        let (h, dir, catalog) = scratch_host();
+        let v = h.config_get(&catalog).await.unwrap();
+        assert_eq!(v["exists"], false);
+        assert_eq!(v["path"], "evals/config.yaml");
+        let rows = v["sources"].as_array().unwrap();
+        let cli = rows.iter().find(|r| r["id"] == "claude-cli").expect("the CLI is a local source");
+        assert_eq!(cli["cli"], true);
+        assert!(rows.iter().all(|r| r["ready"].is_boolean() && r["reason"].is_string()));
+
+        let mut settings = v["settings"].clone();
+        settings["source"] = json!("claude-cli");
+        settings["profiles"]["smoke"]["max_cost"] = json!(0.2);
+        h.config_set(settings, &catalog).unwrap();
+        assert!(dir.path().join("evals/config.yaml").exists());
+        let after = h.config_get(&catalog).await.unwrap();
+        assert_eq!(after["settings"]["source"], "claude-cli");
+        assert_eq!(after["settings"]["profiles"]["smoke"]["max_cost"], 0.2);
+        // A Studio run without a source now uses the configured one; `per-task` keeps the pins.
+        assert_eq!(h.resolved(&cfg("v0", &["E01-edit-add-pow"])).unwrap().source.as_deref(), Some("claude-cli"));
+        let mut per_task = cfg("v0", &["E01-edit-add-pow"]);
+        per_task.source = Some("per-task".into());
+        assert_eq!(h.resolved(&per_task).unwrap().source, None);
+    }
+
+    #[test]
+    fn config_set_refuses_the_cli_for_ci_and_writes_nothing() {
+        let (h, dir, catalog) = scratch_host();
+        let mut bad = serde_json::to_value(crate::eval_config::EvalSettings::default()).unwrap();
+        bad["ci"]["source"] = json!("claude-cli");
+        assert!(h.config_set(bad, &catalog).is_err());
+        assert!(!dir.path().join("evals/config.yaml").exists());
+        assert!(h.config_set(json!({"source": 5}), &catalog).is_err());
     }
 
     #[tokio::test]

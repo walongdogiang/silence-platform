@@ -113,6 +113,24 @@ tasks:
         - path: notes/xin-chao.txt
           pattern: "Xin chào thế giới"
 
+  # The shell tool description names Windows PowerShell 5.1 and its traps (no `&&`/`||`, no
+  # `mkdir -p`/`touch`): a chained command must work on the first try, with no failed shell call.
+  - id: S24-shell-powershell-chain
+    kind: edit
+    prompt: "Chỉ dùng công cụ shell, trong MỘT lệnh duy nhất: tạo thư mục build-out (kể cả khi đã có), ghi file build-out/stamp.txt chứa đúng một dòng: ok, rồi chỉ khi bước ghi thành công mới in nội dung file đó ra. Không sửa file nào khác."
+    pass_if:
+      grep:
+        - path: build-out/stamp.txt
+          pattern: "ok"
+      audit_matches:
+        - '"kind":"tool",.*"tool":"shell".*"ok":true'
+      audit_absent:
+        - '"kind":"tool",.*"tool":"shell".*"ok":false'
+      unchanged:
+        - src/calc.py
+    budget:
+      max_turns: 5
+
   - id: B06-bugfix-mul
     kind: bugfix
     prompt: "mul() đang cộng thay vì nhân. Sửa và đảm bảo test_mul pass."
