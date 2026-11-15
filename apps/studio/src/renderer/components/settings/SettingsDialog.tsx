@@ -4,6 +4,7 @@ import { useT } from "../../i18n";
 import type { Appearance } from "../../theme/appearance";
 import type { Prefs } from "../../prefs";
 import type { UiPermMode } from "../../permissionUi";
+import type { SandboxStatus } from "../../types";
 import { modelSources } from "../../effort";
 import {
   SECTIONS,
@@ -63,6 +64,9 @@ export function SettingsDialog(props: {
   workspace: string;
   permMode: UiPermMode;
   onPermMode: (m: UiPermMode) => void;
+  sandbox: SandboxStatus | null;
+  onRefreshSandbox: () => Promise<void>;
+  onSetupSandbox: () => Promise<void>;
   models: ModelsProps;
 }) {
   const t = useT();
@@ -265,7 +269,14 @@ export function SettingsDialog(props: {
                   <NotificationsSection prefs={props.prefs} onPrefs={props.onPrefs} />
                 ) : null}
                 {section === "permissions" ? (
-                  <PermissionsSection workspace={props.workspace} mode={props.permMode} onMode={props.onPermMode} />
+                  <PermissionsSection
+                    workspace={props.workspace}
+                    mode={props.permMode}
+                    onMode={props.onPermMode}
+                    sandbox={props.sandbox}
+                    onRefreshSandbox={props.onRefreshSandbox}
+                    onSetupSandbox={props.onSetupSandbox}
+                  />
                 ) : null}
                 {section === "models" ? (
                   <NetworkPanel {...props.models} embedded guardRef={guard} focusTab={focusTab} />

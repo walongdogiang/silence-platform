@@ -91,6 +91,8 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { id: "blur", section: "appearance", label: "appear.blur", desc: "appear.blur.desc", keywords: "blur mờ" },
   { id: "motion", section: "appearance", label: "appear.reduceMotion", desc: "appear.reduceMotion.desc", keywords: "animation hiệu ứng chuyển động" },
   { id: "perm-mode", section: "permissions", label: "perms.mode", desc: "perms.mode.desc", keywords: "permission quyền balanced cautious cân bằng thận trọng" },
+  { id: "perm-sandbox", section: "permissions", label: "sandbox.title", desc: "sandbox.desc", keywords: "sandbox autonomous tự chủ cài install uac cách ly" },
+  { id: "perm-network", section: "permissions", label: "sandbox.net.title", desc: "sandbox.net.desc", keywords: "network mạng domain host allowlist registry npm" },
   { id: "perm-remembered", section: "permissions", label: "perms.remembered", desc: "perms.remembered.desc", keywords: "allow cho phép nhớ" },
   { id: "models-sources", section: "models", tab: "sources", label: "net.tab.sources", desc: "set.models.sources.desc", keywords: "api key openrouter claude cli" },
   { id: "models-auto", section: "models", tab: "auto", label: "net.tab.auto", desc: "set.models.auto.desc", keywords: "auto preset slot spend cap chi phí" },

@@ -29,7 +29,7 @@ import type { ChatLine, Diff, Perm } from "../models";
 import { escalationText, useT, type MsgKey, type T } from "../i18n";
 import { MODE_LABEL, type SessionMode } from "../modes";
 import { formatDuration, pulseLabel, pulseTip, runPhase, type RunMeter } from "../runStatus";
-import { scopeLabels, tierBadge, type PermScope } from "../permissionUi";
+import { permEscalation, permHosts, scopeLabels, tierBadge, type PermScope } from "../permissionUi";
 import { DiffCard } from "./DiffCard";
 import { ErrorCard } from "./ErrorCard";
 import { MarkdownMessage } from "./MarkdownMessage";
@@ -472,6 +472,11 @@ function AgentMeta(props: {
                     <li key={j} className={`msg-step${active ? " active" : ""}`}>
                       <span className="msg-step-verb">{verbText(step.verb, t)}</span>
                       {step.detail ? <span className="msg-step-detail">{detailText(step.detail, t)}</span> : null}
+                      {step.sandboxed ? (
+                        <span className="msg-step-sbx" title={t("sandbox.badgeTip")}>
+                          {t("sandbox.badge")}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -533,6 +538,9 @@ export function ChatPane(props: {
   lines: ChatLine[];
   plan: string | null;
   perm: Perm | null;
+  /** Tự chủ đang chạy như Cân bằng vì sandbox không Ready (dòng giải thích, `null` = không có gì). */
+  sandboxNote?: string | null;
+  onOpenPermissions?: () => void;
   diff: Diff | null;
   sessionId: string;
   hasSession: boolean;
@@ -582,6 +590,8 @@ export function ChatPane(props: {
   // Nhớ quyền mở rộng độ tin cậy nên luôn là nút riêng (không tick sẵn); Engine quyết định có cho nhớ không.
   const scopes = scopeLabels(props.perm, t);
   const permCommand = (props.perm?.input as { command?: unknown } | null | undefined)?.command;
+  const permEsc = permEscalation(props.perm);
+  const permHostList = permHosts(props.perm);
   const copyToastTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -825,19 +835,59 @@ export function ChatPane(props: {
           </div>
         )}
 
+        {props.sandboxNote ? (
+          <div className="banner warn sbx-banner" role="status">
+            <span>{props.sandboxNote}</span>
+            {props.onOpenPermissions ? (
+              <button type="button" className="ghost" onClick={props.onOpenPermissions}>
+                {t("sandbox.openSettings")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {props.perm && (
-          <div className="banner warn perm-card" role="alertdialog" aria-label={t("perm.cardLabel")}>
+          <div
+            className="banner warn perm-card"
+            role="alertdialog"
+            aria-label={permEsc ? t("perm.esc.label") : t("perm.cardLabel")}
+          >
             <h4>
-              <span className={`perm-tier ${tierBadge(props.perm.risk?.tier, t).cls}`}>
-                {tierBadge(props.perm.risk?.tier, t).label}
+              <span className={`perm-tier ${tierBadge(permEsc ? "block" : props.perm.risk?.tier, t).cls}`}>
+                {tierBadge(permEsc ? "block" : props.perm.risk?.tier, t).label}
               </span>
-              {props.perm.risk?.reasons[0]?.title
-                ? t("perm.askWithReason", { reason: props.perm.risk.reasons[0].title, tool: props.perm.name })
-                : t("perm.ask", { tool: props.perm.name })}
+              {permEsc
+                ? t("perm.esc.title", { count: permEsc.count })
+                : props.perm.risk?.reasons[0]?.title
+                  ? t("perm.askWithReason", { reason: props.perm.risk.reasons[0].title, tool: props.perm.name })
+                  : t("perm.ask", { tool: props.perm.name })}
             </h4>
+            {permEsc ? <p className="perm-esc-desc">{permEsc.stop_only ? t("perm.esc.stopOnly") : t("perm.esc.desc")}</p> : null}
             {/* Lệnh thật luôn hiện nguyên văn: duyệt dựa trên lệnh, không dựa trên mô tả. */}
             <pre>{typeof permCommand === "string" ? permCommand : JSON.stringify(props.perm.input, null, 2)}</pre>
-            {props.perm.risk?.reasons.length ? (
+            {permEsc && permEsc.blocked.length ? (
+              <>
+                <p className="perm-hosts-label">{t("perm.esc.blocked")}</p>
+                <ul className="perm-reasons">
+                  {permEsc.blocked.map((b) => (
+                    <li key={b}>{b}</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {permHostList.length ? (
+              <>
+                <p className="perm-hosts-label">{t("perm.hostsLabel")}</p>
+                <ul className="perm-hosts">
+                  {permHostList.map((h) => (
+                    <li key={h}>
+                      <code>{h}</code>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {props.perm.risk?.reasons.length && !permEsc ? (
               <ul className="perm-reasons">
                 {props.perm.risk.reasons.map((r) => (
                   <li key={r.code} title={r.code}>
@@ -852,14 +902,16 @@ export function ChatPane(props: {
               </p>
             )}
             <div className="row perm-actions">
-              <button
-                type="button"
-                className="primary"
-                disabled={props.permBusy}
-                onClick={() => props.onAllow("once")}
-              >
-                {t("perm.allowOnce")}
-              </button>
+              {permEsc?.stop_only ? null : (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={props.permBusy}
+                  onClick={() => props.onAllow("once")}
+                >
+                  {permEsc ? t("perm.esc.run") : t("perm.allowOnce")}
+                </button>
+              )}
               {scopes ? (
                 <>
                   <button
@@ -882,8 +934,13 @@ export function ChatPane(props: {
                   </button>
                 </>
               ) : null}
-              <button type="button" className="ghost" disabled={props.permBusy} onClick={props.onDeny}>
-                {t("perm.deny")}
+              <button
+                type="button"
+                className={permEsc?.stop_only ? "primary" : "ghost"}
+                disabled={props.permBusy}
+                onClick={props.onDeny}
+              >
+                {permEsc ? t("perm.esc.stop") : t("perm.deny")}
               </button>
             </div>
           </div>

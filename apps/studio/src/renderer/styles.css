@@ -3858,3 +3858,48 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .evals-run-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .evals-run-tasks { display: flex; flex-wrap: wrap; gap: 3px; }
 .eval-chip { padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: transparent; color: var(--text-muted); font-family: var(--mono); font-size: 10px; cursor: pointer; }
+
+/* Sandbox lệnh (Tự chủ): badge trên bước, trạng thái trong Settings, thẻ host / leo thang. */
+.msg-step-sbx {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border-ui);
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 16px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.banner.sbx-banner {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sbx-controls .row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sbx-state {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.sbx-state.ready {
+  color: var(--success);
+}
+.sbx-state.degraded {
+  color: var(--warning);
+}
+.perm-hosts-label {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.perm-hosts {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+.perm-esc-desc {
+  margin: 4px 0 8px;
+}
