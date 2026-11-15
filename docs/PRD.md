@@ -49,7 +49,7 @@ Phần này **chưa khóa năm 1**. Có thể thêm/bớt.
 
 - Fork VS Code; marketplace extension; fleet agent trên cloud VM.
 - Control plane đa tenant / session từ xa (chỉ sau khi local ổn).
-- Nhồi BMAD/GSD/ECC **nguyên bản vào UI** (kit chỉ dùng khi *build* 5ilence trong Cursor).
+- Nhồi BMAD/GSD/ECC **nguyên bản vào UI** (các bộ công cụ build ngoài không ship vào app).
 
 Tab autocomplete, RAG mặc định, CLI: **không cấm** — để backlog, không phải job lõi Phase 0.
 
