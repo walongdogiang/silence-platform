@@ -2391,6 +2391,14 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .history-menu-item.danger,
 .history-menu-item.danger:hover,
 .history-menu-item.danger:focus-visible { color: var(--error); }
+/* Right-click menu of a chat message (MessageMenu): items may carry a muted second line. */
+.msg-menu { min-width: 240px; max-width: 320px; }
+.msg-menu .history-menu-item.has-desc { height: auto; padding-top: 6px; padding-bottom: 6px; align-items: start; }
+.msg-menu .history-menu-item.has-desc > svg { margin-top: 2px; }
+.msg-menu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.msg-menu-desc { font-size: var(--font-size-xs); line-height: 1.35; color: var(--text-muted); white-space: normal; }
+.msg-user .msg-bubble:focus-visible { outline: 1px solid var(--border-focus, var(--accent)); outline-offset: 2px; }
+.msg-turn.menu-open .msg-bubble { box-shadow: 0 0 0 1px var(--border-ui); }
 .history-menu-sep {
   height: 1px;
   margin: 4px 6px;

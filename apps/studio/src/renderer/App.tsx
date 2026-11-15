@@ -69,6 +69,7 @@ import {
   thinkingLiveStep,
   type NarrateStep,
 } from "./chatMeta";
+import { attachToPrompt, cutParams, rewindPrompt, userTurnsBefore } from "./messageMenu";
 import type { ChatLine, ChatThread, CheckpointFile, Diff, Perm, ShellView } from "./models";
 import {
   applyAppearance,
@@ -1001,7 +1002,19 @@ export function App() {
     const parentId = activeThreadId;
     if (!parentId) return;
     const cut = Math.max(0, Math.min(endLineInclusive, lines.length - 1));
-    await forkLines(parentId, lines.slice(0, cut + 1));
+    await forkLines(parentId, lines.slice(0, cut + 1), { cut: cutParams(lines, cut + 1) });
+  }
+
+  /** Menu chuột phải → Fork from here: chat mới với phần trước tin user `userLine`; tin đó về composer. */
+  async function forkFrom(userLine: number) {
+    if (!workspace || busy || !activeThreadId) return;
+    const target = lines[userLine];
+    if (target?.kind !== "user") return;
+    await forkLines(activeThreadId, lines.slice(0, userLine), {
+      cut: cutParams(lines, userLine),
+      prompt: target.text,
+      images: target.images,
+    });
   }
 
   /** Fork cả đoạn chat `id` (menu ⋯ ở lịch sử). */
@@ -1009,16 +1022,39 @@ export function App() {
     if (!workspace || busy) return;
     const src = id === activeThreadId ? lines : threads.find((t) => t.id === id)?.lines;
     if (!src) return;
-    await forkLines(id, src);
+    await forkLines(id, src, { cut: {} });
   }
 
-  async function forkLines(parentId: string, src: ChatLine[]) {
+  /**
+   * New live session for a fork: `session.fork` copies the parent's model history (cut like the
+   * UI lines). Old Engine / lost session: an empty session, as before 0.1.16 (warned in Output).
+   */
+  async function forkLiveSession(dir: string, parentSid: string, cut: { keep_user_turns?: number; text?: string }) {
+    if (parentSid) {
+      try {
+        const r = (await window.silence.rpc("session.fork", { session_id: parentSid, ...cut })) as { session_id: string };
+        await window.silence.rpc("terminal.start", { session_id: r.session_id, cols: 100, rows: 16 });
+        return r.session_id;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.forkHistoryFailed", { message })}`]);
+      }
+    }
+    return createLiveSession(dir);
+  }
+
+  async function forkLines(
+    parentId: string,
+    src: ChatLine[],
+    opts: { cut: { keep_user_turns?: number; text?: string }; prompt?: string; images?: string[] },
+  ) {
     if (!workspace) return;
     const sliced = src.map((l) => ({ ...l }));
     if (sliced.length === 0) return;
     snapshotActive();
     const parent = threads.find((t) => t.id === parentId);
-    const liveId = await createLiveSession(workspace);
+    const parentSid = parentId === activeThreadId ? sessionId : (parent?.sessionId ?? "");
+    const liveId = await forkLiveSession(workspace, parentSid, opts.cut);
     // Cha đã có tiêu đề chốt (AI / user) thì fork dùng lại, không sinh thêm.
     const parentLocked = parent?.titleSource === "ai" || parent?.titleSource === "user";
     beginThread(workspace, liveId, sliced, {
@@ -1027,6 +1063,59 @@ export function App() {
       titleSource: parentLocked ? "ai" : "auto",
     });
     await refreshCost();
+  }
+
+  /**
+   * Cut the Engine's history before line `idx` of `src` (Rewind, Retry, Checkpoint Restore).
+   * `true` = cut (or nothing to cut: the session is gone after an Engine restart, so the next
+   * send starts a new one). `false` = the Engine refused; the UI must not cut either.
+   */
+  async function cutEngineHistory(src: ChatLine[], idx: number): Promise<boolean> {
+    const cut = cutParams(src, idx);
+    if (!sessionId || cut.keep_user_turns === undefined) return true;
+    try {
+      await window.silence.rpc("session.rewind", { session_id: sessionId, ...cut });
+      return true;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (/unknown session/i.test(message)) return true;
+      const line = /unknown method/i.test(message) ? t("app.rewindOldEngine") : t("app.rewindFailed", { message });
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${line}`]);
+      window.alert(line);
+      return false;
+    }
+  }
+
+  /**
+   * Menu chuột phải → Rewind to here (hỏi xác nhận: không hoàn tác được) hoặc Retry (lượt cuối).
+   * Bỏ tin user `userLine` và mọi thứ sau nó ở UI và ở Engine. Rewind đưa tin về composer; Retry gửi lại.
+   * File trong workspace giữ nguyên (khác Checkpoint Restore).
+   */
+  async function rewindTo(userLine: number, retry = false) {
+    if (busy) return;
+    const target = lines[userLine];
+    if (target?.kind !== "user") return;
+    if (!retry && !window.confirm(t("app.rewindConfirm"))) return;
+    if (!(await cutEngineHistory(lines, userLine))) return;
+    setLines(lines.slice(0, userLine));
+    setPlan(null);
+    setDiff(null);
+    setPerm(null);
+    turnFilesRef.current = [];
+    turnStartedAtRef.current = 0;
+    if (retry) {
+      void send(target.text);
+      return;
+    }
+    setPrompt((p) => rewindPrompt(target.text, p));
+    if (target.images?.length) setImages(target.images);
+    focusComposer();
+  }
+
+  /** Menu chuột phải → Attach message as context: trích dẫn vào composer, giữ bản nháp. */
+  function attachMessage(text: string) {
+    setPrompt((p) => attachToPrompt(p, text));
+    focusComposer();
   }
 
   async function openWorkspace() {
@@ -1440,6 +1529,11 @@ export function App() {
 
     const idx = lines.findIndex((l) => l.kind === "checkpoint" && l.id === id);
     if (idx >= 0) {
+      // Model history follows the cut too (before 0.1.16 only the UI was cut). Files are already
+      // restored, so a refusal here only leaves the model seeing the later turns.
+      if (userTurnsBefore(lines, lines.length) > userTurnsBefore(lines, idx + 1)) {
+        await cutEngineHistory(lines, idx + 1);
+      }
       setLines(lines.slice(0, idx + 1));
     }
     setDiff(null);
@@ -1701,6 +1795,10 @@ export function App() {
           }}
           onRestoreCheckpoint={(id) => void restoreCheckpoint(id)}
           onForkChat={(endLine) => void forkChat(endLine)}
+          onForkFrom={(userLine) => void forkFrom(userLine)}
+          onRewind={(userLine) => void rewindTo(userLine)}
+          onRetryTurn={(userLine) => void rewindTo(userLine, true)}
+          onAttachMessage={attachMessage}
           onOpenWorkspace={() => void openWorkspace()}
           onChip={onChip}
           onUsePrompt={setPrompt}

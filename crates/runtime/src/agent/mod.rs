@@ -23,6 +23,7 @@ use uuid::Uuid;
 mod auto;
 mod changes;
 mod cli;
+mod history;
 mod modes;
 mod plan;
 mod policy;
@@ -36,6 +37,7 @@ pub use cli::{cli_safeguards, run_bridge};
 pub use modes::{profile, ModeProfile};
 pub use plan::approve_plan;
 pub use policy::{decide_permission, decide_permission_scoped, list_permissions, revoke_permission};
+pub use history::{fork_session, rewind_session};
 pub use resume::resume_session;
 pub use sandbox::{
     list_network, list_snapshots, restore_session_snapshot, restore_snapshot, revoke_network, session_snapshots,

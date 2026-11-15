@@ -2,6 +2,12 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  FileText,
+  GitBranch,
+  History,
+  Quote,
+  RefreshCw,
+  TextSelect,
   Circle,
   Code2,
   Copy,
@@ -12,7 +18,15 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   countExplored,
   isPlanningVerb,
@@ -40,6 +54,8 @@ import type { EditTarget } from "../imageActions";
 import { ImageRefStrip } from "./WorkspaceImage";
 import { SoftScroll } from "./SoftScroll";
 import { transcriptOpen, type TranscriptView } from "../prefs";
+import { stripMarkdown } from "../messageMenu";
+import { MessageMenu, type MenuAt, type MessageMenuItem } from "./MessageMenu";
 
 const MODES = [
   { id: "Plan", title: "Plan", desc: "hub.planDesc", Icon: ListChecks },
@@ -65,6 +81,8 @@ type Turn = {
   live?: boolean;
   /** Index dòng cuối (inclusive) trong `lines` thuộc turn này — dùng Fork Chat */
   endLine: number;
+  /** Index của dòng `user` mở turn này; -1 khi turn không có tin user (Rewind / Fork from here). */
+  startLine: number;
 };
 
 function lineToStep(l: Extract<ChatLine, { kind: "narrate" }>): NarrateStep {
@@ -78,7 +96,7 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
 
   function ensure(lineIdx: number): Turn {
     if (!cur) {
-      cur = { user: "", traces: [], narrations: [], errors: [], endLine: lineIdx };
+      cur = { user: "", traces: [], narrations: [], errors: [], endLine: lineIdx, startLine: -1 };
       turns.push(cur);
     }
     cur.endLine = lineIdx;
@@ -96,6 +114,7 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
         narrations: [],
         errors: [],
         endLine: i,
+        startLine: i,
       };
       turns.push(cur);
     } else if (l.kind === "worked") {
@@ -571,6 +590,14 @@ export function ChatPane(props: {
   onChip?: (chip: string) => void;
   onUsePrompt?: (text: string) => void;
   onRetry?: () => void;
+  /** Menu chuột phải → Attach message as context: chèn trích dẫn vào composer. */
+  onAttachMessage?: (text: string) => void;
+  /** Menu chuột phải → Rewind to here: cắt từ dòng user `userLine` (App hỏi xác nhận). */
+  onRewind?: (userLine: number) => void;
+  /** Menu chuột phải → Fork from here: chat mới giữ hội thoại trước dòng user `userLine`. */
+  onForkFrom?: (userLine: number) => void;
+  /** Menu chuột phải trên câu trả lời của lượt cuối → Retry: bỏ câu trả lời, gửi lại tin user. */
+  onRetryTurn?: (userLine: number) => void;
   /** Settings → Chat → default view: which blocks of a turn start open. */
   transcript?: TranscriptView;
   /** "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn prompt. Trả lỗi nếu không đính được. */
@@ -593,6 +620,7 @@ export function ChatPane(props: {
   const permEsc = permEscalation(props.perm);
   const permHostList = permHosts(props.perm);
   const copyToastTimer = useRef<number | null>(null);
+  const [menu, setMenu] = useState<{ at: MenuAt; turn: number; on: "user" | "ai"; selection: string } | null>(null);
 
   useEffect(() => {
     return () => {
@@ -613,6 +641,124 @@ export function ChatPane(props: {
       setCopyToast(false);
       copyToastTimer.current = null;
     }, COPY_FEEDBACK_MS);
+  }
+
+  function copyText(text: string) {
+    void navigator.clipboard
+      ?.writeText(text)
+      .then(showCopyToast)
+      .catch(() => {});
+  }
+
+  /** Chuột phải (hoặc Shift+F10 / phím Menu) trên tin user hoặc câu trả lời AI. */
+  function openMenu(e: ReactMouseEvent | ReactKeyboardEvent, turn: number, on: "user" | "ai") {
+    const keyboard = e.type === "keydown";
+    if (keyboard) {
+      const ke = e as ReactKeyboardEvent;
+      if (!(ke.key === "ContextMenu" || (ke.key === "F10" && ke.shiftKey))) return;
+    }
+    e.preventDefault();
+    const box = e.currentTarget as HTMLElement;
+    const sel = window.getSelection();
+    const selection =
+      sel && !sel.isCollapsed && sel.anchorNode && box.contains(sel.anchorNode) ? sel.toString().trim() : "";
+    const r = box.getBoundingClientRect();
+    const at = keyboard
+      ? { x: r.left + 8, y: r.bottom + 4 }
+      : { x: (e as ReactMouseEvent).clientX, y: (e as ReactMouseEvent).clientY };
+    setMenu({ at, turn, on, selection });
+  }
+
+  function menuItems(turn: Turn, on: "user" | "ai", selection: string, last: boolean): MessageMenuItem[] {
+    const done = (fn: () => void) => () => {
+      setMenu(null);
+      fn();
+    };
+    const source = on === "user" ? turn.user : (turn.ai?.text ?? "");
+    const items: MessageMenuItem[] = [];
+    if (selection)
+      items.push(
+        {
+          id: "sel",
+          label: t("msgMenu.copySelection"),
+          icon: <TextSelect size={14} />,
+          run: done(() => copyText(selection)),
+        },
+        "divider",
+      );
+    items.push(
+      {
+        id: "copy",
+        label: t("msgMenu.copy"),
+        icon: <Copy size={14} />,
+        kbd: "C",
+        disabled: !source.trim(),
+        run: done(() => copyText(stripMarkdown(source))),
+      },
+      {
+        id: "md",
+        label: t("msgMenu.copyMarkdown"),
+        icon: <FileText size={14} />,
+        kbd: "M",
+        disabled: !source.trim(),
+        run: done(() => copyText(source)),
+      },
+    );
+    if (props.onAttachMessage)
+      items.push("divider", {
+        id: "attach",
+        label: t("msgMenu.attach"),
+        icon: <Quote size={14} />,
+        kbd: "A",
+        disabled: !source.trim(),
+        run: done(() => props.onAttachMessage?.(source)),
+      });
+    const hasUser = turn.startLine >= 0;
+    const locked = Boolean(props.busy) || Boolean(turn.live);
+    const tail: MessageMenuItem[] = [];
+    if (on === "ai" && last && hasUser && props.onRetryTurn && turn.user.trim())
+      tail.push({
+        id: "retry",
+        label: t("msgMenu.retry"),
+        desc: t(turn.userImages?.length || turn.userImageCount ? "msgMenu.retryNoImages" : "msgMenu.retryDesc"),
+        icon: <RefreshCw size={14} />,
+        kbd: "T",
+        disabled: locked,
+        run: done(() => props.onRetryTurn?.(turn.startLine)),
+      });
+    if (on === "user" && hasUser && props.onRewind)
+      tail.push({
+        id: "rewind",
+        label: t("msgMenu.rewind"),
+        desc: t("msgMenu.rewindDesc"),
+        icon: <History size={14} />,
+        kbd: "R",
+        danger: true,
+        disabled: locked,
+        run: done(() => props.onRewind?.(turn.startLine)),
+      });
+    if (on === "user" && hasUser && props.onForkFrom)
+      tail.push({
+        id: "fork",
+        label: t("msgMenu.fork"),
+        desc: t("msgMenu.forkDesc"),
+        icon: <GitBranch size={14} />,
+        kbd: "F",
+        disabled: locked,
+        run: done(() => props.onForkFrom?.(turn.startLine)),
+      });
+    if (on === "ai" && props.onForkChat && !turn.live)
+      tail.push({
+        id: "fork",
+        label: t("chat.fork"),
+        desc: t("msgMenu.forkAiDesc"),
+        icon: <GitBranch size={14} />,
+        kbd: "F",
+        disabled: Boolean(props.busy),
+        run: done(() => props.onForkChat?.(turn.endLine)),
+      });
+    if (tail.length) items.push("divider", ...tail);
+    return items;
   }
 
   function onMode(id: string) {
@@ -642,6 +788,14 @@ export function ChatPane(props: {
       ) : null}
       {editor && props.onAttachEdited ? (
         <ImageEditor target={editor} onClose={() => setEditor(null)} onSend={props.onAttachEdited} />
+      ) : null}
+      {menu && turns[menu.turn] ? (
+        <MessageMenu
+          at={menu.at}
+          label={t(menu.on === "user" ? "msgMenu.labelUser" : "msgMenu.labelAi")}
+          items={menuItems(turns[menu.turn], menu.on, menu.selection, menu.turn === turns.length - 1)}
+          onClose={() => setMenu(null)}
+        />
       ) : null}
       {copyToast ? (
         <div className="app-toast" role="status" aria-live="polite">
@@ -708,10 +862,16 @@ export function ChatPane(props: {
             turn.worked || turn.ai || turn.traces.length || turn.narrations.length || turn.thought || turn.live || turn.checkpoint,
           );
           return (
-            <div key={i} className="msg-turn">
+            <div key={i} className={`msg-turn${menu?.turn === i ? " menu-open" : ""}`}>
               {turn.user || turn.userImages?.length || turn.userImageCount ? (
                 <div className="msg-user">
-                  <div className="msg-bubble">
+                  <div
+                    className="msg-bubble"
+                    tabIndex={0}
+                    aria-haspopup="menu"
+                    onContextMenu={(e) => openMenu(e, i, "user")}
+                    onKeyDown={(e) => openMenu(e, i, "user")}
+                  >
                     {turn.userImages?.length ? (
                       <div className="msg-images">
                         {turn.userImages.map((src, j) => (
@@ -742,7 +902,7 @@ export function ChatPane(props: {
                 />
               ) : null}
               {turn.ai ? (
-                <div className="msg-ai-wrap">
+                <div className="msg-ai-wrap" onContextMenu={(e) => openMenu(e, i, "ai")}>
                   <MarkdownMessage
                     text={turn.ai.text}
                     onOpenFile={props.onOpenFile}
