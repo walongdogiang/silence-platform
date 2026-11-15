@@ -49,6 +49,9 @@ impl AuditLog {
             .open(&self.path)
             .await?;
         f.write_all(line.as_bytes()).await?;
+        // tokio::fs::File writes in the background: without flush the line may land after
+        // `append` returned (a query right after would miss it).
+        f.flush().await?;
         Ok(())
     }
 
@@ -107,5 +110,23 @@ pub fn now_event(
         output_tokens,
         usd,
         detail,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// `append` returns only when the line can be read back: callers (and tests) query right after.
+    #[tokio::test]
+    async fn append_is_readable_as_soon_as_it_returns() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        for i in 0..60 {
+            let ev = now_event("s1", "tool", "", &format!("t{i}"), "", 0, 0, 0.0, json!({}));
+            log.append(ev).await.unwrap();
+            assert_eq!(log.query(Some("s1"), 1000).unwrap().len(), i + 1, "after append #{i}");
+        }
     }
 }
