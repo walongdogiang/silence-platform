@@ -3,6 +3,9 @@ description: Hợp đồng UI hội thoại — cấu trúc một lượt, câu 
 type: spec
 code:
   - apps/studio/src/renderer/components/ChatPane.tsx
+  - apps/studio/src/renderer/components/MessageMenu.tsx
+  - apps/studio/src/renderer/messageMenu.ts
+  - crates/runtime/src/agent/history.rs
   - apps/studio/src/renderer/components/MarkdownMessage.tsx
   - apps/studio/src/renderer/components/CodeView.tsx
   - apps/studio/src/renderer/components/DiffCard.tsx
@@ -78,9 +81,31 @@ Nhãn trong file này ghi bản tiếng Anh; UI hiện theo ngôn ngữ đã ch�
 ## Fork Chat
 
 - Nút Fork cạnh Copy trên tin AI đã xong (`!live`); disable khi `busy`.
-- Tạo thread mới: `lines` cắt từ đầu → hết turn đó; `session.create` mới; title `Fork · …`; `forkedFromId` = thread gốc.
+- Tạo thread mới: `lines` cắt từ đầu → hết turn đó; title `Fork · …`; `forkedFromId` = thread gốc.
+- Session mới tạo bằng `session.fork` (protocol 0.1.16): Engine chép lịch sử model của session gốc, cắt đúng chỗ UI cắt, nên model thấy hội thoại trước đó. Session gốc không còn trong bộ nhớ (Engine restart) thì Engine đọc từ log. Engine cũ / lỗi → session trống như trước, ghi cảnh báo ở Output.
 - Thread gốc không đổi; không revert file workspace (khác Checkpoint Restore).
-- Năm 1: history fork chỉ ở UI/localStorage; runtime session mới chưa replay message (prompt tiếp theo chạy trên session trống về phía model — hạn chế đã biết).
+- Checkpoint Restore giờ cắt cả lịch sử model (`session.rewind`), không chỉ dòng UI.
+
+## Menu chuột phải trên tin nhắn
+
+Chuột phải vào bubble user hoặc câu trả lời AI → `MessageMenu` (cùng kiểu menu ⋯ ở lịch sử: `fixed` theo con trỏ, lật khi sát mép, Esc / click ngoài / mất focus đóng, ↑↓ di chuyển, chữ cái chạy mục). Bàn phím: focus bubble user (Tab) rồi **Shift+F10** hoặc phím Menu.
+
+| Mục | Phím | Tin user | Câu trả lời AI | Làm gì |
+| --- | --- | --- | --- | --- |
+| Copy phần đã chọn | | ✓ | ✓ | Chỉ hiện khi đang bôi đen chữ trong tin đó |
+| Copy message | C | ✓ | ✓ | Chữ thuần: bỏ markup Markdown (`stripMarkdown`), giữ nguyên code block, bảng → tab |
+| Copy message as Markdown | M | ✓ | ✓ | Nguồn gốc (như nút Copy ở chân tin AI) |
+| Attach message as context | A | ✓ | ✓ | Chèn trích dẫn `> …` vào composer, dưới bản nháp đang có; không gửi |
+| Retry | T | | lượt cuối | Bỏ câu trả lời, gửi lại đúng tin user (không kèm ảnh — mô tả phụ nói rõ) |
+| Rewind to here | R | ✓ | | Mô tả phụ; hỏi xác nhận (không hoàn tác được) |
+| Fork from here | F | ✓ | | Mô tả phụ; tạo chat mới |
+| Fork chat | F | | ✓ | Như nút Fork ở chân tin |
+
+Mục đổi hội thoại (Retry, Rewind, Fork) khoá khi đang `busy`. Toast "Đã copy" dùng chung với nút Copy.
+
+- **Rewind to here:** `session.rewind { session_id, keep_user_turns, text }` → Engine cắt `messages` trước tin đó, ghi `messages_replaced` vào log (bền qua restart), xoá phiên CLI, diff đang chờ, plan; audit `session.rewind`. Rồi UI cắt `lines` trước tin đó và đưa nội dung tin (và ảnh nếu còn) về composer để sửa — nháp chưa gửi giữ ở dưới. **Không** đụng file workspace (muốn trả file thì dùng Checkpoint → Restore). Engine từ chối (cũ, đang chờ duyệt quyền, không tìm thấy tin) → UI không cắt, báo lỗi. Session đã mất do Engine restart → chỉ cắt UI (lượt sau tạo session mới như cũ).
+- **Fork from here:** chat mới chứa phần **trước** tin này (UI và lịch sử model qua `session.fork`), tin này nằm sẵn trong composer của chat mới để sửa / gửi model khác. Chat cũ giữ nguyên.
+- **Ghép số tin:** UI đếm bubble user, Engine đếm tin `user` thật (bỏ tin `[view_image]`). Hai bên lệch khi một lượt lỗi ngay call đầu (Engine rollback), nên UI gửi kèm `text`: Engine tìm tin khớp gần vị trí đó (cùng vị trí, hoặc lùi về trước); tin chưa từng vào lịch sử thì không cắt gì; không thấy mà còn tin sau → từ chối thay vì cắt nhầm (`agent/history.rs` → `cut_index`).
 
 **Sửa đã chốt:** `Worked for` luôn có `ms` khi `done` (không `—`); không trùng dòng Thought; Explored không hiện rỗng; route không hộp xám.
 

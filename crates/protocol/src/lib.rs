@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.15";
+pub const PROTOCOL_VERSION: &str = "0.1.16";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -566,6 +566,36 @@ pub struct SessionDeleteParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionResumeParams {
     pub session_id: String,
+}
+
+/// Params of `session.rewind` (protocol 0.1.16): drop a user message and everything after it
+/// from a live session's history (memory + log). `keep_user_turns` = user messages kept before
+/// it; `text` = the dropped message as written, to find it if the counts drifted.
+/// Workspace files are not touched. Result: [`SessionRewindResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRewindParams {
+    pub session_id: String,
+    pub keep_user_turns: u32,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRewindResult {
+    /// History messages removed (user, assistant, tool).
+    pub dropped: u32,
+}
+
+/// Params of `session.fork` (protocol 0.1.16): new live session with the source's history, cut
+/// like `session.rewind` (`keep_user_turns` absent = whole history). The source is unchanged.
+/// Result: `{session_id}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionForkParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub keep_user_turns: Option<u32>,
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

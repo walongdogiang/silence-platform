@@ -47,6 +47,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Audit log | `runtime/src/audit.rs` |
 | Event log từng session (`events.jsonl`), list, replay | `runtime/src/session/log.rs` (`SessionStore`, `replay_messages`, `summarize`); kiểu dòng log: `LogRecord` / `LogBody` trong protocol |
 | Mở lại session cũ (`session.resume`), ghi message/event vào log | `agent/resume.rs::resume_session`; `agent/mod.rs::persist_messages`, `subscribe` |
+| Cắt lịch sử (`session.rewind`), nhân bản session (`session.fork`) | `agent/history.rs::rewind_session`, `fork_session`, `cut_index`; UI: `renderer/messageMenu.ts`, `components/MessageMenu.tsx` |
 | Skill/hook của tổ chức (`.silence/`) | `runtime/src/org.rs` |
 | Terminal (ConPTY) | `runtime/src/pty.rs` |
 | Chỉ bind loopback | `runtime/src/bind_policy.rs` |
