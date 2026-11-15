@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.16";
+pub const PROTOCOL_VERSION: &str = "0.1.17";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -469,6 +469,14 @@ pub enum SessionEvent {
     },
     Terminal {
         data: String,
+    },
+    /// A background process (`proc_start`) started, printed a new localhost URL, or ended.
+    /// `status`: `running` | `stopped` | `exited <code>` | `exited`.
+    Proc {
+        id: String,
+        command: String,
+        status: String,
+        urls: Vec<String>,
     },
     Done {
         stop: String,

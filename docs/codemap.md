@@ -54,7 +54,9 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Ẩn secret trong log | `runtime/src/redact.rs` |
 | Entry CLI, chạy eval | `runtime/src/main.rs`; chạy `runtime/src/eval_runner.rs` (`run`, `Suite::attempt`, `resolve_model`), hiệu chỉnh `eval_calibrate.rs` (`pick_model`), lịch sử `eval_history.rs` (`render_summary`); hướng dẫn `evals/README.md` |
 | Eval trong Studio | trang `renderer/components/EvalsPage.tsx`, cấu hình `renderer/evalConfig.ts`; RPC `eval.catalog/estimate/start/cancel/runs/task` ở `runtime/src/eval_rpc.rs` (`EvalHost`); tiến độ `eval_runner::run_with` → `EvalProgress` → notification `eval.progress` (`rpc.rs::pump_eval`, main → IPC `silence-eval`); quy đổi model theo nguồn `router/src/auto.rs::same_model_on`; ước tính `eval_history::estimate` |
-| Tool `read`/`write`/`edit`/`glob`/`grep`/`shell`/`git_*`, jail workspace | `crates/tools/src/lib.rs` (`specs`, `Workspace`) |
+| Tool `read`/`write`/`edit`/`glob`/`grep`/`shell`/`git_*`, jail workspace | `crates/tools/src/lib.rs` (`specs`, `Workspace`, `shell_command`) |
+| Kiểm HTTP tới localhost (`http_check`), chỉ loopback, HTML → chữ | `crates/tools/src/http.rs` (`http_check`, `local_url`, `html_to_text`); risk `LOCAL_HTTP` / `HTTP_NOT_LOCAL` trong `risk/mod.rs::classify` |
+| Tiến trình nền (`proc_start`/`proc_logs`/`proc_stop`/`proc_list`), nhận URL localhost, tab Ports | cơ chế `crates/tools/src/procs.rs` (`Table`, `find_urls`); agent `crates/runtime/src/agent/procs.rs` (`dispatch`, `specs`); RPC `proc.list`/`proc.stop` ở `rpc.rs`; UI `renderer/procs.ts`, `BottomPanel.tsx` (`PortsList`) |
 | Ảnh: đọc ảnh workspace (`read_image`, `view_image` spec), ảnh user dán (validate, content parts, strip cho model không vision) | `crates/tools/src/image.rs`, `crates/runtime/src/images.rs`; tool `view_image` ở `agent/mod.rs` (`view_image`, `builtin_tools`) |
 | Job Object, timeout process | `crates/sandbox/src/lib.rs` |
 | Xác thực kết nối RPC (`auth.hello`, `SILENCE_RPC_TOKEN`) | `crates/runtime/src/rpc_auth.rs`, `rpc.rs` (`serve_connection`); Studio: `apps/studio/src/main/index.ts` (`spawnRuntime`) |

@@ -29,6 +29,7 @@ Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
 | `FS_DELETE_SYSTEM` | `rm -rf /`, `rm -rf ~`, `rm -rf ../`, `Remove-Item C:\ -Recurse`, `rd /s /q C:\Windows`, xoá `$env:USERPROFILE\…` | Xoá đệ quy ngoài workspace, không khôi phục được |
 | `SYSTEM_CHANGE` | `format`, `diskpart`, `bcdedit`, `vssadmin`, `reg add/delete/import`, `Set-ExecutionPolicy`, `Set-MpPreference`, `netsh`, `schtasks /create`, `sc create`, `New-Service`, `takeown`, `icacls`, `shutdown`, `Restart-Computer`, `sudo …`, `runas` | Đổi cấu hình máy, bảo mật, khởi động hoặc tạo persistence |
 | `SECRET_EXFIL` | `curl -d @.env https://…`, `cat .env \| curl --data-binary @- …`, `iwr -Method Post -InFile .env` | Gửi bí mật ra mạng |
+| `HTTP_NOT_LOCAL` | `http_check` tới `https://example.com`, IP trong LAN, `file://`, `localhost.evil.com` | Tool chỉ để kiểm app trên máy này; ra ngoài thì phải đi qua lệnh mạng (`NET_ACCESS`, có hỏi) |
 | `POLICY_TAMPER` | `write`/`edit`/shell ghi `.silence/permissions.json`, `.silence/policy.yaml` | Agent tự nới quyền cho chính nó; chỉ user (Settings) và Engine được ghi |
 
 ## Tầng 2 — Hỏi kèm giải thích
@@ -63,6 +64,7 @@ Agent không được làm. User muốn thì tự chạy ngoài 5ilence.
 | `BUILD_TEST` | `cargo test/check/build/clippy/fmt/run`, `cargo-msvc.bat`, `npm test`, `npm run …`, `pnpm test`, `pytest`, `python -m pytest`, `go test/build/vet`, `dotnet test/build`, `tsc`, `vitest`, `jest`, `eslint`, `prettier`, `ruff`, `mypy`, `make` | Lệnh của dự án, trong workspace. Sau khi có sandbox mạng sẽ chạy offline |
 | `RUN_SCRIPT` | `python calc.py`, `node scripts/check.mjs`, `.\tools\x.ps1` (file trong workspace) | Script trong repo, user xem được |
 | `GIT_LOCAL` | `git add`, `git stash`, `git switch`, `git checkout -b`, `git mv` | Cục bộ, đảo ngược được |
+| `LOCAL_HTTP` | `http_check` tới `localhost`, `127.0.0.1`, `::1` (redirect ra ngoài bị chặn, không proxy) | Chỉ chạm app của chính user trên máy này; không gây taint. Ask/Review chỉ cho GET/HEAD/OPTIONS |
 | `MCP_READ` | Tool MCP có `readOnlyHint` | Không ghi; output vẫn bị coi là nội dung bên ngoài (làm phát sinh taint) |
 
 ## Tầng 0 — Tự chạy

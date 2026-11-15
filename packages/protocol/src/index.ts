@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.16";
+export const PROTOCOL_VERSION = "0.1.17";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -157,6 +157,8 @@ export type SessionEvent =
   /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
   | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: AutoSlot | ""; baseline_usd?: number }
   | { type: "terminal"; data: string }
+  /** Background process (`proc_start`) started, printed a localhost URL, or ended (0.1.17). `status`: running | stopped | exited <code> | exited. */
+  | { type: "proc"; id: string; command: string; status: string; urls: string[] }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };
 

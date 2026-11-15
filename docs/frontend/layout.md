@@ -27,7 +27,8 @@ flowchart LR
   TB --> chat
 ```
 
-- **TitleBar** (`TitleBar.tsx`): full width, `-webkit-app-region: drag`. Logo, menu File…Help, ← →, tên folder, **Toggle Panel → Chat → Evals → Settings**, − □ ×. Icon Chat (sau panel) bật/tắt **cả** Chat Workspace. Icon Evals chỉ hiện ở checkout có `evals/`, mở trang Evals thay khung chat và hiện chip tiến độ khi đang chạy (`evals.md`). Nút panel (Ctrl+J) mở panel dưới: Terminal, Output; Problems / Debug Console / Ports = chưa gắn.
+- **TitleBar** (`TitleBar.tsx`): full width, `-webkit-app-region: drag`. Logo, menu File…Help, ← →, tên folder, **Toggle Panel → Chat → Evals → Settings**, − □ ×. Icon Chat (sau panel) bật/tắt **cả** Chat Workspace. Icon Evals chỉ hiện ở checkout có `evals/`, mở trang Evals thay khung chat và hiện chip tiến độ khi đang chạy (`evals.md`). Nút panel (Ctrl+J) mở panel dưới: Terminal, Output, **Ports**; Problems / Debug Console = chưa gắn.
+- **Ports** (`BottomPanel.tsx` → `PortsList`, logic `renderer/procs.ts`): tiến trình nền agent mở bằng `proc_start` của chat đang mở. Mỗi hàng: chấm trạng thái (xanh = chạy, xám = đã dừng, đỏ = đã thoát), trạng thái (kèm mã thoát), lệnh (mono, cắt …), URL localhost (link mở trình duyệt ngoài qua `openExternal`, chỉ loopback), nút **Dừng** khi đang chạy. Đang chạy lên đầu, mới trước. Nguồn: `proc.list` khi đổi chat + event `proc` (mở, URL mới, thoát); mỗi event cũng ghi một dòng vào Output. Trống: "Chưa có tiến trình nền…".
 - **Không** cột icon dọc trái. **Không** Explorer trong Chat Workspace (không cây file, không icon thư mục trên sidebar).
 - **Chat Workspace** (khi hiện): hàng tab ngang trên khung chat + hội thoại giữa + lịch sử phải. Tab không đè panel lịch sử.
 - **Thanh Agents** (panel lịch sử phải): nút góc trên phải ẩn/hiện panel — tooltip `Toggle Agents Side Bar (Ctrl+Alt+U)`. Khi ẩn, nút hiện lại ở cuối hàng tab. Không xóa lịch sử.

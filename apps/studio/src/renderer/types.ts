@@ -44,6 +44,8 @@ export type SessionEvent =
   /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
   | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: string; baseline_usd?: number }
   | { type: "terminal"; data: string }
+  /** Background process (`proc_start`): started, new localhost URL, or ended. `status`: running | stopped | exited <code>. */
+  | { type: "proc"; id: string; command: string; status: string; urls: string[] }
   | { type: "done"; stop: string }
   | { type: "error"; message: string; error?: ErrorInfo };
 

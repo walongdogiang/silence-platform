@@ -89,6 +89,23 @@ fn mcp_is_ask_unless_read_only() {
 }
 
 #[test]
+fn http_check_is_logged_on_loopback_and_blocked_elsewhere() {
+    let dir = ws();
+    // Taint does not raise it: the request stays on this machine and runs nothing.
+    let ctx = RiskCtx { workspace: dir.path(), tainted: true, mcp_read_only: false };
+    for url in ["http://localhost:5173/", "http://127.0.0.1:8000/api", "http://[::1]:3000/"] {
+        let v = classify("http_check", &json!({"url": url}), &ctx);
+        assert_eq!((v.tier, v.codes.clone()), (Tier::Logged, vec!["LOCAL_HTTP".to_string()]), "{url}");
+        assert!(!v.brings_external_content(), "{url}");
+    }
+    for url in ["https://example.com/", "http://192.168.1.5:5173/", "http://localhost.evil.com/", "file:///etc/passwd", ""] {
+        let v = classify("http_check", &json!({"url": url}), &ctx);
+        assert_eq!(v.tier, Tier::Block, "{url}");
+        assert!(v.codes.contains(&"HTTP_NOT_LOCAL".to_string()), "{url}");
+    }
+}
+
+#[test]
 fn taint_raises_contained_shell_to_ask() {
     let dir = ws();
     let ctx = RiskCtx { workspace: dir.path(), tainted: true, mcp_read_only: false };

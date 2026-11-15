@@ -70,6 +70,7 @@ import {
   type NarrateStep,
 } from "./chatMeta";
 import { attachToPrompt, cutParams, rewindPrompt, userTurnsBefore } from "./messageMenu";
+import { applyProc, isLocalUrl, type ProcRow } from "./procs";
 import type { ChatLine, ChatThread, CheckpointFile, Diff, Perm, ShellView } from "./models";
 import {
   applyAppearance,
@@ -295,6 +296,8 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
   const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
   const [outputLog, setOutputLog] = useState<string[]>([]);
+  /** Background processes of the open chat's session (Ports tab). */
+  const [procs, setProcs] = useState<ProcRow[]>([]);
   const [historyHidden, setHistoryHidden] = useState(() => localStorage.getItem("silence.shell.history") === "1");
 
   const [workspace, setWorkspace] = useState(() => localStorage.getItem("silence.shell.workspace") ?? "");
@@ -389,6 +392,26 @@ export function App() {
     void refreshSandbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [permMode, settings === null]);
+  // Ports tab: the processes of this session (they outlive turns; events only carry changes).
+  useEffect(() => {
+    if (!sessionId || !window.silence) {
+      setProcs([]);
+      return;
+    }
+    let stale = false;
+    window.silence
+      .rpc("proc.list", { session_id: sessionId })
+      .then((r) => {
+        if (!stale) setProcs(((r as { procs?: ProcRow[] }).procs ?? []).slice());
+      })
+      // Engine cũ (protocol < 0.1.17) chưa có proc.list.
+      .catch(() => {
+        if (!stale) setProcs([]);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sessionId]);
 
   // Làm mới khi đổi session / mode / model và khi lượt kết thúc (busy → false).
   useEffect(() => {
@@ -653,6 +676,13 @@ export function App() {
             return next;
           });
         }
+      } else if (ev.type === "proc") {
+        setProcs((xs) => applyProc(xs, ev));
+        setOutputLog((xs) => [
+          ...xs.slice(-199),
+          t("ports.outputLine", { id: ev.id, status: ev.status, command: ev.command }) +
+            (ev.urls.length ? ` · ${ev.urls.join(" ")}` : ""),
+        ]);
       } else if (ev.type === "terminal") {
         term.current?.write(ev.data.replace(/\n/g, "\r\n"));
       } else if (ev.type === "error") {
@@ -1927,6 +1957,17 @@ export function App() {
             onClose={() => setPanelOpen(false)}
             termRef={setTermEl}
             output={outputLog}
+            procs={procs}
+            onStopProc={(id) => {
+              if (!sessionId) return;
+              void window.silence.rpc("proc.stop", { session_id: sessionId, id }).catch((e: unknown) => {
+                const message = e instanceof Error ? e.message : String(e);
+                setOutputLog((xs) => [...xs.slice(-199), `[error] proc.stop ${id}: ${message}`]);
+              });
+            }}
+            onOpenUrl={(url) => {
+              if (isLocalUrl(url)) void window.silence.openExternal(url);
+            }}
           />
         </main>
 

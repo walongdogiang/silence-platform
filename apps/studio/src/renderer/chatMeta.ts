@@ -155,6 +155,12 @@ export function narrateToolLive(name: string, input: unknown): NarrateStep {
   const query = pickQuery(input);
   const command = pickCommand(input);
 
+  // Background processes (`proc_*`): checked first, `proc_list` would otherwise look like a read.
+  if (n === "proc_start") return { verb: "Starting", detail: clip(command ?? "command", 48) };
+  if (n === "proc_logs") return { verb: "Reading logs", detail: pickId(input) ?? "process" };
+  if (n === "proc_stop") return { verb: "Stopping", detail: pickId(input) ?? "process" };
+  if (n === "proc_list") return { verb: "Checking processes" };
+  if (n === "http_check") return { verb: "Checking", detail: httpDetail(input) };
   if (/grep|search|rg|glob|find/.test(n)) {
     if (query && short) return { verb: "Searching", detail: `\`${clip(query, 40)}\` in ${short}` };
     if (query) return { verb: "Searching", detail: `\`${clip(query, 48)}\`` };
@@ -202,6 +208,11 @@ export function narrateToPast(step: NarrateStep): NarrateStep {
     Testing: "Tested",
     Exploring: "Explored",
     "Writing plan": "Wrote plan",
+    Starting: "Started",
+    "Reading logs": "Read logs",
+    Stopping: "Stopped",
+    "Checking processes": "Checked processes",
+    Checking: "Checked",
     Blocked: "Blocked",
     "Using tool": "Used tool",
     Using: "Used tool",
@@ -260,8 +271,22 @@ export function briefFromNarrations(steps: NarrateStep[]): string {
 const VERBS = new Set([
   "Reading", "Read", "Searching", "Searched", "Editing", "Edited", "Running", "Ran", "Testing", "Tested",
   "Exploring", "Explored", "Writing plan", "Wrote plan", "Using tool", "Used tool", "Blocked", "Thinking",
-  "Thought", "Planning next moves",
+  "Thought", "Planning next moves", "Starting", "Started", "Reading logs", "Read logs", "Stopping", "Stopped",
+  "Checking processes", "Checked processes", "Checking", "Checked",
 ]);
+
+/** `GET localhost:5173/api` for an `http_check` step. */
+function httpDetail(input: unknown): string {
+  const i = (input ?? {}) as { url?: unknown; method?: unknown };
+  const method = typeof i.method === "string" && i.method ? i.method.toUpperCase() : "GET";
+  const url = typeof i.url === "string" ? i.url.replace(/^https?:\/\//, "") : "";
+  return clip(`${method} ${url}`.trim(), 48);
+}
+
+function pickId(input: unknown): string | undefined {
+  const id = (input as { id?: unknown } | null | undefined)?.id;
+  return typeof id === "string" && id ? id : undefined;
+}
 
 /** Step verb in the UI language; unknown verbs pass through. */
 export function verbText(verb: string, t: T): string {
