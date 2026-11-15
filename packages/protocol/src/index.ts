@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.15";
+export const PROTOCOL_VERSION = "0.1.16";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -191,6 +191,17 @@ export type SessionSummary = {
 };
 
 export type SessionResumeParams = { session_id: string };
+
+/**
+ * `session.rewind` (0.1.16): drop a user message and everything after it from a live session
+ * (memory + log). `keep_user_turns` = user messages kept before it; `text` = that message, to
+ * find it if counts drifted. Workspace files are not touched.
+ */
+export type SessionRewindParams = { session_id: string; keep_user_turns: number; text?: string };
+export type SessionRewindResult = { dropped: number };
+
+/** `session.fork` (0.1.16): new live session with the source's history cut like rewind. Result `{ session_id }`. */
+export type SessionForkParams = { session_id: string; keep_user_turns?: number; text?: string };
 
 /** `records` omit `messages_replaced`. Pending permissions and staged diffs are not restored. */
 export type SessionResumeResult = {

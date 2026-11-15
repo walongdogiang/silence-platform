@@ -151,6 +151,11 @@ async fn handle(state: Arc<RpcState>, writer: SharedWriter, req: RpcRequest) -> 
         }
         "engine.data_dir" => Ok(json!({"path": state.ctx.audit.dir().to_string_lossy()})),
         "session.resume" => session_resume(state.clone(), writer.clone(), req.params).await,
+        "session.rewind" => {
+            let p: silence_protocol::SessionRewindParams = serde_json::from_value(req.params)?;
+            Ok(serde_json::to_value(agent::rewind_session(&state.ctx, &p).await?)?)
+        }
+        "session.fork" => session_fork(state.clone(), writer.clone(), req.params).await,
         "session.prompt" => {
             let p: PromptParams = serde_json::from_value(req.params)?;
             let text = match p.context.as_deref().map(str::trim) {
@@ -455,6 +460,14 @@ async fn session_resume(state: Arc<RpcState>, writer: SharedWriter, params: Valu
     let rx = agent::subscribe(&state.ctx, &p.session_id).await;
     pump_events(writer, p.session_id, rx);
     Ok(serde_json::to_value(result)?)
+}
+
+async fn session_fork(state: Arc<RpcState>, writer: SharedWriter, params: Value) -> Result<Value> {
+    let p: silence_protocol::SessionForkParams = serde_json::from_value(params)?;
+    let id = agent::fork_session(&state.ctx, &p).await?;
+    let rx = agent::subscribe(&state.ctx, &id).await;
+    pump_events(writer, id.clone(), rx);
+    Ok(json!({"session_id": id}))
 }
 
 /// `eval.progress` notifications for a Studio eval run.
