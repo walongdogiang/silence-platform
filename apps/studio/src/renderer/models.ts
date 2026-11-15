@@ -65,7 +65,8 @@ export type ChatThread = {
 /** `applied`: Engine already wrote the file (Balanced) — card offers Undo, not Apply/Reject. */
 export type Diff = { path: string; before: string; after: string; applied?: boolean };
 /** `risk`: tier + reasons from the Risk Engine (docs/security/permissions.md). */
-export type Perm = { request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk };
+/** `session_id`: session đang chờ duyệt — card chỉ hiện ở thread của session đó, không mất khi đổi tab. */
+export type Perm = { session_id: string; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk };
 
 export type ShellView = "chat" | "hidden";
 

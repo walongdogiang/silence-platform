@@ -5,6 +5,7 @@ import {
   cutParams,
   firstUserFrom,
   quoteBlock,
+  rewindImages,
   rewindPrompt,
   stripMarkdown,
   userTurnsBefore,
@@ -36,6 +37,27 @@ describe("stripMarkdown", () => {
 
   it("leaves snake_case and math alone", () => {
     expect(stripMarkdown("call my_func_name with 2 * 3 * 4")).toBe("call my_func_name with 2 * 3 * 4");
+  });
+
+  it("keeps inline code verbatim", () => {
+    expect(stripMarkdown("Call `__init__` then `a*b*c` and `[x](y)`")).toBe("Call __init__ then a*b*c and [x](y)");
+    expect(stripMarkdown("``a `b` c``")).toBe("a `b` c");
+  });
+
+  it("keeps escaped punctuation literal", () => {
+    expect(stripMarkdown("2 \\* 3 \\* 4 and \\_x\\_")).toBe("2 * 3 * 4 and _x_");
+  });
+
+  it("strips nested quotes and autolinks", () => {
+    expect(stripMarkdown("> > deep\nsee <https://x.dev>")).toBe("deep\nsee https://x.dev");
+  });
+
+  it("keeps a shorter fence inside a longer one", () => {
+    expect(stripMarkdown("````md\n```js\nx\n```\n````\nafter")).toBe("```js\nx\n```\nafter");
+  });
+
+  it("drops link titles", () => {
+    expect(stripMarkdown('[docs](https://x.dev "Docs")')).toBe("docs (https://x.dev)");
   });
 });
 
@@ -81,6 +103,11 @@ describe("history cuts", () => {
 });
 
 describe("rewindPrompt", () => {
+  it("puts the message images first and keeps the draft's", () => {
+    expect(rewindImages(["a", "b"], ["c", "a"])).toEqual(["a", "b", "c"]);
+    expect(rewindImages(undefined, ["c"])).toEqual(["c"]);
+  });
+
   it("puts the message back and keeps an unsent draft", () => {
     expect(rewindPrompt("msg", "")).toBe("msg");
     expect(rewindPrompt("msg", "msg")).toBe("msg");

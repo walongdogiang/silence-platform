@@ -42,7 +42,7 @@ export type SessionEvent =
   /** `slot` on Auto (`frontier|strong|small`); `escalated` when Auto moved up on trouble. */
   | { type: "route"; task_class: string; model_id: string; reason: string; slot?: string; escalated?: boolean }
   /** `baseline_usd`: same tokens on the source's strongest model ("all Opus"). */
-  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: string; baseline_usd?: number }
+  | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; slot?: string; baseline_usd?: number; cache_read_tokens?: number; cache_write_tokens?: number }
   | { type: "terminal"; data: string }
   /** Background process (`proc_start`): started, new localhost URL, or ended. `status`: running | stopped | exited <code>. */
   | { type: "proc"; id: string; command: string; status: string; urls: string[] }
@@ -61,6 +61,7 @@ export type ErrorCode =
   | "PROVIDER_REFUSAL"
   | "CLI_NOT_FOUND"
   | "CLI_AUTH"
+  | "CLI_LIMIT"
   | "UNKNOWN";
 
 /** Lỗi lượt đã chuẩn hóa ở Engine. `detail` đã lọc secret + cắt ngắn. */
@@ -189,6 +190,26 @@ export type EvalCatalog = {
   sources: { id: string; label: string; kind: string; available: boolean; unavailable_reason: string }[];
   running: boolean;
 };
+/** `eval.config.get` / `eval.config.set`: file `evals/config.yaml` (`eval_config.rs`). */
+export type EvalSettings = {
+  /** Nguồn khi chạy trên máy: provider id, hoặc `per-task` (mỗi task theo model ghim). */
+  source: string;
+  profiles: {
+    smoke: { max_cost: number };
+    nightly: { max_cost: number };
+    weekly: { v0_max_cost: number; modes_max_cost: number; auto_max_cost: number };
+  };
+  /** Lượt tự chạy trên GitHub Actions; `source` không được là Claude CLI. */
+  ci: { enabled: boolean; source: string; nightly: boolean; weekly: boolean };
+};
+export type EvalSettingsInfo = {
+  settings: EvalSettings;
+  /** Mọi nguồn; `ready` = dùng được ngay trên máy này (có khoá / CLI đã cài và đăng nhập). */
+  sources: { id: string; label: string; env: string; cli: boolean; ready: boolean; reason: string }[];
+  path: string;
+  exists: boolean;
+  max_cap_usd: number;
+};
 export type EvalEstimate = {
   estimate: { tasks: { id: string; model: string; usd: number | null }[]; total_usd: number; unknown: number };
   skipped: { id: string; reason: string }[];
@@ -208,6 +229,9 @@ export type EvalTaskMetrics = {
   model_calls: number;
   input_tokens: number;
   output_tokens: number;
+  /** Part of input_tokens read from the prompt cache (0 = none or unknown). */
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
   tool_calls: number;
   error?: string;
   error_code?: string;
@@ -245,4 +269,12 @@ export type EvalTaskDetail = {
   report: string;
   audit: string[];
   files: { path: string; status: "added" | "modified" | "deleted"; before: string; after: string; binary: boolean }[];
+  /** `checks.json`: one row per `pass_if` check; null for attempts from before it existed. */
+  checks?: EvalCheck[] | null;
+  /** `trace.jsonl`: session events of the attempt (capped, redacted); empty for old attempts. */
+  trace?: EvalTraceLine[];
 };
+/** One `pass_if` check of an attempt and why it failed. */
+export type EvalCheck = { kind: string; target: string; ok: boolean; detail?: string };
+/** One line of `trace.jsonl`: a `SessionEvent` (`type` tag) plus `t_ms`; tokens merged into `text`. */
+export type EvalTraceLine = { type: string; t_ms: number; [field: string]: unknown };

@@ -93,21 +93,21 @@ Chuột phải vào bubble user hoặc câu trả lời AI → `MessageMenu` (c�
 | Mục | Phím | Tin user | Câu trả lời AI | Làm gì |
 | --- | --- | --- | --- | --- |
 | Copy phần đã chọn | | ✓ | ✓ | Chỉ hiện khi đang bôi đen chữ trong tin đó |
-| Copy message | C | ✓ | ✓ | Chữ thuần: bỏ markup Markdown (`stripMarkdown`), giữ nguyên code block, bảng → tab |
-| Copy message as Markdown | M | ✓ | ✓ | Nguồn gốc (như nút Copy ở chân tin AI) |
+| Copy message | C | ✓ | ✓ | Tin user: nguyên văn. Câu trả lời AI: chữ thuần (`stripMarkdown`): bỏ markup, giữ nguyên code block và code inline (`__init__` không bị mất gạch dưới), ký tự escape `\*` ra `*`, quote lồng, autolink `<url>`, fence dài chứa fence ngắn; bảng → tab |
+| Copy message as Markdown | M | | ✓ | Nguồn gốc (như nút Copy ở chân tin AI). Tin user không có mục này (Copy đã là nguyên văn) |
 | Attach message as context | A | ✓ | ✓ | Chèn trích dẫn `> …` vào composer, dưới bản nháp đang có; không gửi |
-| Retry | T | | lượt cuối | Bỏ câu trả lời, gửi lại đúng tin user (không kèm ảnh — mô tả phụ nói rõ) |
-| Rewind to here | R | ✓ | | Mô tả phụ; hỏi xác nhận (không hoàn tác được) |
+| Retry | T | ✓ (lượt cuối đã có trả lời / lỗi) | | Bỏ câu trả lời, gửi lại đúng tin user kèm ảnh của nó. Ảnh đã mất khỏi bộ nhớ (chỉ còn số đếm) → gửi không ảnh, mô tả phụ nói trước. Tin chỉ có ảnh vẫn Retry được |
+| Rewind to here | R | ✓ | | Mô tả phụ; hộp xác nhận `ConfirmDialog` (nêu số tin bị bỏ, focus sẵn ở Huỷ, không hoàn tác được) |
 | Fork from here | F | ✓ | | Mô tả phụ; tạo chat mới |
 | Fork chat | F | | ✓ | Như nút Fork ở chân tin |
 
-Mục đổi hội thoại (Retry, Rewind, Fork) khoá khi đang `busy`. Toast "Đã copy" dùng chung với nút Copy.
+**Nút ngay dưới tin của user** (hiện khi rê chuột / focus vào tin, nằm góc dưới bên phải bong bóng): Copy, và Retry nếu là lượt cuối đã có trả lời hoặc lỗi (khoá khi đang chạy). Retry thuộc về tin của user (như Claude), không còn trong menu câu trả lời AI. Mục đổi hội thoại (Retry, Rewind, Fork) khoá khi đang `busy` và dòng phụ đổi thành lý do khoá. Rê chuột chọn item (một dòng sáng duy nhất), ↑↓ / Home / End di chuyển, Esc trả focus về tin nhắn. Checkpoint Restore dùng cùng `ConfirmDialog` (không còn `window.confirm`). Toast "Đã copy" dùng chung với nút Copy.
 
-- **Rewind to here:** `session.rewind { session_id, keep_user_turns, text }` → Engine cắt `messages` trước tin đó, ghi `messages_replaced` vào log (bền qua restart), xoá phiên CLI, diff đang chờ, plan; audit `session.rewind`. Rồi UI cắt `lines` trước tin đó và đưa nội dung tin (và ảnh nếu còn) về composer để sửa — nháp chưa gửi giữ ở dưới. **Không** đụng file workspace (muốn trả file thì dùng Checkpoint → Restore). Engine từ chối (cũ, đang chờ duyệt quyền, không tìm thấy tin) → UI không cắt, báo lỗi. Session đã mất do Engine restart → chỉ cắt UI (lượt sau tạo session mới như cũ).
+- **Rewind to here:** `session.rewind { session_id, keep_user_turns, text }` → Engine cắt `messages` trước tin đó, ghi `messages_replaced` vào log (bền qua restart), xoá phiên CLI, diff đang chờ, plan; audit `session.rewind`. Rồi UI cắt `lines` trước tin đó và đưa nội dung tin (và ảnh nếu còn) về composer để sửa — nháp chưa gửi giữ ở dưới, ảnh đang đính kèm trong nháp giữ lại sau ảnh của tin (`rewindImages`). **Không** đụng file workspace (muốn trả file thì dùng Checkpoint → Restore). Engine từ chối (cũ, đang chờ duyệt quyền, không tìm thấy tin) → UI không cắt, báo lỗi. Session đã mất do Engine restart → chỉ cắt UI (lượt sau tạo session mới như cũ).
 - **Fork from here:** chat mới chứa phần **trước** tin này (UI và lịch sử model qua `session.fork`), tin này nằm sẵn trong composer của chat mới để sửa / gửi model khác. Chat cũ giữ nguyên.
 - **Ghép số tin:** UI đếm bubble user, Engine đếm tin `user` thật (bỏ tin `[view_image]`). Hai bên lệch khi một lượt lỗi ngay call đầu (Engine rollback), nên UI gửi kèm `text`: Engine tìm tin khớp gần vị trí đó (cùng vị trí, hoặc lùi về trước); tin chưa từng vào lịch sử thì không cắt gì; không thấy mà còn tin sau → từ chối thay vì cắt nhầm (`agent/history.rs` → `cut_index`).
 
-**Sửa đã chốt:** `Worked for` luôn có `ms` khi `done` (không `—`); không trùng dòng Thought; Explored không hiện rỗng; route không hộp xám.
+**Sửa đã chốt:** `Worked for` luôn có `ms` khi `done` (không `—`); không trùng dòng Thought; Explored không hiện rỗng; route không hộp xám. Lượt chỉ có dòng `worked` (không user/trả lời/bước/lỗi) không được vẽ.
 
 ## Thought (hiển thị suy nghĩ)
 
@@ -162,11 +162,19 @@ Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 
 
 ## Lỗi trong lượt
 
-- Engine chuẩn hóa lỗi provider → `error` event có `error: { code, status?, retryable, detail }` (`PROVIDER_CREDITS`, `PROVIDER_AUTH`, `PROVIDER_RATE`, `PROVIDER_UNAVAILABLE`, `NETWORK`, `TIMEOUT`, `UNKNOWN`). Thiếu `error` → thông báo chung.
-- Hiện **inline trong lượt** bằng `ErrorCard` (tiêu đề + mô tả + hướng xử lý tiếng Việt). Không toast/dialog; không dán JSON/HTTP làm nội dung chính.
+- Engine chuẩn hóa lỗi provider → `error` event có `error: { code, status?, retryable, detail }` (`PROVIDER_CREDITS`, `PROVIDER_AUTH`, `PROVIDER_RATE`, `PROVIDER_UNAVAILABLE`, `NETWORK`, `TIMEOUT`, `PROVIDER_REFUSAL`, `CLI_NOT_FOUND`, `CLI_AUTH`, `CLI_LIMIT`, `UNKNOWN`). Thiếu `error` hoặc mã lạ → tiêu đề chung. `CLI_LIMIT` = hết hạn mức theo khung giờ của gói Claude qua CLI ("hit your 5-hour limit · resets 12pm"): không retryable; thẻ nêu giờ reset (`resetTime`) và có nút **Chọn model khác** (mở Settings → Models).
+- Hiện **inline trong lượt** bằng `ErrorCard` (tiêu đề + mô tả + hướng xử lý). Không toast/dialog; không dán JSON/HTTP làm nội dung chính.
+- Lỗi chưa phân loại: mô tả là **lý do thật** — dòng đầu của `detail`/message, bỏ tiền tố `Error:`, cắt 220 ký tự (`errorReason`) — không phải "Đã có lỗi" chung chung.
 - "Chi tiết kỹ thuật" thu gọn (mã · HTTP · `detail` đã lọc secret ở Engine). Output log ghi cùng dòng.
-- Nút "Thử lại" chỉ khi `retryable` (rate/5xx/mạng/timeout) và chỉ ở lượt cuối. Credit/key sai: không retry, không auto-retry.
-- Sau lỗi: `busy` tắt; prompt vừa gửi được trả lại composer nếu đang trống. Copy: `renderer/errorCopy.ts`.
+- Nút "Thử lại" chỉ ở lượt cuối: lỗi đã phân loại thì khi `retryable` (rate/5xx/mạng/timeout); lỗi chưa phân loại: có nếu không có `info` (lỗi phía Studio/Sidecar, thường tạm thời), còn Engine đã gửi `info` mà `UNKNOWN` thì chỉ khi `retryable`. Credit/key/hạn mức: không retry (có nút Chọn model khác). Không auto-retry. Thử lại gửi lại **tin user của chính lượt lỗi** và dọn bản trùng trong composer.
+- Sau lỗi: `busy` tắt; prompt vừa gửi được trả lại composer nếu đang trống và user còn ở thread đó. Copy: `renderer/errorCopy.ts`.
+
+## Đổi tab khi lượt đang chạy
+
+- Một lượt mỗi lúc; lượt thuộc session đã gửi (`runSessionRef` trong `App.tsx`). Đổi tab / New chat giữa lượt: lượt chạy tiếp, sự kiện (`token`, bước, `done`, `error`) ghi vào thread của nó trong `threads`, không đổ sang chat đang xem và không bị bỏ.
+- Thread đang chạy giữ chấm "running/waiting" ở lịch sử dù không mở; xong/lỗi/chờ duyệt khi đang ở tab khác → chấm unread.
+- Card quyền gắn `session_id`: chỉ hiện ở thread của nó, đổi tab không xoá (lượt không treo vì mất card). Plan chưa duyệt cũng đi theo session.
+- Thread khác: composer khoá trong lúc lượt chạy nền; pulse/Stop chỉ hiện ở thread đang chạy.
 
 ## Thẻ Diff
 

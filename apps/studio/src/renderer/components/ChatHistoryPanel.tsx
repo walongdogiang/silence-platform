@@ -29,6 +29,7 @@ import {
 } from "react";
 import { translate, useT, type MsgKey, type T } from "../i18n";
 import type { ChatLine, ChatThread } from "../models";
+import { DeleteChatDialog } from "./DeleteChatDialog";
 import { SoftScroll } from "./SoftScroll";
 
 export const HISTORY_KEY = "silence.chat.history";
@@ -320,6 +321,8 @@ export function ChatHistoryPanel(props: {
   activeId: string;
   /** Trạng thái lượt của thread đang mở: chấm nhấp nháy (running) hoặc copper (waiting = chờ duyệt quyền). */
   runState?: "running" | "waiting";
+  /** Thread đang chạy lượt (có thể không phải thread đang mở). Mặc định = `activeId`. */
+  runId?: string;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -337,7 +340,8 @@ export function ChatHistoryPanel(props: {
   const tr = useT();
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<{ id: string; anchor: DOMRect; trigger: HTMLElement } | null>(null);
-  const [confirmDel, setConfirmDel] = useState(false);
+  /** Chat đang chờ xác nhận xoá; `trigger` = nút ⋯ để trả focus khi huỷ. */
+  const [delTarget, setDelTarget] = useState<{ id: string; trigger: HTMLElement } | null>(null);
   const [copiedId, setCopiedId] = useState("");
   const [archOpen, setArchOpen] = useState(false);
 
@@ -350,7 +354,6 @@ export function ChatHistoryPanel(props: {
   function closeMenu(refocus: boolean) {
     if (refocus) menu?.trigger.focus();
     setMenu(null);
-    setConfirmDel(false);
   }
 
   function copy(id: string, text: string) {
@@ -435,27 +438,26 @@ export function ChatHistoryPanel(props: {
       });
     items.push({
       id: "delete",
-      label: tr(confirmDel ? "history.deleteConfirm" : "history.deleteShort"),
+      label: `${tr("history.deleteShort")}…`,
       icon: <Trash2 size={14} />,
       kbd: "D",
       danger: true,
       run: () => {
-        if (!confirmDel) {
-          setConfirmDel(true);
-          return;
-        }
+        const trigger = menu?.trigger;
         closeMenu(false);
-        props.onDelete(t.id);
+        if (trigger) setDelTarget({ id: t.id, trigger });
       },
     });
     return items;
   }
+  const runId = props.runId ?? props.activeId;
   const dotClass = (id: string) => {
-    if (id !== props.activeId) return "history-dot";
-    return props.runState ? `history-dot on ${props.runState}` : "history-dot on";
+    const state = id === runId ? props.runState : undefined;
+    if (state) return `history-dot on ${state}`;
+    return id === props.activeId ? "history-dot on" : "history-dot";
   };
   const dotTitle = (id: string) =>
-    id === props.activeId && props.runState
+    id === runId && props.runState
       ? props.runState === "waiting"
         ? tr("history.waiting")
         : tr("history.running")
@@ -527,6 +529,12 @@ export function ChatHistoryPanel(props: {
   const empty = groups.length === 0 && archived.length === 0;
   const showArchived = archOpen || Boolean(q.trim());
   const menuThread = menu ? props.threads.find((t) => t.id === menu.id) : undefined;
+  const delThread = delTarget ? props.threads.find((t) => t.id === delTarget.id) : undefined;
+
+  function cancelDelete() {
+    delTarget?.trigger.focus();
+    setDelTarget(null);
+  }
 
   function row(t: ChatThread) {
     const open = menu?.id === t.id;
@@ -583,7 +591,6 @@ export function ChatHistoryPanel(props: {
               closeMenu(false);
               return;
             }
-            setConfirmDel(false);
             setMenu({ id: t.id, anchor: e.currentTarget.getBoundingClientRect(), trigger: e.currentTarget });
           }}
         >
@@ -659,6 +666,25 @@ export function ChatHistoryPanel(props: {
       </SoftScroll>
       {menu && menuThread && (
         <HistoryItemMenu anchor={menu.anchor} items={menuItems(menuThread)} onClose={closeMenu} />
+      )}
+      {delTarget && delThread && (
+        <DeleteChatDialog
+          title={shownTitle(delThread.title, tr)}
+          turns={delThread.lines.filter((l) => l.kind === "user").length}
+          onCancel={cancelDelete}
+          onDelete={() => {
+            setDelTarget(null);
+            props.onDelete(delThread.id);
+          }}
+          onArchive={
+            props.onArchive && !delThread.archived
+              ? () => {
+                  setDelTarget(null);
+                  props.onArchive?.(delThread.id, true);
+                }
+              : undefined
+          }
+        />
       )}
       <div className="history-user">
         <span className="avatar">5</span>

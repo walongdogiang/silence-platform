@@ -900,7 +900,7 @@ export function Composer(props: {
         <div className="composer-tools">
           <button
             type="button"
-            className={`composer-tool composer-tip ctx-${ctxLevel}${showUsage ? " on" : ""}`}
+            className={`composer-tool ctx-${ctxLevel}${showUsage ? " on" : ""}`}
             data-tip={contextTip(ctx, t)}
             aria-label={t("ctx.show")}
             aria-pressed={showUsage}

@@ -146,7 +146,9 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
     }
   }
 
-  const out = turns.filter((t) => t.user || t.userImages?.length || t.userImageCount || t.ai || t.traces.length || t.worked || t.narrations.length || t.thought || t.errors.length);
+  // `worked` alone is not content: an orphan meta line (old history, a stray `done`) must not render
+  // "Worked for —" over an empty chat.
+  const out = turns.filter((t) => t.user || t.userImages?.length || t.userImageCount || t.ai || t.narrations.length || t.thought || t.errors.length);
   for (const t of out) {
     if (t.ai && !t.ai.at && t.worked?.at) t.ai.at = t.worked.at;
   }
@@ -589,7 +591,10 @@ export function ChatPane(props: {
   onOpenWorkspace?: () => void;
   onChip?: (chip: string) => void;
   onUsePrompt?: (text: string) => void;
-  onRetry?: () => void;
+  /** Thử lại lượt lỗi cuối; `text` là tin user của chính lượt đó (không có thì App dùng prompt gần nhất). */
+  onRetry?: (text?: string) => void;
+  /** Lỗi hạn mức/đăng nhập: mở chọn model/nguồn khác. */
+  onSwitchModel?: () => void;
   /** Menu chuột phải → Attach message as context: chèn trích dẫn vào composer. */
   onAttachMessage?: (text: string) => void;
   /** Menu chuột phải → Rewind to here: cắt từ dòng user `userLine` (App hỏi xác nhận). */
@@ -693,17 +698,19 @@ export function ChatPane(props: {
         icon: <Copy size={14} />,
         kbd: "C",
         disabled: !source.trim(),
-        run: done(() => copyText(stripMarkdown(source))),
+        // Tin của user là chữ người dùng tự gõ: copy nguyên văn. Câu trả lời AI: bỏ Markdown.
+        run: done(() => copyText(on === "user" ? source : stripMarkdown(source))),
       },
-      {
+    );
+    if (on === "ai")
+      items.push({
         id: "md",
         label: t("msgMenu.copyMarkdown"),
         icon: <FileText size={14} />,
         kbd: "M",
         disabled: !source.trim(),
         run: done(() => copyText(source)),
-      },
-    );
+      });
     if (props.onAttachMessage)
       items.push("divider", {
         id: "attach",
@@ -716,11 +723,18 @@ export function ChatPane(props: {
     const hasUser = turn.startLine >= 0;
     const locked = Boolean(props.busy) || Boolean(turn.live);
     const tail: MessageMenuItem[] = [];
-    if (on === "ai" && last && hasUser && props.onRetryTurn && turn.user.trim())
+    if (on === "user" && last && hasUser && props.onRetryTurn && (turn.ai || turn.errors.length) && (turn.user.trim() || turn.userImages?.length))
       tail.push({
         id: "retry",
         label: t("msgMenu.retry"),
-        desc: t(turn.userImages?.length || turn.userImageCount ? "msgMenu.retryNoImages" : "msgMenu.retryDesc"),
+        // Ảnh chỉ còn số đếm (đã mất khỏi bộ nhớ ảnh) thì Retry gửi lại không có ảnh: nói trước.
+        desc: t(
+          locked
+            ? "msgMenu.busyDesc"
+            : !turn.userImages?.length && turn.userImageCount
+              ? "msgMenu.retryNoImages"
+              : "msgMenu.retryDesc",
+        ),
         icon: <RefreshCw size={14} />,
         kbd: "T",
         disabled: locked,
@@ -730,7 +744,7 @@ export function ChatPane(props: {
       tail.push({
         id: "rewind",
         label: t("msgMenu.rewind"),
-        desc: t("msgMenu.rewindDesc"),
+        desc: t(locked ? "msgMenu.busyDesc" : "msgMenu.rewindDesc"),
         icon: <History size={14} />,
         kbd: "R",
         danger: true,
@@ -741,7 +755,7 @@ export function ChatPane(props: {
       tail.push({
         id: "fork",
         label: t("msgMenu.fork"),
-        desc: t("msgMenu.forkDesc"),
+        desc: t(locked ? "msgMenu.busyDesc" : "msgMenu.forkDesc"),
         icon: <GitBranch size={14} />,
         kbd: "F",
         disabled: locked,
@@ -890,6 +904,32 @@ export function ChatPane(props: {
                     ) : null}
                     {turn.user}
                   </div>
+                  {turn.live ? null : (
+                    <div className="msg-user-actions">
+                      <button
+                        type="button"
+                        className="msg-ai-action"
+                        title={t("chat.copyMessage")}
+                        aria-label={t("chat.copyMessage")}
+                        disabled={!turn.user.trim()}
+                        onClick={() => copyText(turn.user)}
+                      >
+                        <Copy size={13} strokeWidth={1.75} />
+                      </button>
+                      {i === turns.length - 1 && turn.startLine >= 0 && props.onRetryTurn && (turn.ai || turn.errors.length) ? (
+                        <button
+                          type="button"
+                          className="msg-ai-action"
+                          title={t(props.busy ? "msgMenu.busyDesc" : "msgMenu.retry")}
+                          aria-label={t("msgMenu.retry")}
+                          disabled={Boolean(props.busy)}
+                          onClick={() => props.onRetryTurn?.(turn.startLine)}
+                        >
+                          <RefreshCw size={13} strokeWidth={1.75} />
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               ) : null}
               {showMeta ? (
@@ -955,7 +995,8 @@ export function ChatPane(props: {
                   message={e.message}
                   info={e.info}
                   retryDisabled={Boolean(props.busy)}
-                  onRetry={i === turns.length - 1 ? props.onRetry : undefined}
+                  onRetry={i === turns.length - 1 && props.onRetry ? () => props.onRetry?.(turn.user || undefined) : undefined}
+                  onSwitchModel={i === turns.length - 1 ? props.onSwitchModel : undefined}
                 />
               ))}
             </div>

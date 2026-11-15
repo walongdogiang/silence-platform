@@ -41,6 +41,7 @@ import {
   type Tool,
 } from "../imageEdit";
 import { useT, type MsgKey } from "../i18n";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const TOOLS: { id: Tool; label: MsgKey; icon: typeof Brush; hint: MsgKey }[] = [
   { id: "draw", label: "ie.draw", icon: Brush, hint: "ie.drawHint" },
@@ -78,6 +79,7 @@ export function ImageEditor(props: {
   const [focusPin, setFocusPin] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
   const [scale, setScale] = useState(1);
   const stageRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -128,12 +130,17 @@ export function ImageEditor(props: {
   }, [editingText]);
 
   function requestClose() {
-    if (dirty && !window.confirm(tr("ie.discardConfirm"))) return;
+    if (dirty) {
+      setAskDiscard(true);
+      return;
+    }
     props.onClose();
   }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Hộp xác nhận đang mở: nó tự lo Esc / Tab, editor đứng yên.
+      if (askDiscard) return;
       const t = e.target as HTMLElement | null;
       const typing = t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
       const mod = e.ctrlKey || e.metaKey;
@@ -467,6 +474,18 @@ export function ImageEditor(props: {
           </button>
         </div>
       </div>
+      {askDiscard ? (
+        <ConfirmDialog
+          title={tr("ie.discardTitle")}
+          body={tr("ie.discardConfirm")}
+          confirmLabel={tr("ie.discardDo")}
+          danger
+          onResult={(ok) => {
+            setAskDiscard(false);
+            if (ok) props.onClose();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

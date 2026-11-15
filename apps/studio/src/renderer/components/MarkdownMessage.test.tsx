@@ -1,10 +1,18 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { LangContext } from "../i18n";
 import { MarkdownMessage, parsePathRef } from "./MarkdownMessage";
 
-const html = (text: string, onOpenFile?: (p: string) => void) =>
-  renderToStaticMarkup(<MarkdownMessage text={text} onOpenFile={onOpenFile} />);
+// These tests assert Vietnamese UI strings, so they render in "vi" explicitly (the default is English).
+const inVi = (node: ReactNode) =>
+  renderToStaticMarkup(<LangContext.Provider value="vi">{node}</LangContext.Provider>);
+const html =(text: string, onOpenFile?: (p: string) => void) =>
+  renderToStaticMarkup(
+    <LangContext.Provider value="vi">
+      <MarkdownMessage text={text} onOpenFile={onOpenFile} />
+    </LangContext.Provider>,
+  );
 
 describe("MarkdownMessage render", () => {
   it("render GFM: đậm, code, danh sách, bảng", () => {
@@ -76,7 +84,7 @@ describe("MarkdownMessage render", () => {
 
   it("ảnh trỏ vào workspace hiện qua Engine; ảnh từ xa vẫn chặn khi có workspace", () => {
     const ws = (text: string) =>
-      renderToStaticMarkup(<MarkdownMessage text={text} workspace="D:/ws" onOpenImage={() => {}} />);
+      inVi(<MarkdownMessage text={text} workspace="D:/ws" onOpenImage={() => {}} />);
     // SSR không chạy effect: thấy placeholder đang tải, chưa có <img>, không lộ URL lạ.
     expect(ws("![mèo](out/cat.png)")).toContain("đang tải ảnh out/cat.png");
     expect(ws("![x](../secret.png)")).toContain("[ảnh: x]");
@@ -100,9 +108,7 @@ describe("MarkdownMessage render", () => {
   });
 
   it("khối ```svg đang stream hiện ô chờ Đang vẽ, không đổ mã", () => {
-    const live = renderToStaticMarkup(
-      <MarkdownMessage text={'```svg\n<svg viewBox="0 0 10 10"><rect'} streaming />,
-    );
+    const live = inVi(<MarkdownMessage text={'```svg\n<svg viewBox="0 0 10 10"><rect'} streaming />);
     expect(live).toContain("visual-pending");
     expect(live).toContain("Đang vẽ…");
     expect(live).not.toContain("&lt;rect");
@@ -123,7 +129,7 @@ describe("MarkdownMessage render", () => {
     expect(html(diagram)).not.toContain("bleed");
 
     // Hover: Tải + Copy luôn có; Chỉnh sửa chỉ khi có onEditImage. Header không còn nút "Chỉnh".
-    const edit = renderToStaticMarkup(<MarkdownMessage text={scene} onEditImage={() => {}} />);
+    const edit = inVi(<MarkdownMessage text={scene} onEditImage={() => {}} />);
     expect(edit).toContain('aria-label="Tải ảnh"');
     expect(edit).toContain('aria-label="Copy dạng ảnh"');
     // Nút Copy chỉ icon: hai icon (Copy, ✓) xếp chồng để chuyển mượt khi copy xong.

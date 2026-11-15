@@ -39,13 +39,13 @@ describe("PermissionsSection sandbox", () => {
   });
 
   it("offers install when missing, repair when degraded, nothing when ready", () => {
-    expect(html({ state: "not_installed" })).toContain("Cài sandbox (UAC)");
+    expect(html({ state: "not_installed" })).toContain("Install sandbox (UAC)");
     const degraded = html({ state: "degraded", reason: "firewall rule missing" });
-    expect(degraded).toContain("Sửa (UAC)");
+    expect(degraded).toContain("Repair (UAC)");
     expect(degraded).toContain("firewall rule missing");
     const ready = html({ state: "ready" });
     expect(ready).not.toContain("(UAC)");
-    expect(ready).toContain("Sẵn sàng");
+    expect(ready).toContain("Ready");
     expect(html({ state: "unsupported" })).not.toContain("(UAC)");
   });
 
