@@ -29,6 +29,7 @@ mod browser;
 mod changes;
 mod cli;
 mod env;
+mod fresh;
 mod history;
 mod modes;
 mod plan;
@@ -133,6 +134,9 @@ pub struct Session {
     pub cli_hot: bool,
     /// Tool calls finished since the loop last looked (escalation signals).
     pub tool_log: Vec<ToolOutcome>,
+    /// Content hash of each file (workspace-relative path) as the agent last read or wrote it,
+    /// so `write` never overwrites a change made since (`fresh.rs`). Memory only.
+    pub seen: HashMap<String, u64>,
     /// Autonomous-mode state (approved hosts, snapshot turn, block streak).
     pub sbx: SandboxSession,
 }
@@ -223,6 +227,7 @@ pub async fn create_session(
         budget_pass: false,
         cli_hot: false,
         tool_log: Vec::new(),
+        seen: HashMap::new(),
         sbx: SandboxSession::default(),
     };
     persist_messages(ctx, &mut session).await;
@@ -1218,6 +1223,11 @@ async fn dispatch_tool(
             return Ok(refuse(tx, tc, "is not available in a read-only mode"));
         }
     }
+    // Before the permission ask: no point asking to approve a write that would lose a change.
+    if let Some(why) = fresh::stale_write(session_arc, tc, &args).await {
+        return Ok(refuse(tx, tc, &why));
+    }
+    let edit_note = fresh::stale_edit_note(session_arc, tc, &args).await;
     // Every remaining tool (read, grep, write, edit, shell, …) goes through the Risk Engine.
     let verdict = match gate(ctx, session_arc, tx, &tc.name, &args, false).await? {
         Gate::Run(v) => (v, None),
@@ -1262,7 +1272,9 @@ async fn dispatch_tool(
         // Staged, not written: a red test after it says nothing about the edit yet.
         record_outcome(session_arc, tc, r.is_ok(), false, false).await;
         return match r {
-            Ok(text) => Ok(text + &nested_note(session_arc, &tc.name, &args).await.unwrap_or_default()),
+            Ok(text) => Ok(text
+                + &edit_note.unwrap_or_default()
+                + &nested_note(session_arc, &tc.name, &args).await.unwrap_or_default()),
             Err(e) => Err(e),
         };
     }
@@ -1274,6 +1286,9 @@ async fn dispatch_tool(
     };
     if result.is_ok() && verdict.brings_external_content() {
         session_arc.lock().await.tainted = true;
+    }
+    if let Ok(out) = &result {
+        fresh::after_tool(session_arc, &tc.name, &args, out).await;
     }
     match &result {
         Ok(out) => record_outcome(session_arc, tc, out.ok, is_test, out.diff.is_some()).await,
@@ -1325,7 +1340,8 @@ async fn dispatch_tool(
             );
             // After ToolEnd: the UI shows the tool's own output; only the model gets the note.
             let note = if out.ok { nested_note(session_arc, &tc.name, &args).await } else { None };
-            Ok(out.output + &note.unwrap_or_default())
+            let stale = if out.ok { edit_note } else { None };
+            Ok(out.output + &stale.unwrap_or_default() + &note.unwrap_or_default())
         }
         Err(err) => {
             emit(
