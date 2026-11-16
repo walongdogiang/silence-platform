@@ -1,0 +1,40 @@
+name: main-guard
+
+# Lớp 4 bảo vệ main (docs/adr/0003-pr-watch.md). Repo private gói Free không có branch protection,
+# nên GitHub không chặn được push thẳng main hay merge khi CI đỏ. Workflow này chạy sau mỗi lần
+# push vào main: commit nào không đi qua PR đã merge với CI xanh thì mở issue nhãn `main-guard`
+# và job đỏ. Chỉ phát hiện, không revert. Logic ở scripts/main-guard.mjs (chạy tay được, DRY_RUN=1).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: read
+  issues: write
+
+jobs:
+  guard:
+    name: main-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/main-guard.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Commit mới trên main có đi qua PR xanh không
+        run: node scripts/main-guard.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: main
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          FORCED: ${{ github.event.forced }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

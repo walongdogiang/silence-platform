@@ -52,4 +52,5 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
   - `ci.yml`: `cargo test --workspace`, `tsc` và `vitest` của Studio.
   - `docs-check.yml`: rule `.cursor` ↔ `.claude` khớp nhau, frontmatter docs hợp lệ.
   - `evals.yml` không chạy trên PR: chạy hằng đêm và lượt Tuần (cuối tuần) theo lịch.
+  - `main-guard.yml` chạy sau mỗi lần push `main`: commit không đi qua PR đã merge với CI xanh (hoặc force-push) thì mở issue nhãn `main-guard` và job đỏ. Repo không có branch protection, nên đây là lưới phát hiện, không chặn.
 - Test RED chờ plan sau phải có `#[ignore = "RED until Plan …"]` kèm lý do; bỏ `#[ignore]` khi làm plan đó. Không để CI đỏ kéo dài.
