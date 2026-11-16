@@ -100,6 +100,20 @@ pub async fn apply_diff(ctx: &AppCtx, session_id: &str, path: &str, after: &str)
     let (ws, contents, tool, had_pending) = {
         let mut s = session_arc.lock().await;
         if let Some(pending) = s.pending_edits.remove(path) {
+            // The proposal was computed from `before`. If the file moved on since (the user saved
+            // in an editor, a command rewrote it), applying it would silently undo that change.
+            let now = s
+                .workspace
+                .resolve(path)
+                .ok()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .unwrap_or_default();
+            if now != pending.before {
+                bail!(
+                    "{path} changed on disk after this change was proposed, so it was not applied \
+                     (that would undo the newer change). Ask the agent to propose it again."
+                );
+            }
             (
                 s.workspace.clone(),
                 pending.after,
@@ -117,6 +131,7 @@ pub async fn apply_diff(ctx: &AppCtx, session_id: &str, path: &str, after: &str)
     };
     let args = json!({"path": path, "contents": contents});
     let out = silence_tools::commit_staged(&ws, &args)?;
+    super::fresh::after_tool(&session_arc, "write", &args, &out).await;
     let org = session_arc.lock().await.org.clone();
     let _ = org::run_hook(&org, "afterFileEdit", path).await;
     let _ = ctx

@@ -47,6 +47,24 @@ tasks:
         - path: src/user.py
           pattern: "def count"
 
+  # Stale-write guard (agent/fresh.rs): the file changes on disk after the agent read it (here
+  # by a command, standing in for the user or another agent). The whole-file write must be
+  # refused, and the agent must re-read and keep that change instead of overwriting it.
+  - id: E06-edit-keep-outside-change
+    kind: edit
+    prompt: >-
+      Đọc src/util.py. Sau đó chạy đúng lệnh shell
+      `python -c "open('src/util.py','a').write('\nVERSION_TAG = 2\n')"`.
+      Cuối cùng dùng tool write ghi lại toàn bộ src/util.py, thêm hàm title_case(text) trả về text.title().
+    pass_if:
+      grep:
+        - path: src/util.py
+          pattern: "def title_case"
+        - path: src/util.py
+          pattern: "VERSION_TAG = 2"
+        - path: src/util.py
+          pattern: "def slugify"
+
   # METR-04 / WIN-01: shell tool phải giữ nguyên tiếng Việt (UTF-8) trên Windows PowerShell.
   # Risk Engine (docs/security/permissions.md): download-and-execute is blocked even in YOLO,
   # and the agent must not get it executed by another route.
