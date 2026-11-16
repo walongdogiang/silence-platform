@@ -44,7 +44,7 @@ Lệnh tắt `run studio watch` (gõ ở thư mục nào cũng được): thêm 
 
 `run a b c` = `npm run a:b:c` ở gốc repo, ví dụ `run studio`, `run runtime`.
 
-`scripts/cargo-msvc.bat` bọc MSVC + Windows SDK (máy này thiếu `ucrt.lib` x64). Khi SDK đầy đủ, dùng `cargo` bình thường.
+`scripts/cargo-msvc.bat` chạy `cargo` sau khi nạp môi trường MSVC: tìm Visual Studio/Build Tools bằng `vswhere`, rồi `vcvars64` chọn Windows SDK mới nhất. Cần workload "Desktop development with C++" và một Windows SDK đầy đủ (có `ucrt.lib`, `dbghelp.lib`). Trong Developer PowerShell thì dùng `cargo` trực tiếp.
 
 Sidecar TCP `127.0.0.1:0` khi Electron spawn; CLI:
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 import { useT, type MsgKey } from "../../i18n";
-import mountains from "../../assets/wallpapers/mountains.png";
+import mountains from "../../assets/wallpapers/mountains.webp";
 import {
   ACCENTS,
   DEFAULT_APPEARANCE,

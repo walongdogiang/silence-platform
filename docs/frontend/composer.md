@@ -120,7 +120,7 @@ Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat
 - Model chọn tay không có `vision` (catalog) → hint "`<model>` không đọc được ảnh." + nút **Dùng Auto**, Enter/nút gửi bị chặn. Engine cũng từ chối. Auto: Engine chọn model có vision cho lượt có ảnh.
 - Engine lưu tin user có ảnh dạng content parts OpenAI (`text` + `image_url`). Model không vision ở lượt sau → gateway thay ảnh bằng ghi chú chữ. Context gauge tính mỗi ảnh ~1.6K token, không tính base64.
 - Bong bóng tin user hiện ảnh (tối đa 220×160), bấm để phóng to.
-- **Lịch sử:** `silence.chat.history` (localStorage) không lưu base64, chỉ `imageIds` + `imageCount`. Ảnh nằm trong IndexedDB `silence-images` (`imageStore.ts`, key = SHA-256 của data URL). Mở lại thread → điền ảnh từ IndexedDB; không còn → "N ảnh (không lưu trong lịch sử)". Mở app → xoá ảnh không thread nào trỏ tới.
+- **Lịch sử:** `silence.chat.history` (localStorage) không lưu base64, chỉ `imageIds` + `imageCount`. Ảnh nằm trong IndexedDB `silence-images` (`imageStore.ts`, key = SHA-256 của data URL). Mở lại thread → điền ảnh từ IndexedDB; không còn → "N ảnh (không lưu trong lịch sử)". Mở app → xoá ảnh không thread nào trỏ tới. Lịch sử ghi trễ (~800 ms sau lần đổi cuối, `flushHistory` trong `App.tsx`) vì `threads` đổi theo từng token khi stream; ẩn hoặc đóng cửa sổ thì ghi ngay.
 
 ## Lightbox (`ImageLightbox.tsx`)
 

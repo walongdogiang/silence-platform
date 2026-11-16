@@ -2,8 +2,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { History } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import mountains from "./assets/wallpapers/mountains.png";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import mountains from "./assets/wallpapers/mountains.webp";
 import { BottomPanel, type PanelTab } from "./components/BottomPanel";
 import {
   ChatHistoryPanel,
@@ -42,12 +42,10 @@ import {
 } from "./autoConfig";
 import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImages";
 import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
-import { DiffPane } from "./components/DiffPane";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
 import { autonomousFallbackNote, blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
-import { EvalsPage } from "./components/EvalsPage";
 import { liveProgress, useEvalLive } from "./evalLive";
 import {
   loadDefaultSource,
@@ -88,6 +86,22 @@ import { loadModelPrefs, lockedModels, saveModelPrefs, visibleModels } from "./t
 import type { CliInfo, ContextUsage, ModelInfo, SandboxStatus, SessionEvent } from "./types";
 import { loadPrefs, savePrefs, type Prefs } from "./prefs";
 import { pinnedSessionIds, pruneThreads } from "./retention";
+
+/** Write the pending chat history (if any) to localStorage and clear it. */
+function flushHistory(pending: { current: ChatThread[] | null }) {
+  const xs = pending.current;
+  if (!xs) return;
+  pending.current = null;
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(threadsForStorage(xs)));
+  } catch {
+    // Out of localStorage quota: keep the previously saved copy rather than crash the app.
+  }
+}
+
+// Monaco (~10 MB, 100+ modules in dev) loads only when the diff/editor pane or the Evals page opens.
+const DiffPane = lazy(() => import("./components/DiffPane").then((m) => ({ default: m.DiffPane })));
+const EvalsPage = lazy(() => import("./components/EvalsPage").then((m) => ({ default: m.EvalsPage })));
 
 /** xterm colours from the theme tokens, so the light theme gets a light terminal. */
 function terminalTheme() {
@@ -537,12 +551,28 @@ export function App() {
     if (workspace) localStorage.setItem("silence.shell.workspace", workspace);
   }, [workspace]);
 
+  // Persist history debounced: `threads` changes on every streamed token, and serializing every
+  // chat synchronously each time blocked the UI thread. Flush on hide/close so nothing is lost.
+  const threadsToSaveRef = useRef<ChatThread[] | null>(null);
   useEffect(() => {
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(threadsForStorage(threads)));
-    } catch {
-      // Hết quota localStorage: giữ bản đã lưu trước đó thay vì làm sập app.
-    }
+    const flush = () => flushHistory(threadsToSaveRef);
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      flush();
+    };
+  }, []);
+  useEffect(() => {
+    threadsToSaveRef.current = threads;
+    const id = window.setTimeout(() => flushHistory(threadsToSaveRef), 800);
+    return () => window.clearTimeout(id);
   }, [threads]);
 
   // Dọn ảnh IndexedDB của thread đã xoá — một lần lúc mở app.
@@ -2028,6 +2058,7 @@ export function App() {
         {activeThreadId ? composerEl : null}
       </div>
       {showReview ? (
+        <Suspense fallback={null}>
         <DiffPane
           tree={tree}
           file={file}
@@ -2046,6 +2077,7 @@ export function App() {
           showChangesSignal={showChangesSignal}
           code={{ font: prefs.codeFont, size: prefs.codeFontSize, minimap: prefs.minimap }}
         />
+        </Suspense>
       ) : null}
     </div>
   );
@@ -2129,13 +2161,15 @@ export function App() {
           ) : null}
           <div className="work-body">
             {chatHidden ? null : showEvals ? (
-              <EvalsPage
-                models={models}
-                live={evals.live}
-                ended={evals.ended}
-                onStopping={evals.markStopping}
-                onClose={() => setShowEvals(false)}
-              />
+              <Suspense fallback={null}>
+                <EvalsPage
+                  models={models}
+                  live={evals.live}
+                  ended={evals.ended}
+                  onStopping={evals.markStopping}
+                  onClose={() => setShowEvals(false)}
+                />
+              </Suspense>
             ) : (
               chatMain
             )}

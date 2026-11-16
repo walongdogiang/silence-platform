@@ -41,3 +41,9 @@ silence-sandbox = { path = "crates/sandbox" }
 silence-tools = { path = "crates/tools" }
 silence-mcp = { path = "crates/mcp" }
 silence-router = { path = "crates/router" }
+
+# Dev builds: optimize dependencies only (regex, ignore/walkdir, serde, tokio, TLS...). Grep/search,
+# JSON and streaming run several times faster in `studio:watch`; our own crates stay unoptimized so
+# incremental rebuilds after editing crates/ are as fast as before. Costs one longer first build.
+[profile.dev.package."*"]
+opt-level = 2

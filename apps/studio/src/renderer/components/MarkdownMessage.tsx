@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { looksLikeDiff, parseUnifiedDiff } from "../unifiedDiff";
@@ -13,6 +13,7 @@ import { useT } from "../i18n";
 export { parsePathRef };
 
 const isHttp = (href: string) => /^https?:\/\//i.test(href);
+const REMARK_PLUGINS = [remarkGfm];
 
 function textOf(node: ReactNode): string {
   if (typeof node === "string") return node;
@@ -41,8 +42,28 @@ export function MarkdownMessage(props: {
   /** Nút "Chỉnh sửa" khi hover ảnh (hình SVG, ảnh workspace): mở trình đánh dấu. */
   onEditImage?: (target: EditTarget) => void;
 }) {
-  const { onOpenFile, workspace, onOpenImage, streaming, onEditImage } = props;
+  const { workspace, streaming } = props;
   const t = useT();
+  // Parent callbacks are new functions on every render (every streamed token). Keep the latest in a
+  // ref and hand stable wrappers to the Markdown tree, so finished messages are not re-parsed
+  // (remark + GFM) on each token — only presence of a callback changes what renders.
+  const latest = useRef(props);
+  latest.current = props;
+  const hasOpenFile = Boolean(props.onOpenFile);
+  const hasOpenImage = Boolean(props.onOpenImage);
+  const hasEditImage = Boolean(props.onEditImage);
+  const onOpenFile = useMemo(
+    () => (hasOpenFile ? (path: string) => latest.current.onOpenFile?.(path) : undefined),
+    [hasOpenFile],
+  );
+  const onOpenImage = useMemo(
+    () => (hasOpenImage ? (images: string[], index: number) => latest.current.onOpenImage?.(images, index) : undefined),
+    [hasOpenImage],
+  );
+  const onEditImage = useMemo(
+    () => (hasEditImage ? (target: EditTarget) => latest.current.onEditImage?.(target) : undefined),
+    [hasEditImage],
+  );
   const components = useMemo<Components>(
     () => ({
       a({ href, children }) {
@@ -128,11 +149,15 @@ export function MarkdownMessage(props: {
     [onOpenFile, workspace, onOpenImage, streaming, onEditImage, t("md.imgBlocked")],
   );
 
-  return (
-    <div className="msg-ai msg-md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+  // Same element object → React skips the subtree; only the message whose text changed re-parses.
+  const md = useMemo(
+    () => (
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
         {props.text}
       </ReactMarkdown>
-    </div>
+    ),
+    [props.text, components],
   );
+
+  return <div className="msg-ai msg-md">{md}</div>;
 }

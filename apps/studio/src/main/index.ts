@@ -129,7 +129,7 @@ function createWindow() {
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("did-fail-load", code, desc, url);
     void win?.webContents.executeJavaScript(
-      `document.body.innerHTML = '<pre style="color:#eee;padding:24px;font:14px sans-serif">Không tải được UI\\n${desc}\\n${url}</pre>'`,
+      `document.body.innerHTML = '<pre style="color:#eee;padding:24px;font:14px sans-serif">Failed to load UI\\n${desc}\\n${url}</pre>'`,
     );
   });
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
@@ -146,8 +146,8 @@ let engineError = "";
 function sendLine(obj: unknown) {
   if (!sock) {
     const why = engineError ? `: ${engineError}` : "";
-    const hint = engineWatch ? "sửa lỗi rồi lưu file để studio:watch build lại" : "đóng app, chạy lại npm run studio";
-    throw new Error(`Engine chưa kết nối${why} — ${hint}`);
+    const hint = engineWatch ? "fix the error and save so studio:watch rebuilds" : "close the app and run npm run studio again";
+    throw new Error(`Engine not connected${why} - ${hint}`);
   }
   sock.write(`${JSON.stringify(obj)}\n`);
 }
@@ -259,7 +259,7 @@ async function startRuntime(): Promise<void> {
 async function spawnRuntime(): Promise<void> {
   const bin = runtimeBin();
   if (!existsSync(bin)) {
-    throw new Error(`Không thấy ${bin}. Chạy: .\\scripts\\cargo-msvc.bat build -p silence-engine`);
+    throw new Error(`${bin} not found. Run: .\\scripts\\cargo-msvc.bat build -p silence-engine`);
   }
   // Mỗi lần spawn một token mới. Chỉ main giữ nó (không đưa cho renderer); Engine xoá biến này
   // khỏi env của chính nó ngay khi đọc, nên lệnh shell/MCP không thừa hưởng được.
@@ -282,8 +282,8 @@ async function spawnRuntime(): Promise<void> {
       clearTimeout(timer);
       reject(err);
     };
-    const timer = setTimeout(() => fail(new Error(`Engine không báo cổng sau 20s: ${ready.trim()}`)), 20_000);
-    proc.on("error", (err) => fail(new Error(`không chạy được ${proc.spawnfile}: ${err.message}`)));
+    const timer = setTimeout(() => fail(new Error(`Engine did not report a port within 20s: ${ready.trim()}`)), 20_000);
+    proc.on("error", (err) => fail(new Error(`failed to start ${proc.spawnfile}: ${err.message}`)));
     proc.stderr!.on("data", (d: Buffer) => {
       const s = d.toString("utf8");
       process.stderr.write(s);
@@ -306,7 +306,7 @@ async function spawnRuntime(): Promise<void> {
     });
     proc.on("exit", (code) => {
       if (!connected) {
-        fail(new Error(`Engine thoát (code ${code}) trước khi kết nối: ${ready.trim().slice(-800)}`));
+        fail(new Error(`Engine exited (code ${code}) before connecting: ${ready.trim().slice(-800)}`));
         return;
       }
       // Engine chết sau khi đã chạy (không phải do stopRuntime): báo lên UI thay vì im lặng.
@@ -314,9 +314,9 @@ async function spawnRuntime(): Promise<void> {
       child = null;
       sock?.destroy();
       sock = null;
-      for (const p of pending.values()) p.reject(new Error(`Engine đã thoát (code ${code})`));
+      for (const p of pending.values()) p.reject(new Error(`Engine exited (code ${code})`));
       pending.clear();
-      engineError = `Engine đã thoát (code ${code})`;
+      engineError = `Engine exited (code ${code})`;
       console.error(`[engine] exited with code ${code}`);
       reportEngineError(engineError);
     });
@@ -325,7 +325,7 @@ async function spawnRuntime(): Promise<void> {
 }
 
 function stopRuntime(): Promise<void> {
-  for (const p of pending.values()) p.reject(new Error("Engine đang khởi động lại"));
+  for (const p of pending.values()) p.reject(new Error("Engine is restarting"));
   pending.clear();
   sock?.destroy();
   sock = null;
@@ -398,10 +398,17 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("win-close", () => win?.close());
   credentials = openCredentials();
-  ipcMain.handle("silence-rpc", (_e, method: string, params?: unknown) => {
+  // RPC errors travel as `{ error }` values, not rejections: Electron prints a stack trace for every
+  // rejected handler, and expected errors (e.g. `unknown session` for a chat restored from the last
+  // run) are handled by the renderer. The preload turns `{ error }` back into a thrown Error.
+  ipcMain.handle("silence-rpc", async (_e, method: string, params?: unknown) => {
     // Secret-carrying methods go through `silence-credentials-*` only.
-    if (MAIN_ONLY_RPC.has(method)) return Promise.reject(new Error(`${method} is main-process only`));
-    return rpc(method, params);
+    if (MAIN_ONLY_RPC.has(method)) return { error: `${method} is main-process only` };
+    try {
+      return { result: await rpc(method, params) };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
   });
   // Keys: renderer → main → Engine. Never returned to the renderer (only has_key + last4).
   ipcMain.handle("silence-credentials-status", () => credentials?.status() ?? []);

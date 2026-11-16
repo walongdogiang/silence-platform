@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("silence", {
-  rpc: (method: string, params?: unknown) => ipcRenderer.invoke("silence-rpc", method, params),
+  rpc: async (method: string, params?: unknown) => {
+    const r = (await ipcRenderer.invoke("silence-rpc", method, params)) as { result?: unknown; error?: string };
+    if (r.error !== undefined) throw new Error(r.error);
+    return r.result;
+  },
   pickFolder: () => ipcRenderer.invoke("silence-pick-folder") as Promise<string | null>,
   openExternal: (url: string) => ipcRenderer.invoke("silence-open-external", url) as Promise<boolean>,
   copyImage: (png: Uint8Array) => ipcRenderer.invoke("silence-copy-image", png) as Promise<boolean>,
