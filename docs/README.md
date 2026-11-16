@@ -55,6 +55,8 @@ Họ crate phụ vẫn `silence-*` (protocol, tools, …). Không đổi sang t�
 | [PRD.md](PRD.md) | Yêu cầu năm 1, persona, 6 job lõi, backlog | Lập kế hoạch, đổi phạm vi sản phẩm |
 | [adr/0001-architecture.md](adr/0001-architecture.md) | Quyết định Electron + Rust sidecar, JSON-RPC, Monaco | Đổi kiến trúc / IPC / editor |
 | [adr/0002-harness-architecture.md](adr/0002-harness-architecture.md) | Kiến trúc đích harness — event log, kernel, tool registry, store task, lộ trình | Đổi agent loop, session, tool, hook, lưu trữ |
+| [adr/0003-pr-watch.md](adr/0003-pr-watch.md) | Quyết định theo dõi PR / Auto-fix: chủ là PR, local + khay, hợp đồng sẵn cho cloud, 4 lớp bảo vệ main, lộ trình PR | Trước khi làm bất kỳ phần theo dõi PR, lease, bảo vệ main |
+| [pr-watch.md](pr-watch.md) | Spec Watch/Incident/Run/Lease, vòng đời, monitor `gh`, lượt sửa, commit status, RPC `watch.*`, UX Đang chạy | Khi code Engine/protocol/Studio cho theo dõi PR |
 | [threat-model.md](threat-model.md) | Tài sản, trust boundary, giảm thiểu đe dọa local agent | Đổi permission, sandbox, MCP, mạng |
 | [security/permissions.md](security/permissions.md) | 4 tầng rủi ro, chế độ Thận trọng/Cân bằng/Tự chủ, Risk Engine, taint, card hỏi, nạp hướng dẫn cho AI | Đổi permission, `ask_perm`, Risk Engine, chế độ quyền |
 | [security/backlog.md](security/backlog.md) | Việc bảo mật cố ý chưa làm: duyệt trước theo plan, nhóm deploy, allowlist domain, sandbox mạng, policy workspace — kèm điều kiện để làm | Trước khi làm tiếp bảo mật/quyền; tránh làm sớm |
