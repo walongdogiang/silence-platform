@@ -1,12 +1,12 @@
-﻿# Lệnh tắt PowerShell cho repo 5ilence. Nạp từ $PROFILE:
+﻿# PowerShell shortcuts for the 5ilence repo. Load from $PROFILE:
 #   . "D:\vuhieu\5ilence\scripts\silence.ps1"
-# Rồi gõ ở bất kỳ thư mục nào:
+# Then type from any directory:
 #   run s              -> npm run studio
-#   run sw             -> npm run studio:watch  (UI HMR + Engine tự build/restart)
+#   run sw             -> npm run studio:watch  (UI HMR + Engine auto build/restart)
 #   run rt             -> npm run runtime
-#   run studio watch   -> npm run studio:watch  (tên đầy đủ vẫn dùng được)
-# Các từ được nối bằng ":" thành tên npm script trong package.json gốc;
-# phần đầu khớp bảng $script:Aliases thì được đổi sang tên đầy đủ.
+#   run studio watch   -> npm run studio:watch  (full name still works)
+# Words are joined with ":" into an npm script name from the root package.json;
+# a first word matching $script:Aliases is expanded to its full name.
 
 $script:SilenceRoot = Split-Path -Parent $PSScriptRoot
 
@@ -18,8 +18,8 @@ $script:Aliases = @{
 
 function run {
     if ($args.Count -eq 0) {
-        Write-Host "Cách dùng: run <script> [phần...]   vd. run sw, run studio watch" -ForegroundColor Yellow
-        Write-Host ("Tên tắt: " + (($script:Aliases.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ", ")) -ForegroundColor Yellow
+        Write-Host "Usage: run <script> [parts...]   e.g. run sw, run studio watch" -ForegroundColor Yellow
+        Write-Host ("Aliases: " + (($script:Aliases.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ", ")) -ForegroundColor Yellow
         Push-Location $script:SilenceRoot
         try { npm run } finally { Pop-Location }
         return

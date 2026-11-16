@@ -1,6 +1,6 @@
 import { Hexagon } from "lucide-react";
 import { useState } from "react";
-import mountains from "../assets/wallpapers/mountains.png";
+import mountains from "../assets/wallpapers/mountains.webp";
 import type { ModelInfo } from "../types";
 
 export function ContextPanel(props: {

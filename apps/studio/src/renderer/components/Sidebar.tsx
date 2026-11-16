@@ -1,7 +1,7 @@
 import { ChevronRight, File, FolderClosed, FolderOpen, Search } from "lucide-react";
 import type { CSSProperties } from "react";
 import logo from "../assets/logo.png";
-import mountains from "../assets/wallpapers/mountains.png";
+import mountains from "../assets/wallpapers/mountains.webp";
 
 export function Sidebar(props: {
   search: string;

@@ -3,6 +3,11 @@ declare module "*.png" {
   export default src;
 }
 
+declare module "*.webp" {
+  const src: string;
+  export default src;
+}
+
 export {};
 
 /** Studio version from package.json (electron.vite.config `define`). */

@@ -1,5 +1,5 @@
 import { Star } from "lucide-react";
-import mountains from "../assets/wallpapers/mountains.png";
+import mountains from "../assets/wallpapers/mountains.webp";
 import type { CenterTab } from "../models";
 
 const TABS: { id: CenterTab; label: string }[] = [
