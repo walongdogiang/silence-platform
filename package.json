@@ -7,6 +7,7 @@
     "packages/protocol"
   ],
   "scripts": {
+    "prepare": "node scripts/install-hooks.mjs",
     "start": "npm run studio",
     "start:watch": "npm run studio:watch",
     "desktop": "npm run studio",

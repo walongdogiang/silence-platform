@@ -556,7 +556,7 @@ mod tests {
             assert!(cards.is_empty(), "{cmd} must not ask");
         }
         // Real identity / publish: asked, and runs outside the sandbox when approved.
-        for cmd in ["git push origin main", "git commit -m x", "npm publish"] {
+        for cmd in ["git push origin feat/x", "git commit -m x", "npm publish"] {
             let (g, cards) = gate_cmd(&ctx, &sid, &s, cmd, Some((true, PermissionScope::Once))).await;
             assert_eq!(cards.len(), 1, "{cmd} must ask");
             assert!(matches!(g, Gate::Run(_)), "{cmd} approved runs unsandboxed");

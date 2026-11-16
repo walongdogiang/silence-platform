@@ -71,6 +71,11 @@ codes:
     title: Git cục bộ
     detail: Thao tác git cục bộ, đảo ngược được (add, stash, tạo nhánh…).
     hint: Local, reversible git command.
+  GH_READ:
+    tier: logged
+    title: Đọc GitHub qua gh
+    detail: Xem PR, check, run, issue hoặc repo trên GitHub; không thay đổi gì.
+    hint: Read-only GitHub CLI call.
 
   # --- tier 2: ask with explanation ------------------------------------
   UNKNOWN_COMMAND:
@@ -128,6 +133,16 @@ codes:
     title: Git xoá thay đổi
     detail: reset --hard, clean, checkout/restore toàn bộ hoặc push --force có thể làm mất việc chưa lưu.
     hint: Destructive git command; may discard work.
+  GH_WRITE:
+    tier: ask
+    title: Thay đổi trên GitHub
+    detail: Lệnh gh tạo hoặc sửa PR, issue, comment, release, workflow… bằng tài khoản GitHub của bạn.
+    hint: GitHub write action; ask the user.
+  GH_MERGE:
+    tier: ask
+    title: Merge pull request
+    detail: Merge PR vào nhánh đích. Repo không có branch protection thì GitHub không tự chặn khi CI đỏ, nên cần kiểm gh pr checks trước.
+    hint: Merging needs the user's approval every time; run `gh pr checks` and confirm CI is green first.
   FS_OUTSIDE_WS:
     tier: ask
     title: Ngoài workspace
@@ -210,6 +225,16 @@ codes:
     title: Sửa quyền của 5ilence
     detail: Sửa .silence/permissions.json hoặc policy bằng tool/shell; chỉ Engine được ghi.
     hint: Permission and policy files can only be changed by the user in Settings.
+  GIT_PUSH_DEFAULT:
+    tier: block
+    title: Push thẳng vào nhánh chính
+    detail: Push vào main/master (hoặc --all) bỏ qua pull request và CI. Mọi thay đổi vào nhánh chính phải đi qua PR.
+    hint: Pushing to the default branch is not allowed. Push a feature branch and open a pull request.
+  GIT_NO_VERIFY:
+    tier: block
+    title: Bỏ qua git hook
+    detail: --no-verify, commit -n hoặc đổi core.hooksPath làm hook kiểm tra (như chặn push main) không chạy.
+    hint: Bypassing git hooks is not allowed. Fix what the hook reports instead.
 
 # PowerShell / cmd aliases → canonical program name (lowercase, no extension).
 aliases:
@@ -318,6 +343,37 @@ commands:
   - { match: [git, checkout], code: GIT_LOCAL }
   - { match: [git, mv], code: GIT_LOCAL }
   - { match: [git, rm], code: FS_DELETE }
+  # Also from code (risk/mod.rs): pushes to the default branch → GIT_PUSH_DEFAULT, hook bypass
+  # (--no-verify, commit -n, core.hooksPath) → GIT_NO_VERIFY, `git -C dir …` matched like `git …`.
+
+  # GitHub CLI. `gh api` is classified in code by method/fields/path (`gh_api_code`).
+  - { match: [gh, auth, token], code: SECRET_READ }
+  - { match: [gh, auth, status], code: GH_READ }
+  - { match: [gh, pr, merge], code: GH_MERGE }
+  - { match: [gh, pr, view], code: GH_READ }
+  - { match: [gh, pr, checks], code: GH_READ }
+  - { match: [gh, pr, list], code: GH_READ }
+  - { match: [gh, pr, diff], code: GH_READ }
+  - { match: [gh, pr, status], code: GH_READ }
+  - { match: [gh, pr], code: GH_WRITE }
+  - { match: [gh, run, view], code: GH_READ }
+  - { match: [gh, run, list], code: GH_READ }
+  - { match: [gh, run, watch], code: GH_READ }
+  - { match: [gh, run], code: GH_WRITE }
+  - { match: [gh, issue, view], code: GH_READ }
+  - { match: [gh, issue, list], code: GH_READ }
+  - { match: [gh, issue, status], code: GH_READ }
+  - { match: [gh, issue], code: GH_WRITE }
+  - { match: [gh, repo, view], code: GH_READ }
+  - { match: [gh, repo], code: GH_WRITE }
+  - { match: [gh, workflow, view], code: GH_READ }
+  - { match: [gh, workflow, list], code: GH_READ }
+  - { match: [gh, workflow], code: GH_WRITE }
+  - { match: [gh, release, view], code: GH_READ }
+  - { match: [gh, release, list], code: GH_READ }
+  - { match: [gh, release], code: GH_WRITE }
+  - { match: [gh, label], code: GH_WRITE }
+  - { match: [gh, secret], code: SECRET_READ }
 
   # packages
   - { match: [npx], code: PKG_EXEC }
@@ -489,7 +545,7 @@ upload_flags: ["-d", "--data", "--data-binary", "-f", "--form", "-t", "--upload-
 # Secret path patterns (case-insensitive, matched on path basename or any segment).
 secret_patterns: [".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12", "id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", ".ssh", ".aws", ".npmrc", ".pypirc", ".git-credentials", ".netrc", "credentials", "credentials.json", "secrets.*"]
 # Codes that always re-ask: "remember" is ignored for a verdict containing any of them.
-never_remember: [PKG_PUBLISH, GIT_DESTRUCTIVE, FS_DELETE, FS_OUTSIDE_WS, SECRET_READ, ENV_READ, UNPARSED, DYNAMIC_EXEC, INLINE_CODE, TAINTED_CONTEXT, UNKNOWN_TOOL]
+never_remember: [PKG_PUBLISH, GH_MERGE, GIT_DESTRUCTIVE, FS_DELETE, FS_OUTSIDE_WS, SECRET_READ, ENV_READ, UNPARSED, DYNAMIC_EXEC, INLINE_CODE, TAINTED_CONTEXT, UNKNOWN_TOOL]
 # Codes whose approved run feeds arbitrary outside text to the model (sets session taint).
 # Package/git logs are not included: their output is tool chatter, not fetched content.
 taint_codes: [NET_ACCESS, MCP_CALL, MCP_READ]
@@ -504,6 +560,6 @@ policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/po
 # when every host is allowlisted; FS_DELETE only when the turn has a git snapshot to undo from.
 sandbox_covers: [UNKNOWN_COMMAND, RUN_SCRIPT, BUILD_TEST, INLINE_CODE, DYNAMIC_EXEC, UNPARSED, PKG_EXEC, PKG_INSTALL, FS_DELETE, PROC_KILL, NET_ACCESS, TAINTED_CONTEXT]
 # Always ask, even in the sandbox: they act with the real user's identity or leave the machine.
-always_ask: [GIT_NETWORK, GIT_COMMIT, GIT_DESTRUCTIVE, PKG_PUBLISH, MCP_CALL, ENV_READ]
+always_ask: [GIT_NETWORK, GIT_COMMIT, GIT_DESTRUCTIVE, GH_WRITE, GH_MERGE, PKG_PUBLISH, MCP_CALL, ENV_READ]
 # Blocked calls that the escalation card may never offer to run: the card only has "Dừng".
-never_escalate: [POLICY_TAMPER, SECRET_EXFIL, NET_DOWNLOAD_EXEC, ENCODED_COMMAND, FS_DELETE_SYSTEM]
+never_escalate: [POLICY_TAMPER, GIT_PUSH_DEFAULT, GIT_NO_VERIFY, SECRET_EXFIL, NET_DOWNLOAD_EXEC, ENCODED_COMMAND, FS_DELETE_SYSTEM]

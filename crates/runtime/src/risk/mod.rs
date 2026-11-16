@@ -522,6 +522,238 @@ fn url_hosts(tokens: &[String]) -> Vec<String> {
     out
 }
 
+/// `git` global options before the subcommand: returns `[git, sub, args…]` and the directory
+/// the command runs in (`-C dir`, relative to the previous one). `-c core.hooksPath=…` and
+/// `--config-env=core.hooksPath=…` disable the repo's hooks → `GIT_NO_VERIFY`.
+fn git_globals(toks: &[String], ws: &Path, v: &mut Verdict) -> (Vec<String>, PathBuf) {
+    let mut dir = ws.to_path_buf();
+    let mut i = 1;
+    while let Some(t) = toks.get(i) {
+        if !t.starts_with('-') {
+            break;
+        }
+        let l = t.to_ascii_lowercase();
+        match t.as_str() {
+            "-C" => {
+                if let Some(d) = toks.get(i + 1) {
+                    let p = Path::new(d.as_str());
+                    dir = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
+                }
+                i += 2;
+            }
+            "-c" | "--config-env" => {
+                if toks.get(i + 1).is_some_and(|kv| is_hooks_key(kv)) {
+                    v.add("GIT_NO_VERIFY");
+                }
+                i += 2;
+            }
+            "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" => i += 2,
+            _ => {
+                if l.starts_with("--config-env=") && is_hooks_key(&l) {
+                    v.add("GIT_NO_VERIFY");
+                }
+                i += 1;
+            }
+        }
+    }
+    let mut out = vec![toks[0].clone()];
+    out.extend(toks.iter().skip(i).cloned());
+    (out, dir)
+}
+
+fn is_hooks_key(s: &str) -> bool {
+    s.to_ascii_lowercase().contains("core.hookspath")
+}
+
+/// Git rules that need more than word matching: pushes that land on the default branch
+/// (`GIT_PUSH_DEFAULT`, including a bare `git push` while on it) and hook bypass
+/// (`GIT_NO_VERIFY`). `g` is `[git, sub, args…]` from `git_globals`.
+fn git_guard(g: &[String], dir: &Path, v: &mut Verdict) {
+    let Some(sub) = g.get(1).map(|s| s.to_ascii_lowercase()) else { return };
+    let args = &g[2..];
+    if args.iter().any(|a| a.eq_ignore_ascii_case("--no-verify")) {
+        v.add("GIT_NO_VERIFY");
+    }
+    match sub.as_str() {
+        // `commit -n` = `--no-verify`, also inside short clusters (`-nm "msg"`).
+        "commit" => {
+            let takes_value = ["-m", "-F", "-C", "-c", "-t"];
+            let short_n = args.iter().enumerate().any(|(i, a)| {
+                let prev_is_flag_value = i > 0 && takes_value.contains(&args[i - 1].as_str());
+                !prev_is_flag_value
+                    && a.len() >= 2
+                    && a.starts_with('-')
+                    && !a.starts_with("--")
+                    && a[1..].chars().all(|c| c.is_ascii_alphabetic())
+                    && a[1..].contains('n')
+            });
+            if short_n {
+                v.add("GIT_NO_VERIFY");
+            }
+        }
+        "config" => {
+            let reads = args.iter().any(|a| {
+                matches!(a.to_ascii_lowercase().as_str(), "--get" | "--get-all" | "--get-regexp" | "--list" | "-l")
+            });
+            if !reads && args.iter().any(|a| is_hooks_key(a)) {
+                v.add("GIT_NO_VERIFY");
+            }
+        }
+        "push" => {
+            if pushes_default_branch(args, dir) {
+                v.add("GIT_PUSH_DEFAULT");
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Does `git push <args>` (run in `dir`) update the default branch? A refspec's destination
+/// (`src:dst`, or `src` alone) is compared with main/master and `origin/HEAD`; with no refspec
+/// the current branch is pushed. Unknown repo or detached HEAD: only explicit refspecs count.
+fn pushes_default_branch(args: &[String], dir: &Path) -> bool {
+    let mut positional: Vec<&str> = Vec::new();
+    let (mut all, mut tags_only, mut has_repo) = (false, false, false);
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        let l = a.to_ascii_lowercase();
+        match l.as_str() {
+            "--all" | "--branches" | "--mirror" => all = true,
+            "--tags" => tags_only = true,
+            "--repo" => {
+                has_repo = true;
+                i += 1;
+            }
+            "-o" | "--push-option" | "--receive-pack" | "--exec" => i += 1,
+            _ if l.starts_with("--repo=") => has_repo = true,
+            _ if a.starts_with('-') => {}
+            _ => positional.push(a.as_str()),
+        }
+        i += 1;
+    }
+    if all {
+        return true;
+    }
+    let gitdir = git_dir_of(dir);
+    let current = gitdir.as_deref().and_then(head_branch);
+    let refspecs: &[&str] = if has_repo { &positional } else { positional.get(1..).unwrap_or(&[]) };
+    let mut targets: Vec<String> = Vec::new();
+    if refspecs.is_empty() {
+        if !tags_only {
+            targets.extend(current.clone());
+        }
+    }
+    for spec in refspecs {
+        let spec = spec.trim_start_matches('+');
+        let dst = spec.split_once(':').map_or(spec, |(_, d)| d);
+        let dst = dst.strip_prefix("refs/heads/").unwrap_or(dst);
+        if dst == "HEAD" || dst == "@" {
+            targets.extend(current.clone());
+        } else if !dst.is_empty() {
+            targets.push(dst.to_string());
+        }
+    }
+    let protected = default_branches(gitdir.as_deref());
+    targets.iter().any(|t| protected.iter().any(|p| p.eq_ignore_ascii_case(t)))
+}
+
+/// `.git` directory for `start` or its nearest ancestor (follows the `gitdir:` file of a worktree).
+fn git_dir_of(start: &Path) -> Option<PathBuf> {
+    let mut cur = Some(start);
+    while let Some(d) = cur {
+        let g = d.join(".git");
+        if g.is_dir() {
+            return Some(g);
+        }
+        if g.is_file() {
+            let text = std::fs::read_to_string(&g).ok()?;
+            let p = PathBuf::from(text.trim().strip_prefix("gitdir:")?.trim());
+            return Some(if p.is_absolute() { p } else { d.join(p) });
+        }
+        cur = d.parent();
+    }
+    None
+}
+
+fn head_branch(gitdir: &Path) -> Option<String> {
+    let head = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
+    head.trim().strip_prefix("ref: refs/heads/").map(str::to_string)
+}
+
+/// main, master and whatever `origin/HEAD` points to (read from the common dir of a worktree).
+fn default_branches(gitdir: Option<&Path>) -> Vec<String> {
+    let mut out = vec!["main".to_string(), "master".to_string()];
+    let Some(gitdir) = gitdir else { return out };
+    let common = std::fs::read_to_string(gitdir.join("commondir"))
+        .map(|c| gitdir.join(c.trim()))
+        .unwrap_or_else(|_| gitdir.to_path_buf());
+    if let Ok(text) = std::fs::read_to_string(common.join("refs/remotes/origin/HEAD")) {
+        if let Some(b) = text.trim().strip_prefix("ref: refs/remotes/origin/") {
+            out.push(b.to_string());
+        }
+    }
+    out
+}
+
+/// `gh api`: GET without fields reads; a method, `-f/-F/--field/--raw-field/--input` (gh then
+/// POSTs) or a GraphQL mutation writes; writing to a `…/merge` endpoint or `mergePullRequest`
+/// merges.
+fn gh_api_code(t: &[String]) -> &'static str {
+    let mut method: Option<String> = None;
+    let mut fields: Vec<&str> = Vec::new();
+    let mut path: Option<&str> = None;
+    let mut i = 2;
+    while let Some(a) = t.get(i) {
+        let l = a.to_ascii_lowercase();
+        let next = t.get(i + 1).map(String::as_str);
+        match l.as_str() {
+            "-x" | "--method" => {
+                method = next.map(str::to_ascii_uppercase);
+                i += 1;
+            }
+            "-f" | "--field" | "--raw-field" | "--input" => {
+                fields.push(next.unwrap_or(""));
+                i += 1;
+            }
+            "-h" | "--header" | "-q" | "--jq" | "-t" | "--template" | "--hostname" | "--cache" | "-p" | "--preview" => i += 1,
+            _ if l.starts_with("--method=") => method = Some(l["--method=".len()..].to_ascii_uppercase()),
+            _ if l.starts_with("-x") && l.len() > 2 && !l.starts_with("--") => method = Some(l[2..].to_ascii_uppercase()),
+            _ if l.starts_with("--field=") || l.starts_with("--raw-field=") || l.starts_with("--input=") => {
+                fields.push(a.split_once('=').map_or("", |(_, v)| v));
+            }
+            _ if a.starts_with('-') => {}
+            _ => {
+                if path.is_none() {
+                    path = Some(a.as_str());
+                }
+            }
+        }
+        i += 1;
+    }
+    let path = path.unwrap_or("").to_ascii_lowercase();
+    let body = fields.join(" ").to_ascii_lowercase();
+    if path == "graphql" {
+        return if body.contains("mergepullrequest") {
+            "GH_MERGE"
+        } else if body.contains("mutation") || body.contains("query=@") {
+            "GH_WRITE"
+        } else {
+            "GH_READ"
+        };
+    }
+    let writes = match &method {
+        Some(m) => m != "GET" && m != "HEAD",
+        None => !fields.is_empty(),
+    };
+    if !writes {
+        "GH_READ"
+    } else if path.trim_end_matches('/').ends_with("/merge") {
+        "GH_MERGE"
+    } else {
+        "GH_WRITE"
+    }
+}
+
 /// Classify a shell command line into `v`.
 pub fn classify_command(cmd: &str, ws: &Path, v: &mut Verdict) {
     let p = policy();
@@ -610,8 +842,18 @@ pub fn classify_command(cmd: &str, ws: &Path, v: &mut Verdict) {
             continue;
         }
 
-        let rule = p.commands.iter().find(|r| rule_matches(r, &prog, &toks));
+        // git: look through global options so `git -C dir push` is matched like `git push`.
+        let (rule_toks, git_cwd) = if prog == "git" {
+            let (g, d) = git_globals(&toks, ws, v);
+            (g, Some(d))
+        } else {
+            (toks.clone(), None)
+        };
+        let rule = p.commands.iter().find(|r| rule_matches(r, &prog, &rule_toks));
         let code = match rule {
+            _ if prog == "gh" && rule_toks.get(1).is_some_and(|t| t.eq_ignore_ascii_case("api")) => {
+                gh_api_code(&rule_toks).to_string()
+            }
             Some(r) => r.code.clone(),
             None if p.interpreters.contains(&prog) => {
                 if has_flag(&toks, &p.inline_flags) || toks.len() == 1 {
@@ -633,6 +875,9 @@ pub fn classify_command(cmd: &str, ws: &Path, v: &mut Verdict) {
             downloaded = true;
         }
         v.add(&code);
+        if let Some(dir) = &git_cwd {
+            git_guard(&rule_toks, dir, v);
+        }
         if code == "NET_ACCESS" {
             let hosts = url_hosts(&toks);
             if hosts.is_empty() {

@@ -1,0 +1,2 @@
+# Hook chạy bằng sh của Git for Windows: giữ LF.
+.githooks/* text eol=lf
