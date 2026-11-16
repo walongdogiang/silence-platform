@@ -1,0 +1,21 @@
+#!/bin/sh
+# Lớp 2 bảo vệ main (docs/adr/0003-pr-watch.md): từ chối push thẳng vào nhánh mặc định.
+# Mọi thay đổi vào main đi qua pull request + CI. Bật bằng `npm install` (scripts/install-hooks.mjs).
+# Git gửi vào stdin mỗi dòng: <local ref> <local sha> <remote ref> <remote sha>; $1 = tên remote.
+
+protected="refs/heads/main refs/heads/master"
+head=$(git symbolic-ref -q "refs/remotes/$1/HEAD" 2>/dev/null)
+if [ -n "$head" ]; then
+  protected="$protected refs/heads/${head#refs/remotes/$1/}"
+fi
+
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  for p in $protected; do
+    if [ "$remote_ref" = "$p" ]; then
+      echo "pre-push: không push thẳng vào ${p#refs/heads/}. Đẩy lên nhánh riêng rồi mở pull request." >&2
+      status=1
+    fi
+  done
+done
+exit $status

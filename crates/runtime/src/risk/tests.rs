@@ -223,3 +223,57 @@ fn network_policy_file_is_engine_only() {
     );
     assert_eq!(v.primary(), "POLICY_TAMPER");
 }
+
+/// A bare `git push` pushes the current branch, so the verdict depends on `.git/HEAD`.
+#[test]
+fn bare_push_follows_the_checked_out_branch() {
+    let dir = ws();
+    let git = dir.path().join(".git");
+    std::fs::create_dir_all(git.join("refs/remotes/origin")).unwrap();
+    let head = |b: &str| std::fs::write(git.join("HEAD"), format!("ref: refs/heads/{b}\n")).unwrap();
+
+    head("main");
+    for cmd in ["git push", "git push origin", "git push -u origin HEAD", "git -C sub push"] {
+        let v = shell(cmd, dir.path());
+        assert_eq!(v.tier, Tier::Block, "{cmd}: {:?}", v.codes);
+        assert!(v.codes.contains(&"GIT_PUSH_DEFAULT".to_string()), "{cmd}");
+    }
+    head("feat/x");
+    assert_eq!(shell("git push", dir.path()).tier, Tier::Ask);
+    assert_eq!(shell("git push origin HEAD", dir.path()).tier, Tier::Ask);
+
+    // origin/HEAD names the default branch when it is not main/master.
+    std::fs::write(git.join("refs/remotes/origin/HEAD"), "ref: refs/remotes/origin/trunk\n").unwrap();
+    assert_eq!(shell("git push origin trunk", dir.path()).tier, Tier::Block);
+    head("trunk");
+    assert_eq!(shell("git push", dir.path()).tier, Tier::Block);
+}
+
+/// A linked worktree has a `.git` file pointing at its own gitdir, and `commondir` for refs.
+#[test]
+fn bare_push_reads_a_worktree_gitdir() {
+    let dir = ws();
+    let common = dir.path().join("repo.git");
+    let wt_git = common.join("worktrees/wt");
+    std::fs::create_dir_all(&wt_git).unwrap();
+    std::fs::create_dir_all(common.join("refs/remotes/origin")).unwrap();
+    std::fs::write(wt_git.join("HEAD"), "ref: refs/heads/dev\n").unwrap();
+    std::fs::write(wt_git.join("commondir"), "../..\n").unwrap();
+    std::fs::write(common.join("refs/remotes/origin/HEAD"), "ref: refs/remotes/origin/dev\n").unwrap();
+    let wt = dir.path().join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join(".git"), format!("gitdir: {}\n", wt_git.display())).unwrap();
+    let v = shell("git push", &wt);
+    assert_eq!(v.tier, Tier::Block, "{:?}", v.codes);
+}
+
+#[test]
+fn merge_and_hook_bypass_are_never_remembered_or_escalated() {
+    let dir = ws();
+    assert!(shell("gh pr merge 30 --squash", dir.path()).never_remember());
+    assert!(shell("gh api -X PUT repos/o/r/pulls/1/merge", dir.path()).never_remember());
+    let p = policy();
+    for c in ["GIT_PUSH_DEFAULT", "GIT_NO_VERIFY"] {
+        assert!(p.never_escalate.iter().any(|x| x == c), "{c} must not be escalatable");
+    }
+}

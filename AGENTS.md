@@ -46,7 +46,7 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 
 ## Quy trình Git
 
-- Không push thẳng `main`. Mỗi việc một nhánh ngắn từ `origin/main`: `feat/…`, `fix/…`, `chore/…`, `docs/…`.
+- Không push thẳng `main`. Mỗi việc một nhánh ngắn từ `origin/main`: `feat/…`, `fix/…`, `chore/…`, `docs/…`. Hook `.githooks/pre-push` từ chối push vào `main` (bật tự động khi `npm install`); agent trong 5ilence bị Risk Engine chặn (`GIT_PUSH_DEFAULT`, `GIT_NO_VERIFY`).
 - Commit theo Conventional Commits. Xong việc thì mở PR vào `main`, đợi CI xanh, **squash merge**, xoá nhánh.
 - CI chạy trên mọi PR, base là `main` hay nhánh khác (PR xếp chồng cũng có CI):
   - `ci.yml`: `cargo test --workspace`, `tsc` và `vitest` của Studio.

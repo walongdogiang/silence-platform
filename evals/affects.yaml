@@ -34,7 +34,7 @@ rules:
 
   # Risk engine / sandbox: task bảo mật và task chạy lệnh.
   - paths: ["crates/runtime/src/risk/**", "crates/sandbox/**", "crates/runtime/src/permissions.rs"]
-    tasks: ["R", "V", "S23", "S24"]
+    tasks: ["R", "V", "S23", "S24", "G"]
 
   # Prompt theo mode và answer style.
   - paths: ["crates/runtime/src/agent/modes.rs"]
