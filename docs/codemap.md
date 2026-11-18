@@ -78,6 +78,19 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Chạy shell trong sandbox | `crates/tools/src/lib.rs::shell_sandboxed` |
 | MCP client/host | `crates/mcp/src/lib.rs` |
 
+## Lõi TS (`packages/core`, ADR 0004)
+
+Đang xây để thay Engine Rust; bật trong Studio bằng `SILENCE_CORE=1`. Không import Electron.
+
+| Câu hỏi | Ở đâu |
+| --- | --- |
+| JSON-RPC server/client, lỗi, notification | `packages/core/src/api/jsonrpc.ts` (`RpcServer`, `RpcClient`, `RpcFailure`) |
+| Kênh truyền (MessagePort, cặp trong bộ nhớ cho test) | `packages/core/src/api/transport.ts` (`portTransport`, `memoryPair`) |
+| Đăng ký method của lõi | `packages/core/src/core.ts::createCore` |
+| Entry khi chạy trong `utilityProcess` | `packages/core/src/host/utility.ts` |
+| Interface `Backend`, `ToolCall`, `Decision`, sự kiện | `packages/core/src/backends/types.ts` (spec `docs/adapters/protocol.md`) |
+| Studio khởi động lõi, IPC `silence-core` | `apps/studio/src/main/core.ts` (`startCore`, `coreEnabled`); `main/index.ts::connectCore` |
+
 ## Protocol (đổi cả hai)
 
 | Câu hỏi | Ở đâu |

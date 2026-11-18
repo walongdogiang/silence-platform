@@ -1,0 +1,26 @@
+{
+  "name": "@silence/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "5ilence harness core (ADR 0004): API, Risk Engine, event log, backends. Never imports Electron.",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./host/utility": "./dist/host/utility.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

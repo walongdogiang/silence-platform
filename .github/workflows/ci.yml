@@ -34,7 +34,7 @@ jobs:
         run: cargo test --workspace
 
   studio:
-    name: studio (tsc + vitest)
+    name: studio (core + tsc + vitest)
     runs-on: windows-latest
     env:
       # Không cần binary Electron để type-check và chạy vitest.
@@ -48,6 +48,11 @@ jobs:
       # Cài đúng phiên bản trong package-lock.json (lock đã được commit).
       - name: Install
         run: npm ci --no-audit --no-fund
+      - name: Core (type-check, test, build)
+        run: |
+          npm run typecheck --workspace @silence/core
+          npm test --workspace @silence/core
+          npm run build --workspace @silence/core
       - name: Type-check
         run: npx tsc --noEmit -p apps/studio
       - name: Unit tests

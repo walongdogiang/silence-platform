@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "workspaces": [
     "apps/studio",
-    "packages/protocol"
+    "packages/protocol",
+    "packages/core"
   ],
   "scripts": {
     "prepare": "node scripts/install-hooks.mjs",
@@ -23,6 +24,8 @@
     "evals:nightly": "cargo run -p silence-engine -- evals-profile --profile nightly --repo-root .",
     "evals:weekly": "cargo run -p silence-engine -- evals-profile --profile weekly --repo-root .",
     "check:rules": "node scripts/check-rules.mjs",
-    "check:docs": "node scripts/check-docs-meta.mjs"
+    "check:docs": "node scripts/check-docs-meta.mjs",
+    "build:core": "npm run build --workspace @silence/core",
+    "test:core": "npm test --workspace @silence/core"
   }
 }
