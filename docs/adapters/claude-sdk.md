@@ -50,11 +50,35 @@ Hệ quả: chỉ hook `PreToolUse` thấy được **mọi** lệnh gọi, kể
 
 Ngoại lệ đã biết: lệnh xoá đường dẫn hệ trọng (`rm`/`rmdir` vào critical path) không được duyệt bởi hook `allow`. Ngoại lệ này chỉ chặt hơn, không lỏng hơn.
 
-**Test bắt buộc trước khi dùng thật:** (1) project có `"allow": ["Bash(*)", "Edit"]` mà Risk Engine vẫn nhận `decide` cho mọi lệnh gọi; (2) tool call bên trong subagent (`Task`) cũng đi qua hook **[chưa xác minh]**; (3) hook chờ 5 phút không bị huỷ; (4) lõi chết giữa chừng thì lệnh gọi bị từ chối; (5) hook dạng lệnh trong `.claude/settings.json` của project có tự chạy khi headless không **[chưa xác minh, các nguồn mâu thuẫn]**; (6) hook trả `allow` thì SDK có còn hỏi thêm ở bước permission mode hay gọi `canUseTool` không (tránh hỏi hai lần) **[chưa xác minh]**; (7) lệnh slash của project có chạy shell mà không qua hook không **[chưa xác minh]**; (8) `plugins` cục bộ nạp đúng skill/subagent khi `settingSources: ['project']`.
+## Kết quả spike (2026-11-19)
+
+SDK `0.3.327` (kèm Claude Code `2.1.327`), Windows 10, phiên đăng nhập Claude Pro, model Haiku, chạy bằng Node 20.20 và bằng Electron 33.4 (`ELECTRON_RUN_AS_NODE`, Node 20.18). Script spike nằm ngoài repo (thư mục tạm), không merge.
+
+| # | Câu hỏi | Kết quả |
+| --- | --- | --- |
+| 1 | Project có `"allow": ["Bash(*)", "Edit", "Write", "Read"]`, hook còn thấy mọi lệnh gọi? | **Có.** Hook nhận `Bash`, `Write`, `Skill` |
+| 2 | Tool call trong subagent có qua hook? | **Có.** Lệnh gọi `Agent` và `Read` của subagent đều qua hook; lệnh của subagent có `agent_id` |
+| 3 | Hook chờ lâu có bị huỷ? | Với `timeout: 600` trên matcher, hook chờ **70 giây** rồi `allow`, lệnh chạy bình thường. Chưa thử 5 phút |
+| 4 | Lõi chết giữa chừng thì lệnh bị từ chối? | Chưa thử (cần lõi thật) |
+| 5 | Hook dạng lệnh trong `.claude/settings.json` của project có chạy khi headless? | **Không chạy** (thư mục chưa trust). Vẫn giữ bước duyệt cấu hình repo vì `.mcp.json`, `env`, `apiKeyHelper` chưa thử |
+| 6 | Hook trả `allow` thì có bị hỏi thêm / gọi `canUseTool`? | **Không**, cả khi có lẫn không có allow rule trong project. Không hỏi hai lần |
+| 7 | Lệnh slash của project chạy shell ngoài hook? | Chưa thử |
+| 8 | `plugins` cục bộ nạp skill khi `settingSources: ['project']`? | **Có.** Skill hiện tên `spike-plugin:spike-skill`, model gọi qua tool `Skill` (cũng qua hook) |
+| 9 | `updatedInput` của hook có đổi được lệnh? | **Có.** `echo spike-ok` thành `echo modified-by-hook` |
+| 10 | Đăng nhập | `apiKeySource: "none"` khi dùng phiên Pro, không cần biến môi trường nào |
+
+**Phát hiện cần xử lý trong adapter:**
+- **Môi trường kế thừa làm lọt tool của app chủ.** Chạy từ trong app Claude desktop, session SDK thấy thêm tool `Artifact…` của app đó. Dựng `env` từ **danh sách cho phép** (PATH, SystemRoot, USERPROFILE, APPDATA, LOCALAPPDATA, TEMP…), không copy cả `process.env`.
+- **Tool theo tài khoản vẫn có dù chỉ nạp `project`:** connector claude.ai (`mcp__claude_ai_*`), `CronCreate`, `RemoteTrigger`, `SendToProject`, `PushNotification`… Truyền `tools` là danh sách rõ ràng (Read, Write, Edit, Bash, PowerShell, Glob, Grep, WebSearch, Task, Skill, TodoWrite, ExitPlanMode, các MCP của project) để vừa an toàn vừa bớt token.
+- **Mỗi session mới tốn khoảng 40k token tạo cache** (system prompt + định nghĩa tool). Thu gọn danh sách tool giảm con số này; tái dùng session (resume) rẻ hơn mở mới.
+- **Kiểu message mới** ngoài tài liệu: `system/task_summary`, `system/thinking_tokens`, `system/post_turn_summary`, `system/background_tasks_changed`, `system/task_started|progress|updated|notification`; `system/init` xuất hiện lại khi có subagent. Adapter bỏ qua kiểu không biết, không lỗi.
+- **`electron.exe` trên Windows** là app giao diện nên không in ra console; lõi chạy dưới Electron phải giao tiếp qua pipe/MessagePort, không dựa vào stdout của console.
+
+Test còn lại (4, 7, và chờ 5 phút) làm trong PR adapter thật.
 
 ## Duyệt cấu hình repo
 
-Hook dạng lệnh trong `.claude/settings.json` và server trong `.mcp.json` chạy tiến trình **ngoài** tool call, nên hook `PreToolUse` không thấy. Theo các issue trên tracker của Claude Code, chế độ headless/SDK coi thư mục là đã tin cậy và bỏ qua hộp thoại trust. Trước `start`, lõi đọc các file này (kể cả `env`, `apiKeyHelper` trong settings và lệnh slash của project). Nếu có hook hoặc MCP server chưa duyệt (so theo hash nội dung), lõi hỏi người dùng. Từ chối thì không mở session với `settingSources: ['project']`.
+Hook dạng lệnh trong `.claude/settings.json` và server trong `.mcp.json` chạy tiến trình **ngoài** tool call, nên hook `PreToolUse` không thấy. Spike cho thấy hook dạng lệnh của project **không** chạy khi headless trong thư mục chưa trust; `.mcp.json` và `env` chưa thử, nên vẫn duyệt. Trước `start`, lõi đọc các file này (kể cả `env`, `apiKeyHelper` trong settings và lệnh slash của project). Nếu có hook hoặc MCP server chưa duyệt (so theo hash nội dung), lõi hỏi người dùng. Từ chối thì không mở session với `settingSources: ['project']`.
 
 ## Ánh xạ tool Claude → tên trung lập
 
@@ -71,7 +95,7 @@ Hook dạng lệnh trong `.claude/settings.json` và server trong `.mcp.json` ch
 | `mcp__<server>__<tool>` | mcp | giữ nguyên |
 | tên khác | other | Risk Engine coi là `ask` |
 
-Danh sách tool thật lấy từ `system/init.tools` mỗi session; tên trong bảng là theo hiểu biết hiện tại **[chưa xác minh đủ danh sách]**.
+Danh sách tool thật lấy từ `system/init.tools` mỗi session. Spike thấy thêm `PowerShell` (kind `shell`), `Skill` (`internal`, nhưng nội dung skill có thể dẫn tới tool khác nên vẫn ghi log), `Agent` (tên mới của `Task` trong hook), `EnterWorktree`/`ExitWorktree`, `Monitor`, `ToolSearch`. Không thấy `WebFetch`, `LS`, `MultiEdit`, `TodoWrite` trong bản `2.1.327`.
 
 ## Diff, snapshot, sandbox
 
@@ -82,9 +106,9 @@ Danh sách tool thật lấy từ `system/init.tools` mỗi session; tên trong 
 ## Xác thực, usage, quota
 
 - `env` của SDK **thay thế** môi trường tiến trình con chứ không gộp. Adapter dựng `env` từ môi trường hiện có, **bỏ** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`. Ở chế độ không tương tác, API key luôn được ưu tiên nếu có.
-- `.claude/settings.json` của project có thể đặt `apiKeyHelper` hay `env`. Lõi kiểm `apiKeySource` trong `system/init`: khác nguồn đăng nhập gói thì đóng session với `auth_required`. **[chưa xác minh]** giá trị chính xác của `apiKeySource` khi dùng phiên đăng nhập Pro.
+- `.claude/settings.json` của project có thể đặt `apiKeyHelper` hay `env`. Lõi kiểm `apiKeySource` trong `system/init`: phiên đăng nhập Pro cho `"none"` (đã xác minh); khác giá trị đó thì đóng session với `auth_required`.
 - `usage`: lấy từ `result.usage` và `total_cost_usd`. Tài liệu ghi rõ đây là **ước tính phía client** → `usd_kind: 'estimate'`. Với gói Pro, con số này chỉ để tham khảo.
-- `quota`: từ `rate_limit_event.rate_limit_info` (`status` `allowed`/`allowed_warning`/`rejected`, `resetsAt`, `utilization`) và `SDKAssistantMessage.error` (`rate_limit`, `billing_error`, `overloaded`, `authentication_failed`). **[chưa xác minh]** hình dạng đầy đủ của `rate_limit_event` và `SDKAPIRetryMessage`.
+- `quota`: từ `rate_limit_event.rate_limit_info` và `SDKAssistantMessage.error` (`rate_limit`, `billing_error`, `overloaded`, `authentication_failed`). Hình dạng thấy trong spike: `{ status: "allowed" | "allowed_warning" | "rejected", resetsAt (giây epoch), rateLimitType: "five_hour" | "seven_day", utilization (0–1), surpassedThreshold, unifiedWindows: { five_hour: { utilization, resetsAt, status }, seven_day: { … } }, overageStatus, isUsingOverage }`. Lõi lấy cửa sổ có `utilization` cao nhất làm trạng thái quota. `SDKAPIRetryMessage` chưa gặp.
 - `turn.end`: từ `result.subtype` (`success`, `error_max_turns`, `error_max_budget_usd`, `error_during_execution`) và `stop_reason`.
 
 ## Backend sau (chưa làm)
