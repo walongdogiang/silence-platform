@@ -175,4 +175,4 @@ Quy tắc cho "Duyệt + tự sửa file":
 └──────────────────┘
 ```
 
-Không mount lại `Sidebar.tsx` hay `ContextPanel.tsx`; rail là component mới.
+Rail là component mới, không dựng lại sidebar hay context panel cũ.
