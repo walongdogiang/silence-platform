@@ -89,6 +89,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Đăng ký method của lõi | `packages/core/src/core.ts::createCore` |
 | Entry khi chạy trong `utilityProcess` | `packages/core/src/host/utility.ts` |
 | Interface `Backend`, `ToolCall`, `Decision`, sự kiện | `packages/core/src/backends/types.ts` (spec `docs/adapters/protocol.md`) |
+| Risk Engine bản TS (port từ `crates/runtime/src/risk`) | `packages/core/src/risk/classify.ts` (`classify`, `classifyCommand`, `Verdict`, `shellPattern`); parser `risk/command.ts`; policy `packages/core/policy/default_policy.yaml` + `corpus.yaml` (test giữ giống hệt bản Rust cho tới khi xoá Rust) |
 | Studio khởi động lõi, IPC `silence-core` | `apps/studio/src/main/core.ts` (`startCore`, `coreEnabled`); `main/index.ts::connectCore` |
 
 ## Protocol (đổi cả hai)
