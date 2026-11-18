@@ -38,7 +38,6 @@
       "Read(./**/Cargo.lock)",
       "Read(./**/package-lock.json)",
       "Read(./apps/studio/out/**)",
-      "Read(./docs/archive/**)",
       "Read(./.env)",
       "Read(./.env.*)"
     ]

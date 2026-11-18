@@ -1,7 +1,7 @@
 name: ci
 
 # Chạy trên mọi PR (base bất kỳ, kể cả PR xếp chồng) và mỗi lần push main. Không gọi model, không cần secret.
-# Eval tốn API nên chỉ chạy ở workflow nightly-evals (evals.yml).
+# Không chạy eval trên CI (ADR 0004: eval cũ chờ xoá cùng Engine Rust).
 
 on:
   pull_request:

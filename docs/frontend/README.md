@@ -20,6 +20,6 @@ Khi sửa giao diện: đọc file tương ứng dưới đây, rồi `.claude/r
 
 **Ranh giới:** UI không gọi model. Mọi fs/shell/MCP qua `silence-engine` (JSON-RPC). Không bịa backend (mic, upload, automations = “chưa gắn”).
 
-**Lịch sử:** `docs/archive/ui-app.md` (Axiom Studio / Agents Window) **không** còn là nguồn sự thật. Đã bỏ project header (Chat/Plan/Tasks…) khỏi khung chat. Explorer không hiện trong Chat Workspace. Icon Chat trên titlebar (giữa panel và Settings) bật/tắt cả Chat Workspace.
+**Lịch sử:** spec Axiom Studio / Agents Window cũ đã xoá (còn trong tag `archive/pre-harness-pivot`). Đã bỏ project header (Chat/Plan/Tasks…) khỏi khung chat. Explorer không hiện trong Chat Workspace. Icon Chat trên titlebar (giữa panel và Settings) bật/tắt cả Chat Workspace.
 
 **Code:** `apps/studio/src/renderer/` — `App.tsx` + `components/` + `theme/`.
