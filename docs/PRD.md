@@ -1,18 +1,18 @@
 ---
-description: Yêu cầu năm 1 của 5ilence — mục đích, persona, 6 job lõi, backlog, non-goals, NFR Windows, chỉ số thành công.
+description: Yêu cầu sản phẩm 5ilence — mục đích harness cá nhân chuyên môn hoá (đã cập nhật theo ADR 0004); persona, job, non-goals, NFR là bản cũ chờ viết lại.
 type: prd
 ---
 # PRD — 5ilence AI Engineer Platform
 
-**Status:** Phase 0  
-**Audience:** kỹ sư nội bộ, Windows  
-**Success:** app lập trình AI đầy đủ như Cursor / Claude Code; agent dùng **model do người vận hành đưa vào** — **cloud** (OpenRouter, nhà cung cấp cloud) hoặc **local** (Ollama, LM Studio, server nội bộ), qua endpoint OpenAI-compatible. Không khoá vào một nhà cung cấp.
+**Status:** Đổi hướng theo [ADR 0004](adr/0004-backend-adapters.md) (2026-11-18). Mục Mục đích dưới đây đã cập nhật; các mục còn lại là bản cũ, sẽ viết lại theo [lộ trình](adapters/migration.md).  
+**Audience:** một người dùng (cá nhân, không thương mại); Windows là chính, có thể macOS/Linux  
+**Success:** agent làm đúng theo cách của người dùng ngay lần đầu, tự kiểm chứng trước khi báo xong, không làm điều nguy hiểm; đo được là tốt hơn dùng Claude Code trần; người dùng bỏ được app Claude desktop.
 
 ## Mục đích
 
-5ilence là **app AI engineer hoàn chỉnh** — chuyên lập trình: code, database, build app, build website, build hệ thống kỹ thuật. Người dùng làm việc với nó như với Cursor hoặc Claude Code: chat/prompt AI, AI dùng harness (đọc/sửa file, grep, shell, terminal), MCP, plan, sub-agent, skills/hooks, xem diff, audit.
+5ilence là **harness cá nhân cho lĩnh vực lập trình** (code, database, app, website, hệ thống). Các app AI coding có sẵn (Claude Code, Codex, Cursor…) phục vụ mọi người nên phải "cân bằng". 5ilence **chuyên môn hoá** chúng cho riêng người dùng qua tám trụ: hồ sơ cá nhân, tri thức project, kỹ năng, quy trình, kiểm chứng, vòng học, đo lường, kiểm soát và kinh tế quota.
 
-Hướng bắc: **Cursor và Claude Code có chức năng gì thì 5ilence cũng có**. Năm 1 **làm lõi trước** (6 job dưới đây); phần còn lại là backlog, không phải phạm vi Phase 0/1. Không fork VS Code năm 1 — 5ilence Studio (Electron) + 5ilence Engine (sidecar Rust) như ADR hiện tại.
+Hướng bắc: **không tự xây vòng agent, không đuổi theo tính năng của Cursor hay Claude Code.** Vòng agent là của app có sẵn (Claude Code trước, qua Agent SDK). 5ilence giữ phần làm nên khác biệt: Risk Engine, audit, hồ sơ và skill của người dùng, kiểm chứng, số liệu, và Studio làm nơi làm việc hằng ngày. Không fork VS Code; 5ilence Studio (Electron) + 5ilence Engine (sidecar Rust).
 
 ## Persona
 
