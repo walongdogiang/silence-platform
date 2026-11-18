@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { splitFrontmatter } from "./check-rules-sync.mjs";
+import { splitFrontmatter } from "./frontmatter.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const docsDir = path.join(root, "docs");

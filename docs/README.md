@@ -4,7 +4,7 @@ type: index
 ---
 # Tài liệu 5ilence (mục lục build)
 
-Đọc file này trước khi đọc sâu docs khác. Đây là **mục lục cho Cursor khi xây repo `5ilence`**, không phải sách hướng dẫn end-user.
+Đọc file này trước khi đọc sâu docs khác. Đây là **mục lục cho agent khi xây repo `5ilence`**, không phải sách hướng dẫn end-user.
 
 Cách dùng: chọn **một hoặc hai** file theo việc → đọc file đó. Không đọc hết catalog mỗi lần.
 
@@ -81,7 +81,7 @@ Mục lục chi tiết UI: [frontend/README.md](frontend/README.md).
 | [frontend/i18n.md](frontend/i18n.md) | Ngôn ngữ giao diện VI/EN, từ điển `i18n.ts`, thuật ngữ không dịch, chuỗi còn từ Engine | Thêm hoặc sửa chữ hiển thị trên UI |
 | [frontend/chat-markdown-roadmap.md](frontend/chat-markdown-roadmap.md) | Việc Markdown chat cố ý chưa làm | Tránh làm sớm / mở lại backlog Markdown |
 
-Đổi UI: đọc spec tương ứng rồi `.cursor/rules/frontend-*.mdc`.
+Đổi UI: đọc spec tương ứng rồi `.claude/rules/frontend-*.md`.
 
 ## Cấu hình / eval (ngoài `docs/`)
 
@@ -90,7 +90,7 @@ Mục lục chi tiết UI: [frontend/README.md](frontend/README.md).
 | [../config/models.yaml](../config/models.yaml) | Cấu hình model / route | Đổi Auto-model hoặc danh sách model |
 | [../evals/README.md](../evals/README.md) | Eval: cách chạy, ghim model, lịch sử, ngân sách; task ở `evals/*/manifest.yaml` | Đổi vòng agent / thêm eval / chạy eval |
 
-## Kit agent trong app (không phải playbook Cursor)
+## Kit agent trong app (không phải playbook build repo)
 
 Đây là tài liệu **agent sản phẩm** (copy `templates/silence` → `.silence/`), tách khỏi mục lục build ở trên.
 
