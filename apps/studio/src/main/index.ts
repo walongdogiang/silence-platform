@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
 import { isPngBytes } from "./clipboardImage";
+import { coreEnabled, startCore, type CoreHandle } from "./core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../");
@@ -486,9 +487,37 @@ app.whenReady().then(async () => {
     reportEngineError(err instanceof Error ? err.message : String(err));
   }
   watchEngineBuild();
+  if (coreEnabled()) void connectCore();
+});
+
+/** New TS core (ADR 0004), next to the Rust Engine while it is being built. */
+let core: CoreHandle | null = null;
+
+async function connectCore(): Promise<void> {
+  try {
+    core = await startCore((code) => {
+      core = null;
+      console.error(`[core] exited with code ${code}`);
+    });
+    const info = await core.client.call("core.info");
+    console.log("[core] ready", JSON.stringify(info));
+  } catch (err) {
+    console.error("[core] failed to start:", err instanceof Error ? err.message : String(err));
+  }
+}
+
+ipcMain.handle("silence-core", async (_e, method: string, params?: unknown) => {
+  if (!core) return { error: "core is not running (set SILENCE_CORE=1)" };
+  try {
+    return { result: await core.client.call(method, params) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 });
 
 app.on("window-all-closed", () => {
+  core?.stop();
+  core = null;
   const stamp = process.env.SILENCE_ENGINE_STAMP;
   if (stamp) unwatchFile(stamp);
   // Tắt chủ động: bỏ `child` trước khi kill để handler `exit` không coi là Engine chết bất thường.

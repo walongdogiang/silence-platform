@@ -5,13 +5,17 @@
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
+    "predev": "npm run build --workspace @silence/core",
     "dev": "electron-vite dev",
+    "prebuild": "npm run build --workspace @silence/core",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "pretest": "npm run build --workspace @silence/core",
     "test": "vitest run"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "@silence/core": "0.1.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "lucide-react": "^1.61.0",
