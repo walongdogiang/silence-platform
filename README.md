@@ -61,7 +61,7 @@ Copy `templates/silence` thành `.silence/` trong repo làm việc để bật s
 ## Tài liệu
 
 - [docs/README.md](docs/README.md) — mục lục (mục đích + khi nào đọc)
-- [AGENTS.md](AGENTS.md) — playbook Cursor khi build repo này
+- [AGENTS.md](AGENTS.md) — playbook cho agent khi build repo này
 - [docs/frontend/README.md](docs/frontend/README.md) — spec UI chi tiết
 - [config/models.yaml](config/models.yaml)
 - [evals/v0/manifest.yaml](evals/v0/manifest.yaml)

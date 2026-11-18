@@ -1,4 +1,4 @@
-# 5ilence — hướng dẫn cho agent (Cursor, Claude Code, …) khi build repo này
+# 5ilence — hướng dẫn cho agent (Claude Code) khi build repo này
 
 Repo monorepo xây nền tảng 5ilence (Electron Studio + Rust Engine).
 
@@ -26,9 +26,9 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 ## Sửa X thì đụng đâu
 
 - Harness / agent loop: thêm hoặc sửa eval task; chạy eval nếu có key, không thì ghi rõ chưa chạy. Không full 20 eval cho mọi PR.
-- UI: đọc spec `docs/frontend/` và rule `.cursor/rules/frontend-*.mdc` trước khi sửa; đổi hành vi thì cập nhật spec + rule.
+- UI: đọc spec `docs/frontend/` và rule `.claude/rules/frontend-*.md` trước khi sửa; đổi hành vi thì cập nhật spec + rule.
 - Câu trả lời agent trong app (Markdown user-facing): sửa `SYSTEM` trong `crates/runtime/src/agent/modes.rs`; hợp đồng UI/Copy: `docs/frontend/chat.md`; việc chưa làm: `docs/frontend/chat-markdown-roadmap.md`.
-- Rule agent: `.cursor/rules/*.mdc` và bản port `.claude/rules/*.md` phải khớp nhau — sửa cả hai rồi `npm run check:rules`.
+- Rule agent: `.claude/rules/*.md` (frontmatter `paths:`) — sửa xong chạy `npm run check:rules`.
 - Docs: mỗi file trong `docs/` có `description` ở frontmatter; sửa docs thì `npm run check:docs`.
 
 ## Test theo phạm vi
@@ -50,7 +50,7 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 - Commit theo Conventional Commits. Xong việc thì mở PR vào `main`, đợi CI xanh, **squash merge**, xoá nhánh.
 - CI chạy trên mọi PR, base là `main` hay nhánh khác (PR xếp chồng cũng có CI):
   - `ci.yml`: `cargo test --workspace`, `tsc` và `vitest` của Studio.
-  - `docs-check.yml`: rule `.cursor` ↔ `.claude` khớp nhau, frontmatter docs hợp lệ.
+  - `docs-check.yml`: rule `.claude/rules` hợp lệ, frontmatter docs hợp lệ.
   - Không còn workflow eval trên CI (ADR 0004).
   - `main-guard.yml` chạy sau mỗi lần push `main`: commit không đi qua PR đã merge với CI xanh (hoặc force-push) thì mở issue nhãn `main-guard` và job đỏ. Repo không có branch protection, nên đây là lưới phát hiện, không chặn.
 - Test RED chờ plan sau phải có `#[ignore = "RED until Plan …"]` kèm lý do; bỏ `#[ignore]` khi làm plan đó. Không để CI đỏ kéo dài.
