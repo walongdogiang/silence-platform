@@ -8,3 +8,6 @@ export { EventLog, LOG_VERSION, type LogBody, type LogRecord, type SessionSummar
 export { AuditLog, type AuditEvent } from "./store/audit.js";
 export { redact, redactValue } from "./store/redact.js";
 export { takeSnapshot, listSnapshots, restoreSnapshot, KEEP_SNAPSHOTS } from "./git/snapshot.js";
+export { ClaudeBackend, CLAUDE_CAPABILITIES, type ClaudeBackendOptions, type QueryFn } from "./backends/claude/index.js";
+export { claudeEnv, AUTH_VARS } from "./backends/claude/env.js";
+export { toToolCall, CLAUDE_TOOLS } from "./backends/claude/toolMap.js";
