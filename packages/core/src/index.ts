@@ -4,3 +4,7 @@ export * from "./backends/types.js";
 export { createCore, CORE_VERSION, type CoreOptions } from "./core.js";
 export { classify, classifyCommand, shellPattern, shellMatches, Verdict, type RiskCtx } from "./risk/classify.js";
 export { policy, tierOf, TIER_ORDER, type Tier, type CodeInfo } from "./risk/policy.js";
+export { EventLog, LOG_VERSION, type LogBody, type LogRecord, type SessionSummary } from "./store/eventLog.js";
+export { AuditLog, type AuditEvent } from "./store/audit.js";
+export { redact, redactValue } from "./store/redact.js";
+export { takeSnapshot, listSnapshots, restoreSnapshot, KEEP_SNAPSHOTS } from "./git/snapshot.js";
