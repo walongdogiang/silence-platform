@@ -2,7 +2,7 @@
 paths:
   - "apps/studio/src/renderer/App.tsx"
   - "apps/studio/src/renderer/styles.css"
-  - "apps/studio/src/renderer/components/{TitleBar,ChatTabBar,Sidebar,ChatHistoryPanel,ChatPane,DiffPane,BottomPanel}.tsx"
+  - "apps/studio/src/renderer/components/{TitleBar,ChatTabBar,ChatHistoryPanel,ChatPane,DiffPane,BottomPanel}.tsx"
 ---
 
 # Shell
