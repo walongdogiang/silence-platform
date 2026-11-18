@@ -8,7 +8,7 @@ code:
 
 Chỉ tài liệu **UI Electron** (`apps/studio/src/renderer`). Backend, Engine, infra, evals **không** nằm đây.
 
-Khi sửa giao diện: đọc file tương ứng dưới đây, rồi `.cursor/rules/frontend-*.mdc`.
+Khi sửa giao diện: đọc file tương ứng dưới đây, rồi `.claude/rules/frontend-*.md`.
 
 | Spec | Nội dung |
 | --- | --- |

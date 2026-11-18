@@ -256,7 +256,7 @@ Lựa chọn lưu ở `localStorage` (`silence.permission.mode`), gửi lúc `se
 | --- | --- | --- |
 | 1. Enforce | Engine | Risk Engine quyết định; model không vượt qua được |
 | 2. Progressive disclosure | Agent trong app | SYSTEM có mục `## Safety` ngắn, khoảng 8 dòng (B3). Khi bị `ask`/`block`, tool result trả về **mã + `hint`** đúng lúc, không nạp cả catalog vào context |
-| 3. Rule theo đường dẫn | Dev agent build repo (Claude Code, Cursor) | Cặp rule `security-permissions` (`.claude/rules` `paths:` ↔ `.cursor/rules` `globs:`) tự nạp khi sửa `crates/runtime/src/risk/**`, `permissions.rs`, `agent/policy.rs`, `crates/tools/**`, `crates/sandbox/**`, `crates/mcp/**`, `packages/protocol/**` |
+| 3. Rule theo đường dẫn | Dev agent build repo (Claude Code, Cursor) | Rule `security-permissions` (`.claude/rules`, `paths:`) tự nạp khi sửa `crates/runtime/src/risk/**`, `permissions.rs`, `agent/policy.rs`, `crates/tools/**`, `crates/sandbox/**`, `crates/mcp/**`, `packages/protocol/**` |
 
 So sánh: Claude Code nạp `CLAUDE.md` luôn luôn, `.claude/rules` theo `paths`, skills theo description, và enforce bằng hook. Cursor nạp rules theo `alwaysApply`/`globs`/agent-requested. Codex dùng `AGENTS.md` theo thư mục. 5ilence lấy cách "rule theo đường dẫn" cho dev, và "enforce + gợi ý đúng lúc" cho agent trong app.
 

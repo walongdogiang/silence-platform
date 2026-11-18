@@ -1,7 +1,0 @@
-# Cursor không đọc / index các path này (đồng bộ với permissions.deny trong .claude/settings.json).
-target/
-**/node_modules/
-**/Cargo.lock
-**/package-lock.json
-apps/studio/out/
-docs/archive/
