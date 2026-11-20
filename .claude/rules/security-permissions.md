@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/runtime/src/risk/**"
+  - "packages/core/src/risk/**"
+  - "packages/core/policy/**"
   - "crates/runtime/src/permissions.rs"
   - "crates/runtime/src/agent/policy.rs"
   - "crates/runtime/src/rpc.rs"
@@ -22,5 +24,5 @@ Read `docs/security/permissions.md` before changing permission flow; look up cod
 - RPC must never create a `yolo` session (`rpc::client_permission_allowed`); only `eval_runner` may.
 - Permission card shows the real command; model-written text is never the basis for approval.
 - New tool: add it to `risk::classify` (or it falls into `UNKNOWN_TOOL`) and to `silence_tools::mutates` if it writes.
-- Changing a rule: edit `risk/default_policy.yaml` + add cases to `risk/corpus.yaml` (safe and attack) + update `risk-catalog.md`, then `.\scripts\cargo-msvc.bat test -p silence-engine --lib risk` (`catalog_lists_every_code`, `corpus_tiers`).
+- Changing a rule: edit `default_policy.yaml` + add cases to `corpus.yaml` (safe and attack) in **both** `crates/runtime/src/risk/` and `packages/core/policy/` (a core test fails if the copies differ) + update `risk-catalog.md`, then `npm test --workspace @silence/core` and `.\scripts\cargo-msvc.bat test -p silence-engine --lib risk` (`catalog_lists_every_code`, `corpus_tiers`).
 - Changing `ask_perm`/agent loop: add an eval task; run evals only with API keys, otherwise say so.

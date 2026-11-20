@@ -1,0 +1,565 @@
+# Built-in risk policy (machine source of truth). Human catalog: docs/security/risk-catalog.md.
+# Every code below MUST have a row in that catalog (test `catalog_lists_every_code`).
+#
+# tier: auto (0) | logged (1) | ask (2) | block (3)
+# title/detail: Vietnamese, shown to the user on the permission card.
+# hint: English, returned to the model when the action is blocked or asked.
+#
+# Rules only ever RAISE a tier. Unknown programs fall back to UNKNOWN_COMMAND (ask).
+
+codes:
+  # --- tier 0: read-only -------------------------------------------------
+  READ_WS:
+    tier: auto
+    title: Đọc trong workspace
+    detail: Chỉ đọc file/thư mục trong workspace.
+    hint: Read-only access inside the workspace.
+  READ_CMD:
+    tier: auto
+    title: Lệnh chỉ đọc
+    detail: Lệnh liệt kê, tìm kiếm hoặc hiển thị nội dung, không thay đổi gì.
+    hint: Read-only command.
+  VERSION:
+    tier: auto
+    title: Xem phiên bản
+    detail: Chỉ in phiên bản của công cụ.
+    hint: Version query.
+  GIT_READ:
+    tier: auto
+    title: Git chỉ đọc
+    detail: status, diff, log, show, blame… không đổi repo.
+    hint: Read-only git command.
+  INTERNAL:
+    tier: auto
+    title: Thao tác nội bộ của agent
+    detail: Gửi plan, gợi ý mode, giao việc cho sub-agent (từng tool của sub-agent vẫn được xét riêng).
+    hint: Internal agent action.
+
+  # --- tier 1: reversible / contained ----------------------------------
+  WRITE_WS:
+    tier: logged
+    title: Sửa file trong workspace
+    detail: Có DiffCard và checkpoint để Restore.
+    hint: Workspace edit, checkpointed.
+  BUILD_TEST:
+    tier: logged
+    title: Build / test
+    detail: Chạy build, test, lint hoặc format của dự án trong workspace.
+    hint: Project build/test command.
+  RUN_SCRIPT:
+    tier: logged
+    title: Chạy script trong workspace
+    detail: Chạy một file script nằm trong workspace.
+    hint: Running a script file from the workspace.
+  LOCAL_HTTP:
+    tier: logged
+    title: Gọi app trên máy này
+    detail: http_check gửi một request tới localhost / 127.0.0.1 (app của chính bạn); redirect ra ngoài bị chặn.
+    hint: One HTTP request to an app on this machine.
+  LOCAL_BROWSER:
+    tier: logged
+    title: Trình duyệt trên app của bạn
+    detail: Mở trang localhost trong trình duyệt headless (profile tạm, không cookie của bạn) và bấm / gõ trên đó như người dùng.
+    hint: Headless browser on an app running on this machine.
+  MCP_READ:
+    tier: logged
+    title: MCP chỉ đọc
+    detail: Tool MCP tự khai báo là chỉ đọc (readOnlyHint). Output vẫn bị coi là nội dung bên ngoài.
+    hint: Read-only MCP tool; its output is untrusted.
+  GIT_LOCAL:
+    tier: logged
+    title: Git cục bộ
+    detail: Thao tác git cục bộ, đảo ngược được (add, stash, tạo nhánh…).
+    hint: Local, reversible git command.
+  GH_READ:
+    tier: logged
+    title: Đọc GitHub qua gh
+    detail: Xem PR, check, run, issue hoặc repo trên GitHub; không thay đổi gì.
+    hint: Read-only GitHub CLI call.
+
+  # --- tier 2: ask with explanation ------------------------------------
+  UNKNOWN_COMMAND:
+    tier: ask
+    title: Lệnh chưa được phân loại
+    detail: 5ilence chưa biết lệnh này an toàn hay không nên cần bạn xem.
+    hint: Unclassified command; the user must approve it.
+  UNPARSED:
+    tier: ask
+    title: Lệnh khó phân tích
+    detail: Có biểu thức động, subshell hoặc cú pháp lạ nên không xác định được lệnh sẽ làm gì.
+    hint: Command uses dynamic expressions or subshells; prefer a plain command.
+  INLINE_CODE:
+    tier: ask
+    title: Chạy code viết trực tiếp
+    detail: Chạy đoạn code truyền thẳng trên dòng lệnh (python -c, node -e…).
+    hint: Inline code execution; prefer writing a script file the user can review.
+  DYNAMIC_EXEC:
+    tier: ask
+    title: Thực thi chuỗi động
+    detail: Chạy một chuỗi như lệnh (Invoke-Expression, eval, pipe vào shell).
+    hint: Dynamic execution of a string; run the concrete command instead.
+  NET_ACCESS:
+    tier: ask
+    title: Truy cập mạng
+    detail: Kết nối ra Internet hoặc máy khác.
+    hint: Network access requires approval.
+  PKG_INSTALL:
+    tier: ask
+    title: Cài package
+    detail: Tải package từ registry và có thể chạy script cài đặt; sửa file lock và thư mục dependency.
+    hint: Package install needs network and runs install scripts; ask the user.
+  PKG_EXEC:
+    tier: ask
+    title: Tải và chạy package tạm
+    detail: npx/pnpm dlx/uvx tải package từ mạng rồi chạy ngay.
+    hint: Downloads and runs a package; ask the user.
+  PKG_PUBLISH:
+    tier: ask
+    title: Phát hành package
+    detail: Đẩy package lên registry công khai (npm, crates.io, PyPI, NuGet). Không thu hồi được hoàn toàn.
+    hint: Publishing uploads to a public registry and cannot be undone; ask the user.
+  GIT_NETWORK:
+    tier: ask
+    title: Git qua mạng
+    detail: push, pull, fetch, clone liên lạc với remote.
+    hint: Git network operation.
+  GIT_COMMIT:
+    tier: ask
+    title: Tạo commit
+    detail: Ghi lịch sử git. Dự án yêu cầu hỏi trước khi commit.
+    hint: Commits need explicit user approval.
+  GIT_DESTRUCTIVE:
+    tier: ask
+    title: Git xoá thay đổi
+    detail: reset --hard, clean, checkout/restore toàn bộ hoặc push --force có thể làm mất việc chưa lưu.
+    hint: Destructive git command; may discard work.
+  GH_WRITE:
+    tier: ask
+    title: Thay đổi trên GitHub
+    detail: Lệnh gh tạo hoặc sửa PR, issue, comment, release, workflow… bằng tài khoản GitHub của bạn.
+    hint: GitHub write action; ask the user.
+  GH_MERGE:
+    tier: ask
+    title: Merge pull request
+    detail: Merge PR vào nhánh đích. Repo không có branch protection thì GitHub không tự chặn khi CI đỏ, nên cần kiểm gh pr checks trước.
+    hint: Merging needs the user's approval every time; run `gh pr checks` and confirm CI is green first.
+  FS_OUTSIDE_WS:
+    tier: ask
+    title: Ngoài workspace
+    detail: Đụng tới đường dẫn nằm ngoài thư mục dự án.
+    hint: Path is outside the workspace.
+  FS_DELETE:
+    tier: ask
+    title: Xoá file
+    detail: Xoá file hoặc thư mục; không có checkpoint để khôi phục.
+    hint: Deletion is not checkpointed; ask the user.
+  SECRET_READ:
+    tier: ask
+    title: Đụng tới bí mật
+    detail: File có thể chứa khoá, token hoặc mật khẩu (.env, *.pem, id_rsa…).
+    hint: Path may contain secrets; never print secret values.
+  ENV_READ:
+    tier: ask
+    title: Đọc biến môi trường
+    detail: Biến môi trường có thể chứa API key.
+    hint: Environment may contain secrets.
+  PROC_KILL:
+    tier: ask
+    title: Dừng tiến trình
+    detail: Dừng một tiến trình đang chạy trên máy.
+    hint: Killing processes needs approval.
+  MCP_CALL:
+    tier: ask
+    title: Gọi MCP server
+    detail: Tool của server MCP bên ngoài; 5ilence không biết nó làm gì.
+    hint: External MCP tool call.
+  UNKNOWN_TOOL:
+    tier: ask
+    title: Tool chưa phân loại
+    detail: Tool chưa có trong policy.
+    hint: Unclassified tool.
+  TAINTED_CONTEXT:
+    tier: ask
+    title: Có nội dung từ bên ngoài
+    detail: Phiên này đã nhận dữ liệu từ MCP/mạng; lệnh có thể bị nội dung đó điều khiển (prompt injection).
+    hint: This session ingested external content; shell commands need approval.
+
+  # --- tier 3: block ----------------------------------------------------
+  NET_DOWNLOAD_EXEC:
+    tier: block
+    title: Tải về rồi chạy ngay
+    detail: Tải nội dung từ mạng và thực thi luôn (curl | sh, iwr | iex). Kiểu tấn công phổ biến nhất.
+    hint: Never pipe downloaded content into an interpreter. Download to a file and show it to the user.
+  ENCODED_COMMAND:
+    tier: block
+    title: Lệnh mã hoá
+    detail: Lệnh bị mã hoá (-EncodedCommand, base64 | sh) để che nội dung.
+    hint: Encoded/obfuscated commands are not allowed; use a plain command.
+  FS_DELETE_SYSTEM:
+    tier: block
+    title: Xoá ngoài dự án
+    detail: Xoá đệ quy ngoài workspace, ổ đĩa, thư mục người dùng hoặc hệ thống.
+    hint: Recursive deletion outside the workspace is blocked.
+  SYSTEM_CHANGE:
+    tier: block
+    title: Thay đổi hệ thống
+    detail: Format, phân vùng, boot, registry, execution policy, Defender/firewall, dịch vụ, tác vụ định kỳ, tắt máy.
+    hint: System configuration changes are blocked; ask the user to do it themselves.
+  SECRET_EXFIL:
+    tier: block
+    title: Gửi bí mật ra ngoài
+    detail: Gửi file chứa bí mật lên mạng.
+    hint: Sending secrets over the network is blocked.
+  HTTP_NOT_LOCAL:
+    tier: block
+    title: http_check ra ngoài máy
+    detail: http_check chỉ gọi được localhost, 127.0.0.1 hoặc ::1; không dùng nó để truy cập Internet hay máy khác.
+    hint: http_check only reaches this machine (localhost, 127.0.0.1, ::1). Do not use it for other hosts.
+  BROWSER_NOT_LOCAL:
+    tier: block
+    title: Mở trang ngoài máy bằng browser_open
+    detail: browser_open chỉ mở localhost, 127.0.0.1 hoặc ::1. Trình duyệt của agent không dùng để lướt Internet.
+    hint: The browser tool only opens pages on this machine (localhost, 127.0.0.1, ::1).
+  POLICY_TAMPER:
+    tier: block
+    title: Sửa quyền của 5ilence
+    detail: Sửa .silence/permissions.json hoặc policy bằng tool/shell; chỉ Engine được ghi.
+    hint: Permission and policy files can only be changed by the user in Settings.
+  GIT_PUSH_DEFAULT:
+    tier: block
+    title: Push thẳng vào nhánh chính
+    detail: Push vào main/master (hoặc --all) bỏ qua pull request và CI. Mọi thay đổi vào nhánh chính phải đi qua PR.
+    hint: Pushing to the default branch is not allowed. Push a feature branch and open a pull request.
+  GIT_NO_VERIFY:
+    tier: block
+    title: Bỏ qua git hook
+    detail: --no-verify, commit -n hoặc đổi core.hooksPath làm hook kiểm tra (như chặn push main) không chạy.
+    hint: Bypassing git hooks is not allowed. Fix what the hook reports instead.
+
+# PowerShell / cmd aliases → canonical program name (lowercase, no extension).
+aliases:
+  rm: remove-item
+  del: remove-item
+  erase: remove-item
+  rd: remove-item
+  rmdir: remove-item
+  ri: remove-item
+  ls: get-childitem
+  dir: get-childitem
+  gci: get-childitem
+  cat: get-content
+  gc: get-content
+  type: get-content
+  iwr: invoke-webrequest
+  wget: invoke-webrequest
+  curl: curl
+  irm: invoke-restmethod
+  iex: invoke-expression
+  kill: stop-process
+  spps: stop-process
+  echo: write-output
+  pwd: get-location
+  sls: select-string
+  cp: copy-item
+  copy: copy-item
+  cpi: copy-item
+  mv: move-item
+  move: move-item
+  mi: move-item
+  ni: new-item
+  mkdir: new-item
+  md: new-item
+
+# Ordered command rules: first match by token prefix (canonical program + following words, lowercase).
+# `flags_any`: rule applies only if one of these flags appears anywhere in the segment.
+commands:
+  # system changes (block)
+  - { match: [format], code: SYSTEM_CHANGE }
+  - { match: [format-volume], code: SYSTEM_CHANGE }
+  - { match: [diskpart], code: SYSTEM_CHANGE }
+  - { match: [bcdedit], code: SYSTEM_CHANGE }
+  - { match: [vssadmin], code: SYSTEM_CHANGE }
+  - { match: [cipher], code: SYSTEM_CHANGE, flags_any: ["/w"] }
+  - { match: [reg, add], code: SYSTEM_CHANGE }
+  - { match: [reg, delete], code: SYSTEM_CHANGE }
+  - { match: [reg, import], code: SYSTEM_CHANGE }
+  - { match: [set-itemproperty], code: SYSTEM_CHANGE, flags_any: ["hklm:", "hklm:\\", "registry::"] }
+  - { match: [set-executionpolicy], code: SYSTEM_CHANGE }
+  - { match: [set-mppreference], code: SYSTEM_CHANGE }
+  - { match: [add-mppreference], code: SYSTEM_CHANGE }
+  - { match: [netsh], code: SYSTEM_CHANGE }
+  - { match: [schtasks], code: SYSTEM_CHANGE, flags_any: ["/create", "/change", "/delete"] }
+  - { match: [register-scheduledtask], code: SYSTEM_CHANGE }
+  - { match: [sc, create], code: SYSTEM_CHANGE }
+  - { match: [sc, config], code: SYSTEM_CHANGE }
+  - { match: [sc, delete], code: SYSTEM_CHANGE }
+  - { match: [new-service], code: SYSTEM_CHANGE }
+  - { match: [set-service], code: SYSTEM_CHANGE }
+  - { match: [takeown], code: SYSTEM_CHANGE }
+  - { match: [icacls], code: SYSTEM_CHANGE }
+  - { match: [shutdown], code: SYSTEM_CHANGE }
+  - { match: [stop-computer], code: SYSTEM_CHANGE }
+  - { match: [restart-computer], code: SYSTEM_CHANGE }
+  - { match: [mkfs], code: SYSTEM_CHANGE }
+  - { match: [dd], code: SYSTEM_CHANGE }
+  - { match: [chmod], code: SYSTEM_CHANGE, flags_any: ["-r", "777"] }
+  - { match: [sudo], code: SYSTEM_CHANGE }
+  - { match: [runas], code: SYSTEM_CHANGE }
+  - { match: [start-process], code: SYSTEM_CHANGE, flags_any: ["runas"] }
+
+  # git
+  - { match: [git, push], code: GIT_DESTRUCTIVE, flags_any: ["--force", "-f", "--force-with-lease", "--delete", "--mirror"] }
+  - { match: [git, push], code: GIT_NETWORK }
+  - { match: [git, pull], code: GIT_NETWORK }
+  - { match: [git, fetch], code: GIT_NETWORK }
+  - { match: [git, clone], code: GIT_NETWORK }
+  - { match: [git, submodule], code: GIT_NETWORK }
+  - { match: [git, reset], code: GIT_DESTRUCTIVE, flags_any: ["--hard", "--merge", "--keep"] }
+  - { match: [git, clean], code: GIT_DESTRUCTIVE }
+  - { match: [git, checkout], code: GIT_DESTRUCTIVE, flags_any: ["--", ".", "-f", "--force"] }
+  - { match: [git, restore], code: GIT_DESTRUCTIVE }
+  - { match: [git, branch], code: GIT_DESTRUCTIVE, flags_any: ["-d", "-D", "--delete"] }
+  - { match: [git, stash, drop], code: GIT_DESTRUCTIVE }
+  - { match: [git, stash, clear], code: GIT_DESTRUCTIVE }
+  - { match: [git, rebase], code: GIT_DESTRUCTIVE }
+  - { match: [git, commit], code: GIT_COMMIT }
+  - { match: [git, merge], code: GIT_COMMIT }
+  - { match: [git, tag], code: GIT_COMMIT }
+  - { match: [git, cherry-pick], code: GIT_COMMIT }
+  - { match: [git, revert], code: GIT_COMMIT }
+  - { match: [git, config], code: GIT_COMMIT }
+  - { match: [git, status], code: GIT_READ }
+  - { match: [git, diff], code: GIT_READ }
+  - { match: [git, log], code: GIT_READ }
+  - { match: [git, show], code: GIT_READ }
+  - { match: [git, blame], code: GIT_READ }
+  - { match: [git, rev-parse], code: GIT_READ }
+  - { match: [git, ls-files], code: GIT_READ }
+  - { match: [git, branch], code: GIT_READ }
+  - { match: [git, remote], code: GIT_READ }
+  - { match: [git, add], code: GIT_LOCAL }
+  - { match: [git, stash], code: GIT_LOCAL }
+  - { match: [git, switch], code: GIT_LOCAL }
+  - { match: [git, checkout], code: GIT_LOCAL }
+  - { match: [git, mv], code: GIT_LOCAL }
+  - { match: [git, rm], code: FS_DELETE }
+  # Also from code (risk/mod.rs): pushes to the default branch → GIT_PUSH_DEFAULT, hook bypass
+  # (--no-verify, commit -n, core.hooksPath) → GIT_NO_VERIFY, `git -C dir …` matched like `git …`.
+
+  # GitHub CLI. `gh api` is classified in code by method/fields/path (`gh_api_code`).
+  - { match: [gh, auth, token], code: SECRET_READ }
+  - { match: [gh, auth, status], code: GH_READ }
+  - { match: [gh, pr, merge], code: GH_MERGE }
+  - { match: [gh, pr, view], code: GH_READ }
+  - { match: [gh, pr, checks], code: GH_READ }
+  - { match: [gh, pr, list], code: GH_READ }
+  - { match: [gh, pr, diff], code: GH_READ }
+  - { match: [gh, pr, status], code: GH_READ }
+  - { match: [gh, pr], code: GH_WRITE }
+  - { match: [gh, run, view], code: GH_READ }
+  - { match: [gh, run, list], code: GH_READ }
+  - { match: [gh, run, watch], code: GH_READ }
+  - { match: [gh, run], code: GH_WRITE }
+  - { match: [gh, issue, view], code: GH_READ }
+  - { match: [gh, issue, list], code: GH_READ }
+  - { match: [gh, issue, status], code: GH_READ }
+  - { match: [gh, issue], code: GH_WRITE }
+  - { match: [gh, repo, view], code: GH_READ }
+  - { match: [gh, repo], code: GH_WRITE }
+  - { match: [gh, workflow, view], code: GH_READ }
+  - { match: [gh, workflow, list], code: GH_READ }
+  - { match: [gh, workflow], code: GH_WRITE }
+  - { match: [gh, release, view], code: GH_READ }
+  - { match: [gh, release, list], code: GH_READ }
+  - { match: [gh, release], code: GH_WRITE }
+  - { match: [gh, label], code: GH_WRITE }
+  - { match: [gh, secret], code: SECRET_READ }
+
+  # packages
+  - { match: [npx], code: PKG_EXEC }
+  - { match: [pnpm, dlx], code: PKG_EXEC }
+  - { match: [bunx], code: PKG_EXEC }
+  - { match: [uvx], code: PKG_EXEC }
+  - { match: [npm, install], code: PKG_INSTALL }
+  - { match: [npm, i], code: PKG_INSTALL }
+  - { match: [npm, ci], code: PKG_INSTALL }
+  - { match: [npm, add], code: PKG_INSTALL }
+  - { match: [npm, update], code: PKG_INSTALL }
+  - { match: [npm, publish], code: PKG_PUBLISH }
+  - { match: [pnpm, publish], code: PKG_PUBLISH }
+  - { match: [yarn, publish], code: PKG_PUBLISH }
+  - { match: [yarn, npm], code: PKG_PUBLISH }
+  - { match: [bun, publish], code: PKG_PUBLISH }
+  - { match: [cargo, publish], code: PKG_PUBLISH }
+  - { match: [twine, upload], code: PKG_PUBLISH }
+  - { match: [poetry, publish], code: PKG_PUBLISH }
+  - { match: [uv, publish], code: PKG_PUBLISH }
+  - { match: [dotnet, nuget], code: PKG_PUBLISH }
+  - { match: [nuget, push], code: PKG_PUBLISH }
+  - { match: [gem, push], code: PKG_PUBLISH }
+  - { match: [npm, exec], code: PKG_EXEC }
+  - { match: [pnpm, install], code: PKG_INSTALL }
+  - { match: [pnpm, i], code: PKG_INSTALL }
+  - { match: [pnpm, add], code: PKG_INSTALL }
+  - { match: [yarn, add], code: PKG_INSTALL }
+  - { match: [yarn, install], code: PKG_INSTALL }
+  - { match: [pip, install], code: PKG_INSTALL }
+  - { match: [pip3, install], code: PKG_INSTALL }
+  - { match: [uv, add], code: PKG_INSTALL }
+  - { match: [uv, pip], code: PKG_INSTALL }
+  - { match: [poetry, add], code: PKG_INSTALL }
+  - { match: [cargo, install], code: PKG_INSTALL }
+  - { match: [cargo, add], code: PKG_INSTALL }
+  - { match: [go, install], code: PKG_INSTALL }
+  - { match: [go, get], code: PKG_INSTALL }
+  - { match: [dotnet, add], code: PKG_INSTALL }
+  - { match: [winget], code: PKG_INSTALL }
+  - { match: [choco], code: PKG_INSTALL }
+  - { match: [scoop], code: PKG_INSTALL }
+  - { match: [install-module], code: PKG_INSTALL }
+  - { match: [install-package], code: PKG_INSTALL }
+
+  # build / test (reversible, workspace-contained)
+  - { match: [npm, test], code: BUILD_TEST }
+  - { match: [npm, run], code: BUILD_TEST }
+  - { match: [npm, t], code: BUILD_TEST }
+  - { match: [pnpm, test], code: BUILD_TEST }
+  - { match: [pnpm, run], code: BUILD_TEST }
+  - { match: [yarn, test], code: BUILD_TEST }
+  - { match: [cargo, test], code: BUILD_TEST }
+  - { match: [cargo, check], code: BUILD_TEST }
+  - { match: [cargo, build], code: BUILD_TEST }
+  - { match: [cargo, clippy], code: BUILD_TEST }
+  - { match: [cargo, fmt], code: BUILD_TEST }
+  - { match: [cargo, run], code: BUILD_TEST }
+  - { match: [cargo-msvc], code: BUILD_TEST }
+  - { match: [pytest], code: BUILD_TEST }
+  - { match: [python, -m, pytest], code: BUILD_TEST }
+  - { match: [python, -m, unittest], code: BUILD_TEST }
+  - { match: [go, test], code: BUILD_TEST }
+  - { match: [go, build], code: BUILD_TEST }
+  - { match: [go, vet], code: BUILD_TEST }
+  - { match: [dotnet, test], code: BUILD_TEST }
+  - { match: [dotnet, build], code: BUILD_TEST }
+  - { match: [tsc], code: BUILD_TEST }
+  - { match: [vitest], code: BUILD_TEST }
+  - { match: [jest], code: BUILD_TEST }
+  - { match: [eslint], code: BUILD_TEST }
+  - { match: [prettier], code: BUILD_TEST }
+  - { match: [ruff], code: BUILD_TEST }
+  - { match: [mypy], code: BUILD_TEST }
+  - { match: [make], code: BUILD_TEST }
+
+  # network
+  - { match: [curl], code: NET_ACCESS }
+  - { match: [invoke-webrequest], code: NET_ACCESS }
+  - { match: [invoke-restmethod], code: NET_ACCESS }
+  - { match: [start-bitstransfer], code: NET_ACCESS }
+  - { match: [ssh], code: NET_ACCESS }
+  - { match: [scp], code: NET_ACCESS }
+  - { match: [sftp], code: NET_ACCESS }
+  - { match: [ftp], code: NET_ACCESS }
+  - { match: [nc], code: NET_ACCESS }
+  - { match: [ncat], code: NET_ACCESS }
+  - { match: [telnet], code: NET_ACCESS }
+  - { match: [test-netconnection], code: NET_ACCESS }
+  - { match: [ping], code: NET_ACCESS }
+
+  # processes / environment
+  - { match: [stop-process], code: PROC_KILL }
+  - { match: [taskkill], code: PROC_KILL }
+  - { match: [pkill], code: PROC_KILL }
+  - { match: [killall], code: PROC_KILL }
+  - { match: [env], code: ENV_READ }
+  - { match: [printenv], code: ENV_READ }
+  - { match: [set], code: ENV_READ }
+  - { match: [get-childitem, "env:"], code: ENV_READ }
+
+  # dynamic execution
+  - { match: [invoke-expression], code: DYNAMIC_EXEC }
+  - { match: [eval], code: DYNAMIC_EXEC }
+  - { match: [invoke-command], code: DYNAMIC_EXEC }
+  - { match: [source], code: DYNAMIC_EXEC }
+
+  # filesystem mutations
+  - { match: [remove-item], code: FS_DELETE }
+  - { match: [clear-content], code: FS_DELETE }
+  - { match: [copy-item], code: WRITE_WS }
+  - { match: [move-item], code: WRITE_WS }
+  - { match: [new-item], code: WRITE_WS }
+  - { match: [set-content], code: WRITE_WS }
+  - { match: [add-content], code: WRITE_WS }
+  - { match: [out-file], code: WRITE_WS }
+  - { match: [touch], code: WRITE_WS }
+  - { match: [rename-item], code: WRITE_WS }
+
+  # read-only
+  - { match: [get-childitem], code: READ_CMD }
+  - { match: [get-content], code: READ_CMD }
+  - { match: [get-item], code: READ_CMD }
+  - { match: [test-path], code: READ_CMD }
+  - { match: [get-location], code: READ_CMD }
+  - { match: [resolve-path], code: READ_CMD }
+  - { match: [get-command], code: READ_CMD }
+  - { match: [write-output], code: READ_CMD }
+  - { match: [write-host], code: READ_CMD }
+  - { match: [select-string], code: READ_CMD }
+  - { match: [select-object], code: READ_CMD }
+  - { match: [where-object], code: READ_CMD }
+  - { match: [foreach-object], code: READ_CMD }
+  - { match: [sort-object], code: READ_CMD }
+  - { match: [measure-object], code: READ_CMD }
+  - { match: [format-table], code: READ_CMD }
+  - { match: [format-list], code: READ_CMD }
+  - { match: [out-string], code: READ_CMD }
+  - { match: [convertfrom-json], code: READ_CMD }
+  - { match: [convertto-json], code: READ_CMD }
+  - { match: [findstr], code: READ_CMD }
+  - { match: [where], code: READ_CMD }
+  - { match: [which], code: READ_CMD }
+  - { match: [rg], code: READ_CMD }
+  - { match: [grep], code: READ_CMD }
+  - { match: [find], code: FS_DELETE, flags_any: ["-delete"] }
+  - { match: [find], code: DYNAMIC_EXEC, flags_any: ["-exec", "-execdir", "-ok"] }
+  - { match: [find], code: READ_CMD }
+  - { match: [head], code: READ_CMD }
+  - { match: [tail], code: READ_CMD }
+  - { match: [wc], code: READ_CMD }
+  - { match: [sort], code: READ_CMD }
+  - { match: [uniq], code: READ_CMD }
+  - { match: [tree], code: READ_CMD }
+  - { match: [true], code: READ_CMD }
+
+# Exec sinks: a pipeline segment that runs its stdin / an argument as code.
+exec_sinks: [sh, bash, zsh, cmd, powershell, pwsh, invoke-expression, python, python3, node, perl, ruby]
+# Downloaders: earlier pipeline segments that fetch remote content.
+downloaders: [curl, invoke-webrequest, invoke-restmethod, start-bitstransfer]
+# Interpreters: run a script file (RUN_SCRIPT) or inline code (INLINE_CODE).
+interpreters: [python, python3, py, node, deno, bun, ruby, perl, powershell, pwsh, bash, sh, cmd]
+# Flags that mean "inline code follows" for interpreters.
+inline_flags: ["-c", "-e", "--eval", "-command", "/c", "-p"]
+# Flags that mean "encoded command" for powershell/pwsh.
+encoded_flags: ["-encodedcommand", "-enc", "-ec", "-en", "-encoded"]
+# Upload flags: combined with a secret path → SECRET_EXFIL.
+upload_flags: ["-d", "--data", "--data-binary", "-f", "--form", "-t", "--upload-file", "-infile", "-body"]
+# Secret path patterns (case-insensitive, matched on path basename or any segment).
+secret_patterns: [".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12", "id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", ".ssh", ".aws", ".npmrc", ".pypirc", ".git-credentials", ".netrc", "credentials", "credentials.json", "secrets.*"]
+# Codes that always re-ask: "remember" is ignored for a verdict containing any of them.
+never_remember: [PKG_PUBLISH, GH_MERGE, GIT_DESTRUCTIVE, FS_DELETE, FS_OUTSIDE_WS, SECRET_READ, ENV_READ, UNPARSED, DYNAMIC_EXEC, INLINE_CODE, TAINTED_CONTEXT, UNKNOWN_TOOL]
+# Codes whose approved run feeds arbitrary outside text to the model (sets session taint).
+# Package/git logs are not included: their output is tool chatter, not fetched content.
+taint_codes: [NET_ACCESS, MCP_CALL, MCP_READ]
+# Programs whose first non-flag argument is part of the remembered pattern (`npm install *`).
+subcommand_programs: [git, npm, pnpm, yarn, bun, cargo, pip, pip3, uv, poetry, go, dotnet, winget, choco, scoop, docker, kubectl, npx, gh]
+# Workspace files only the Engine may write.
+policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml", ".silence/network.json"]
+
+# --- Autonomous mode (sandbox Ready): who decides, see docs/security/permissions.md ---------
+# Codes a sandboxed run makes safe enough to skip the question. A call whose verdict has any
+# tier>=ask code outside this list (and outside never_escalate) still asks. NET_ACCESS only counts
+# when every host is allowlisted; FS_DELETE only when the turn has a git snapshot to undo from.
+sandbox_covers: [UNKNOWN_COMMAND, RUN_SCRIPT, BUILD_TEST, INLINE_CODE, DYNAMIC_EXEC, UNPARSED, PKG_EXEC, PKG_INSTALL, FS_DELETE, PROC_KILL, NET_ACCESS, TAINTED_CONTEXT]
+# Always ask, even in the sandbox: they act with the real user's identity or leave the machine.
+always_ask: [GIT_NETWORK, GIT_COMMIT, GIT_DESTRUCTIVE, GH_WRITE, GH_MERGE, PKG_PUBLISH, MCP_CALL, ENV_READ]
+# Blocked calls that the escalation card may never offer to run: the card only has "Dừng".
+never_escalate: [POLICY_TAMPER, GIT_PUSH_DEFAULT, GIT_NO_VERIFY, SECRET_EXFIL, NET_DOWNLOAD_EXEC, ENCODED_COMMAND, FS_DELETE_SYSTEM]
