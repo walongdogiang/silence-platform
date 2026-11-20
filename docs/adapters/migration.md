@@ -53,9 +53,11 @@ Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc 
 | 1.2 | `feat/core-skeleton` | `packages/core`: API không phụ thuộc kênh truyền, host tiến trình riêng do Studio khởi chạy, client trong main/renderer, công tắc đường cũ/đường mới |
 | 1.3 | `feat/core-risk` | Port Risk Engine + quyền + so khác biệt với corpus |
 | 1.4 | `feat/core-log` | Event log, audit, redact, snapshot |
-| 1.5 | `feat/adapter-claude` | Interface `Backend`, adapter Claude, hook → Risk Engine → UI, diff trước khi ghi, taint, phát hiện đăng nhập, quota; test record/replay |
+| 1.5a | `feat/adapter-claude` | Interface `Backend`, adapter Claude (hook `PreToolUse` → `decide`), env chỉ đăng nhập gói, phát hiện đăng nhập, quota; test record/replay |
+| 1.5b | `feat/core-sessions` | Session manager: Risk Engine → Cân bằng (`ask` hỏi qua `session.event`, không người trông thì `deny`, lỗi thì `deny`), diff trước khi ghi, taint, event log/audit/snapshot, `session.create/prompt/abort/permission/close/list` (gồm session ngoài), nạp hồ sơ + plugin `~/.silence` |
+| 1.5c | `feat/studio-core-chat` | Studio dùng lõi cho chat khi `SILENCE_CORE=1` |
 | 1.6 | `feat/repo-config-review` | Duyệt cấu hình repo theo hash |
-| 1.7 | `feat/personal-profile` | Nạp `~/.silence/profile.md` và plugin cá nhân |
+| 1.7 | `feat/personal-profile` | Hồ sơ cá nhân nâng cao (bản cơ bản đã có ở 1.5b): theo project, giới hạn kích thước, xem trong Settings |
 | 1.8 | `feat/verify` | Kiểm chứng theo phạm vi file đổi, trả lỗi cho agent tối đa 2 lần |
 | 1.9 | `feat/lessons` | Nút "ghi bài học" → đề xuất sửa hồ sơ/skill → duyệt → commit vào `~/.silence` |
 | 1.10 | `feat/session-metrics` | Số liệu từ event log; xem session của Claude desktop/terminal |
