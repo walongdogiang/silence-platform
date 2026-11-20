@@ -54,7 +54,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Terminal (ConPTY) | `runtime/src/pty.rs` |
 | Chỉ bind loopback | `runtime/src/bind_policy.rs` |
 | Ẩn secret trong log | `runtime/src/redact.rs` |
-| Entry CLI, chạy eval | `runtime/src/main.rs`; chạy `runtime/src/eval_runner.rs` (`run`, `Suite::attempt`, `resolve_model`), hiệu chỉnh `eval_calibrate.rs` (`pick_model`), lịch sử `eval_history.rs` (`render_summary`, `fail_streak`, `last_run`); trần theo task `eval_runner.rs::TaskMetrics::over_limits`; chọn task theo diff `eval_affects.rs` + `evals/affects.yaml`; cấu hình eval (nguồn mặc định, trần profile, CI) `eval_config.rs` + `evals/config.yaml` (`steps` = các bước của profile; RPC `eval.config.get/set`; UI `components/EvalsSettingsPanel.tsx`); chạy profile `eval_profile.rs::run_profile` (lệnh `evals-profile`, `npm run evals:smoke|nightly|weekly`); kiểm nguồn trước khi chạy `providers.rs::source_ready`; hướng dẫn `evals/README.md` |
+| Entry CLI, chạy eval | `runtime/src/main.rs`; chạy `runtime/src/eval_runner.rs` (`run`, `Suite::attempt`, `resolve_model`), hiệu chỉnh `eval_calibrate.rs` (`pick_model`), lịch sử `eval_history.rs` (`render_summary`, `fail_streak`, `last_run`); trần theo task `eval_runner.rs::TaskMetrics::over_limits`; chọn task theo diff `eval_affects.rs` + `evals/affects.yaml`; cấu hình eval (nguồn mặc định, trần profile, CI) `eval_config.rs` + `evals/config.yaml` (`steps` = các bước của profile; RPC `eval.config.get/set`; UI `components/EvalsSettingsPanel.tsx`); chạy profile `eval_profile.rs::run_profile` (lệnh `evals-profile`, `npm run evals:smoke|nightly|weekly`, workflow `evals.yml`); kiểm nguồn trước khi chạy `providers.rs::source_ready`; hướng dẫn `evals/README.md` |
 | Eval trong Studio | trang `renderer/components/EvalsPage.tsx`, cấu hình `renderer/evalConfig.ts`; RPC `eval.catalog/estimate/start/cancel/runs/task` ở `runtime/src/eval_rpc.rs` (`EvalHost`); tiến độ `eval_runner::run_with` → `EvalProgress` → notification `eval.progress` (`rpc.rs::pump_eval`, main → IPC `silence-eval`); quy đổi model theo nguồn `router/src/auto.rs::same_model_on`; ước tính `eval_history::estimate` |
 | Tool `read`/`write`/`edit`/`glob`/`grep`/`shell`/`git_*`, jail workspace | `crates/tools/src/lib.rs` (`specs`, `Workspace`, `shell_command`) |
 | Chặn ghi đè thay đổi bên ngoài: file đổi trên đĩa sau lần agent đọc/ghi cuối thì `write` bị từ chối tới khi đọc lại, `edit` chạy kèm ghi chú; Apply bản đề xuất (Ask/Allowlist) bị từ chối nếu file đã đổi sau khi đề xuất | `runtime/src/agent/fresh.rs` (`stale_write`, `stale_edit_note`, `after_tool`; `Session.seen`); gọi trong `agent/mod.rs::dispatch_tool` trước Risk Engine; `agent/changes.rs::apply_diff`; eval `E06-edit-keep-outside-change` |
@@ -90,6 +90,8 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Entry khi chạy trong `utilityProcess` | `packages/core/src/host/utility.ts` |
 | Interface `Backend`, `ToolCall`, `Decision`, sự kiện | `packages/core/src/backends/types.ts` (spec `docs/adapters/protocol.md`) |
 | Risk Engine bản TS (port từ `crates/runtime/src/risk`) | `packages/core/src/risk/classify.ts` (`classify`, `classifyCommand`, `Verdict`, `shellPattern`); parser `risk/command.ts`; policy `packages/core/policy/default_policy.yaml` + `corpus.yaml` (test giữ giống hệt bản Rust cho tới khi xoá Rust) |
+| Event log từng session, audit, ẩn secret | `packages/core/src/store/eventLog.ts` (`EventLog`, `<dataDir>/sessions/<id>/events.jsonl`), `store/audit.ts` (`AuditLog`), `store/redact.ts`; ghi tuần tự theo file `store/jsonl.ts` |
+| Snapshot git theo lượt (Undo) | `packages/core/src/git/snapshot.ts` (`takeSnapshot`, `restoreSnapshot`, `refs/silence/snap/<session>/<turn>`) |
 | Studio khởi động lõi, IPC `silence-core` | `apps/studio/src/main/core.ts` (`startCore`, `coreEnabled`); `main/index.ts::connectCore` |
 
 ## Protocol (đổi cả hai)
@@ -112,7 +114,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Ô nhập, mode, model | `renderer/components/Composer.tsx`, `renderer/modes.ts`, `renderer/models.ts` |
 | Diff | `renderer/components/DiffPane.tsx`, `DiffCard.tsx`, `renderer/unifiedDiff.ts`, `renderer/diffSummary.ts` |
 | Lịch sử chat, tab | `renderer/components/ChatHistoryPanel.tsx`, `ChatTabBar.tsx` |
-| Khung cửa sổ | `renderer/components/TitleBar.tsx`, `BottomPanel.tsx` |
+| Khung cửa sổ | `renderer/components/TitleBar.tsx`, `Sidebar.tsx`, `BottomPanel.tsx` |
 | Quyền (Settings) | `renderer/components/PermissionsSection.tsx` |
 | Thông báo lỗi cho user | `renderer/errorCopy.ts`, `components/ErrorCard.tsx` |
 | Theme, token màu | `renderer/theme/tokens.css`, `theme/appearance.ts`; spec: `docs/frontend/tokens.md` |
