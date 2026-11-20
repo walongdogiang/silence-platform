@@ -95,6 +95,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Adapter Claude (Agent SDK): hook PreToolUse → `decide`, env cho phép, ánh xạ tool, sự kiện | `packages/core/src/backends/claude/index.ts` (`ClaudeBackend`), `toolMap.ts` (`toToolCall`, `CLAUDE_TOOLS`), `env.ts` (`claudeEnv`); test bằng `query` giả `claude.test.ts` |
 | Session của lõi: quyết định tool call (Risk Engine → Cân bằng → hỏi user), `session.*` RPC, `session.event`, diff trước khi ghi, taint, log/audit/snapshot | `packages/core/src/sessions/manager.ts` (`SessionManager.decide`, `toClient`), đăng ký method ở `core.ts::createCoreWithSessions`; hồ sơ/plugin `~/.silence` và thư mục dữ liệu lõi ở `sessions/personal.ts` (`loadPersonal`, `silenceHome`, `coreDataDir`); test `sessions/manager.test.ts` |
 | Studio khởi động lõi, IPC `silence-core` | `apps/studio/src/main/core.ts` (`startCore`, `coreEnabled`); `main/index.ts::connectCore` |
+| Duyệt cấu hình repo (hook, MCP, env, helper trong `.claude/settings.json`, `.mcp.json`, `` !`lệnh` `` trong command/skill) theo hash | `packages/core/src/repoConfig/review.ts` (`scanRepoConfig`, `RepoApprovals`); chặn ở `sessions/manager.ts::create`/`prompt` (`REPO_CONFIG_REVIEW` = -32010); hộp thoại Studio `apps/studio/src/main/repoReview.ts` + `main/index.ts::callCoreReviewed` |
 | Chat chạy trên lõi khi `SILENCE_CORE=1` (method nào sang lõi, method nào ở Engine, đổi id model) | `apps/studio/src/main/coreRoute.ts` (`routeRpc`, `toCoreModel`, `splitDelete`); dùng ở `main/index.ts::routedRpc` |
 
 ## Protocol (đổi cả hai)

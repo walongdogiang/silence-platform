@@ -80,6 +80,14 @@ Test còn lại (4, 7, và chờ 5 phút) làm trong PR adapter thật.
 
 Hook dạng lệnh trong `.claude/settings.json` và server trong `.mcp.json` chạy tiến trình **ngoài** tool call, nên hook `PreToolUse` không thấy. Spike cho thấy hook dạng lệnh của project **không** chạy khi headless trong thư mục chưa trust; `.mcp.json` và `env` chưa thử, nên vẫn duyệt. Trước `start`, lõi đọc các file này (kể cả `env`, `apiKeyHelper` trong settings và lệnh slash của project). Nếu có hook hoặc MCP server chưa duyệt (so theo hash nội dung), lõi hỏi người dùng. Từ chối thì không mở session với `settingSources: ['project']`.
 
+Đã làm ở 1.6 (`packages/core/src/repoConfig/review.ts`):
+
+- **Mục được liệt kê:** trong `.claude/settings.json` có `hooks` (từng lệnh/URL), từng biến `env`, `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `otelHeadersHelper`, `statusLine`, `fileSuggestion`, `enabledPlugins`, `extraKnownMarketplaces`, `enableAllProjectMcpServers`, `enabledMcpjsonServers`, `mcpServers`. Trong `.mcp.json` có từng server (lệnh + tên biến env). Trong `.claude/commands/**/*.md` và `.claude/skills/**/*.md` có mỗi `` !`lệnh` ``. File JSON hỏng được liệt kê dạng `invalid`.
+- **Hash:** sha256 của danh sách mục, nên sửa vô hại (quyền, model, định dạng) không làm hỏi lại. Bản duyệt lưu theo workspace ở `<dataDir>/repo-config-approvals.jsonl`; `repo_config.approve` chỉ nhận hash khớp với nội dung trên đĩa lúc đó.
+- **`session.create`:** chưa duyệt thì trả lỗi JSON-RPC `-32010` (`REPO_CONFIG_REVIEW`) kèm `data.review`. Client duyệt (`repo_config.approve`) rồi gọi lại, hoặc gọi lại với `repo_config: "ignore"`: khi đó adapter dùng `settingSources: []`, không nạp `CLAUDE.md`, skill, hook, MCP của repo. Không người trông thì tự chạy kiểu `ignore` và ghi audit.
+- **Mỗi lượt:** lõi quét lại; cấu hình đổi sang nội dung chưa duyệt thì `session.prompt` trả `-32010`, lượt không chạy.
+- **Studio:** main hiện hộp thoại native liệt kê các mục (`apps/studio/src/main/repoReview.ts`) với Cho phép / Chạy không dùng cấu hình repo / Huỷ; giữa session chỉ có Cho phép / Huỷ.
+
 ## Ánh xạ tool Claude → tên trung lập
 
 | Tool Claude | `kind` | `name` (Risk Engine) |

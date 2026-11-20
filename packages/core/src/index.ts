@@ -12,5 +12,6 @@ export { ClaudeBackend, CLAUDE_CAPABILITIES, type ClaudeBackendOptions, type Que
 export { claudeEnv, AUTH_VARS } from "./backends/claude/env.js";
 export { toToolCall, CLAUDE_TOOLS } from "./backends/claude/toolMap.js";
 export { createCoreWithSessions, type Core } from "./core.js";
-export { SessionManager, applyEdit, parseImages, type ClientEvent, type ExternalSession, type SessionManagerOptions } from "./sessions/manager.js";
+export { SessionManager, REPO_CONFIG_REVIEW, applyEdit, parseImages, type ClientEvent, type ExternalSession, type SessionManagerOptions } from "./sessions/manager.js";
 export { loadPersonal, silenceHome, coreDataDir, type Personal } from "./sessions/personal.js";
+export { scanRepoConfig, hashItems, RepoApprovals, type RepoItem, type RepoItemKind, type RepoReview } from "./repoConfig/review.js";
