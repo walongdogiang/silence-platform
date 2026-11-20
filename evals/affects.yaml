@@ -24,7 +24,6 @@ rules:
       - "evals/README.md"
       - "evals/affects.yaml"
       - "evals/config.yaml"
-      - ".github/workflows/evals.yml"
       - "docs/**"
       - "apps/**"
       - ".claude/**"
