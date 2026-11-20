@@ -61,6 +61,8 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("session.prompt", (p, ctx) => sessions.prompt(p, ctx));
   server.register("session.abort", (p) => sessions.abort(p));
   server.register("session.permission", (p) => sessions.permission(p));
+  server.register("session.set_mode", (p) => sessions.setMode(p));
+  server.register("session.set_model", (p) => sessions.setModel(p));
   server.register("session.close", (p) => sessions.close(p));
   server.register("session.list", (p) => sessions.list(p));
   return { server, sessions };

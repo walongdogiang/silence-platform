@@ -30,7 +30,7 @@ function setup(script: Script, opts: { unattended?: boolean; mode?: string; exte
   const ws = tmp("core-ws-");
   writeFileSync(path.join(ws, "a.txt"), "hello world\n");
   const dataDir = tmp("core-data-");
-  const calls = { interrupt: 0, close: 0, snapshots: [] as number[] };
+  const calls = { interrupt: 0, close: 0, snapshots: [] as number[], modes: [] as string[], models: [] as Array<string | undefined> };
   let seen: Options | undefined;
   const queryFn: QueryFn = ({ prompt, options }) => {
     seen = options;
@@ -41,8 +41,8 @@ function setup(script: Script, opts: { unattended?: boolean; mode?: string; exte
     return Object.assign(gen, {
       interrupt: async () => void calls.interrupt++,
       close: () => void calls.close++,
-      setPermissionMode: async () => {},
-      setModel: async () => {},
+      setPermissionMode: async (m: string) => void calls.modes.push(m),
+      setModel: async (m?: string) => void calls.models.push(m),
     }) as unknown as Query;
   };
   let n = 0;
@@ -234,6 +234,24 @@ describe("SessionManager", () => {
     await t.client.call("session.close", { session_id: sid });
     expect(t.calls.close).toBe(1);
     await expect(t.client.call("session.prompt", { session_id: sid, text: "x" })).rejects.toThrow(/unknown session/);
+  });
+
+  it("set_mode reaches the backend and switches ask-mode enforcement; set_model too", async () => {
+    const outs: unknown[] = [];
+    const t = setup(async function* ({ input, hook }) {
+      await input.next();
+      yield init;
+      outs.push(await hook("Write", { file_path: "b.txt", content: "x" }, "t1"));
+      yield result;
+    });
+    const sid = await t.start();
+    await t.client.call("session.set_mode", { session_id: sid, mode: "ask" });
+    await t.client.call("session.set_model", { session_id: sid, model: "haiku" });
+    expect(t.calls.modes).toEqual(["default"]);
+    expect(t.calls.models).toEqual(["haiku"]);
+    await t.client.call("session.prompt", { session_id: sid, text: "x" });
+    await t.next((e) => e.type === "done");
+    expect(outs[0]).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
   });
 
   it("refuses yolo and a missing workspace", async () => {

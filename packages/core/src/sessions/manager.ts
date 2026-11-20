@@ -188,6 +188,31 @@ export class SessionManager {
     return { ok: true };
   }
 
+  /** Change the mode for the next tool calls (ask mode is enforced here; plan goes to the backend too). */
+  async setMode(params: unknown): Promise<{ ok: true }> {
+    const p = obj(params);
+    const s = this.get(p.session_id);
+    const mode = toMode(p.mode);
+    if (mode !== s.mode) {
+      s.mode = mode;
+      await s.handle.setMode?.(mode);
+    }
+    return { ok: true };
+  }
+
+  /** Change the model; empty means the backend's default. */
+  async setModel(params: unknown): Promise<{ ok: true }> {
+    const p = obj(params);
+    const s = this.get(p.session_id);
+    const model = str(p.model);
+    if (model !== s.model) {
+      await s.handle.setModel?.(model);
+      if (model) s.model = model;
+      else delete s.model;
+    }
+    return { ok: true };
+  }
+
   /** Answer a `permission` event. */
   permission(params: unknown): { ok: boolean } {
     const p = obj(params);

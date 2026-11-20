@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
 import { isPngBytes } from "./clipboardImage";
 import { coreEnabled, startCore, type CoreHandle } from "./core";
+import { routeRpc, splitDelete } from "./coreRoute";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../");
@@ -406,7 +407,7 @@ app.whenReady().then(async () => {
     // Secret-carrying methods go through `silence-credentials-*` only.
     if (MAIN_ONLY_RPC.has(method)) return { error: `${method} is main-process only` };
     try {
-      return { result: await rpc(method, params) };
+      return { result: await routedRpc(method, params) };
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }
@@ -497,12 +498,47 @@ async function connectCore(): Promise<void> {
   try {
     core = await startCore((code) => {
       core = null;
+      coreSessions.clear();
       console.error(`[core] exited with code ${code}`);
+    });
+    // Core sessions stream the same `session.event` shape as the Engine.
+    core.client.onNotification((method, params) => {
+      if (method === "session.event") sendToRenderer(params);
     });
     const info = await core.client.call("core.info");
     console.log("[core] ready", JSON.stringify(info));
   } catch (err) {
     console.error("[core] failed to start:", err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** Chat sessions the core created in this run (1.5c); the rest of the app stays on the Engine. */
+const coreSessions = new Set<string>();
+
+async function routedRpc(method: string, params?: unknown): Promise<unknown> {
+  const c = core;
+  if (c && method === "session.delete") {
+    const { core: ours, engine } = splitDelete(params, coreSessions);
+    for (const id of ours) {
+      coreSessions.delete(id);
+      await c.client.call("session.close", { session_id: id }).catch(() => undefined);
+    }
+    if (!engine.length) return {};
+    return rpc(method, { ...(params as object), session_ids: engine });
+  }
+  const r = routeRpc(method, params, c !== null, coreSessions);
+  switch (r.to) {
+    case "engine":
+      return rpc(method, params);
+    case "local":
+      return r.result;
+    case "error":
+      throw new Error(r.message);
+    case "core": {
+      const out = await c!.client.call(r.method, r.params);
+      if (r.method === "session.create") coreSessions.add((out as { session_id: string }).session_id);
+      return out;
+    }
   }
 }
 

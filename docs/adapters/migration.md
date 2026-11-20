@@ -55,7 +55,7 @@ Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc 
 | 1.4 | `feat/core-log` | Event log, audit, redact, snapshot |
 | 1.5a | `feat/adapter-claude` | Interface `Backend`, adapter Claude (hook `PreToolUse` → `decide`), env chỉ đăng nhập gói, phát hiện đăng nhập, quota; test record/replay |
 | 1.5b | `feat/core-sessions` | Session manager: Risk Engine → Cân bằng (`ask` hỏi qua `session.event`, không người trông thì `deny`, lỗi thì `deny`), diff trước khi ghi, taint, event log/audit/snapshot, `session.create/prompt/abort/permission/close/list` (gồm session ngoài), nạp hồ sơ + plugin `~/.silence` |
-| 1.5c | `feat/studio-core-chat` | Studio dùng lõi cho chat khi `SILENCE_CORE=1` |
+| 1.5c | `feat/studio-core-chat` | Studio dùng lõi cho chat khi `SILENCE_CORE=1`: main định tuyến `session.create` và các method lượt (`prompt`/`abort`/`permission`/`set_mode`/`set_model`) của session lõi sang lõi; renderer không đổi; còn lại (fs, terminal, lịch sử, eval) ở Engine. Chưa có trên lõi: `session.context`, `rewind`, `fork`, lịch sử chat |
 | 1.6 | `feat/repo-config-review` | Duyệt cấu hình repo theo hash |
 | 1.7 | `feat/personal-profile` | Hồ sơ cá nhân nâng cao (bản cơ bản đã có ở 1.5b): theo project, giới hạn kích thước, xem trong Settings |
 | 1.8 | `feat/verify` | Kiểm chứng theo phạm vi file đổi, trả lỗi cho agent tối đa 2 lần |
