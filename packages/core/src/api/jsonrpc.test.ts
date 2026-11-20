@@ -95,6 +95,6 @@ describe("createCore", () => {
     await expect(client.call("core.ping")).resolves.toBe("pong");
     const info = await client.call<{ host: string; methods: string[] }>("core.info");
     expect(info.host).toBe("test");
-    expect(info.methods).toEqual(["core.info", "core.ping", "repo_config.approve", "repo_config.review", "session.abort", "session.close", "session.create", "session.list", "session.permission", "session.prompt", "session.set_mode", "session.set_model"]);
+    expect(info.methods).toEqual(["core.info", "core.ping", "profile.status", "repo_config.approve", "repo_config.review", "session.abort", "session.close", "session.create", "session.list", "session.permission", "session.prompt", "session.set_mode", "session.set_model"]);
   });
 });

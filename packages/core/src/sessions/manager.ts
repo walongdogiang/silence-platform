@@ -78,6 +78,8 @@ interface Session {
   running: boolean;
   /** This turn already took in outside content (web, MCP): the Risk Engine tightens shell calls. */
   tainted: boolean;
+  /** Problems found in `~/.silence` at start, shown once with the first turn. */
+  personalWarnings: string[];
   /** The backend loads the repo's own config (approved, or nothing to review). */
   projectConfig: boolean;
   /** Hash of the repo config the session started with (empty when none). */
@@ -102,7 +104,6 @@ function obj(params: unknown): Record<string, unknown> {
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
-  private personal: Promise<Personal> | null = null;
   /** Log/audit writes started from events; `list` and `close` wait for them. */
   private readonly inflight = new Set<Promise<unknown>>();
 
@@ -110,7 +111,7 @@ export class SessionManager {
 
   // ---- RPC ---------------------------------------------------------------------------------
 
-  async create(params: unknown, ctx?: CallContext): Promise<{ session_id: string }> {
+  async create(params: unknown, ctx?: CallContext): Promise<{ session_id: string; personal: PersonalSummary }> {
     const p = obj(params);
     const cwd = str(p.workspace);
     if (!cwd) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
@@ -122,7 +123,8 @@ export class SessionManager {
     const mode = toMode(p.mode);
     const model = str(p.model);
     const effort = str(p.effort) as Effort | undefined;
-    const personal = await (this.personal ??= loadPersonal(this.o.home));
+    // Read fresh each session: editing ~/.silence applies to the next chat without restarting.
+    const personal = await loadPersonal(this.o.home, cwd);
     const resume = str(p.resume_backend_session);
     const unattended = p.unattended === true;
     const review = await scanRepoConfig(cwd);
@@ -148,6 +150,7 @@ export class SessionManager {
       turn: 0,
       running: false,
       tainted: false,
+      personalWarnings: personal.warnings,
     } as Omit<Session, "handle"> as Session;
     this.sessions.set(id, s);
     await this.o.log.append(id, { type: "session.start", cwd: s.cwd, backend: backendId, mode, ...(model ? { model } : {}) });
@@ -162,7 +165,7 @@ export class SessionManager {
           mode,
           ...(model ? { model } : {}),
           ...(effort && effort !== ("auto" as string) ? { effort } : {}),
-          ...(personal.profile ? { systemAppend: personal.profile } : {}),
+          ...(personal.systemAppend ? { systemAppend: personal.systemAppend } : {}),
           ...(personal.plugins.length ? { plugins: personal.plugins } : {}),
           ...(resume ? { resume: { backendSessionId: resume, fork: p.fork === true } } : {}),
           ...(projectConfig ? {} : { projectConfig: false }),
@@ -174,7 +177,14 @@ export class SessionManager {
       await this.o.log.append(id, { type: "session.end", reason: `start failed: ${e instanceof Error ? e.message : String(e)}` });
       throw e;
     }
-    return { session_id: id };
+    this.track(this.o.audit.append({ session: id, kind: "personal", detail: { ...personalSummary(personal) } }));
+    return { session_id: id, personal: personalSummary(personal) };
+  }
+
+  /** What `~/.silence` gives a session in `workspace` (profile, project profile, plugin, warnings). */
+  async profileStatus(params: unknown): Promise<PersonalSummary> {
+    const p = (typeof params === "object" && params !== null ? params : {}) as Record<string, unknown>;
+    return personalSummary(await loadPersonal(this.o.home, str(p.workspace)));
   }
 
   async prompt(params: unknown, ctx?: CallContext): Promise<{ ok: true; turn: number }> {
@@ -196,6 +206,7 @@ export class SessionManager {
     }
     s.turn += 1;
     s.running = true;
+    if (s.turn === 1 && s.personalWarnings.length) this.emit(s, { type: "trace", event: "profile", detail: { warnings: s.personalWarnings } });
     s.tainted = false;
     await this.o.log.append(s.id, { type: "user", text });
     try {
@@ -504,6 +515,13 @@ export class SessionManager {
       await this.o.log.append(s.id, { type: "session.end", reason });
     }
   }
+}
+
+/** RPC shape of the personal layer (no profile text: it may be long and is the user's own file). */
+export type PersonalSummary = Omit<Personal, "systemAppend" | "plugins">;
+
+function personalSummary(p: Personal): PersonalSummary {
+  return { home: p.home, profile: p.profile, project: p.project, plugin: p.plugin, warnings: p.warnings };
 }
 
 function reviewNeeded(review: RepoReview): RpcFailure {

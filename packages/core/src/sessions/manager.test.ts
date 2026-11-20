@@ -26,7 +26,8 @@ const text = (t: string) => ({ type: "stream_event", parent_tool_use_id: null, e
 function setup(script: Script, opts: { unattended?: boolean; mode?: string; external?: Array<{ sessionId: string; summary: string; lastModified: number; cwd?: string }> } = {}) {
   const home = tmp("core-home-");
   writeFileSync(path.join(home, "profile.md"), "Tôi là một lập trình viên.\n");
-  mkdirSync(path.join(home, "plugin"));
+  mkdirSync(path.join(home, "plugin", ".claude-plugin"), { recursive: true });
+  writeFileSync(path.join(home, "plugin", ".claude-plugin", "plugin.json"), JSON.stringify({ name: "me" }));
   const ws = tmp("core-ws-");
   writeFileSync(path.join(ws, "a.txt"), "hello world\n");
   const dataDir = tmp("core-data-");
