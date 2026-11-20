@@ -26,7 +26,8 @@ client (Studio main/renderer, PWA) ──API lõi──► packages/core ──i
 | WebSocket | Điện thoại (giai đoạn 4) | Chỉ nghe `127.0.0.1`; `tailscale serve` đưa ra mạng riêng; token; duyệt lệnh rủi ro cần xác nhận thêm |
 
 - Request/response JSON-RPC 2.0 và notification `session.event`, giống RPC hiện tại của Studio. Giữ tên method hiện có (`session.create`, `session.prompt`, `session.abort`, `session.permission`, `diff.*`, `fs.*`, `terminal.*`…) khi ý nghĩa không đổi, để renderer ít phải sửa.
-- Method mới: `session.list_external` (session tạo từ Claude desktop/terminal), `lesson.add`, `verify.status`, `quota.status`, `repo_config.review`/`approve`.
+- Method mới: `session.close`; `session.list` trả `{ sessions, external }`, `external` là session tạo từ Claude desktop/terminal (bỏ qua `{ external: false }`); sau này: `lesson.add`, `verify.status`, `quota.status`, `repo_config.review`/`approve`.
+- `session.create` của lõi nhận thêm `unattended` (không người trông: `ask` thành `deny`), `backend` (mặc định `claude`), `resume_backend_session` + `fork`. Đã có ở 1.5b: `session.create`/`prompt`/`abort`/`permission`/`close`/`list` (`packages/core/src/sessions/manager.ts`).
 - Renderer gọi qua một client trừu tượng; client chọn kênh. Renderer không biết đang chạy trong Electron hay trên web.
 
 ## Interface `Backend` (lõi ↔ adapter, trong tiến trình)
@@ -94,7 +95,7 @@ Lỗi hoặc huỷ khi đang chờ `decide` → adapter coi là `deny` với lý
 
 Mã lỗi: `auth_required`, `quota_exhausted`, `rate_limited`, `overloaded`, `backend_crashed`, `backend_not_found`, `unsupported`, `internal`.
 
-Lõi đổi các sự kiện này thành `SessionEvent` hiện có cho client (`Token`, `Thinking`, `ToolStart`, `ToolEnd`, `Permission`, `Diff`, `Cost`, `Done`, `Error`), thêm `Quota`.
+Lõi đổi các sự kiện này thành `SessionEvent` hiện có cho client (`Token`, `Thinking`, `ToolStart`, `ToolEnd`, `Permission`, `Diff`, `Cost`, `Done`, `Error`), thêm `Quota`. Tới khi `Quota` vào protocol, `quota`, `compacted`, `subagent`, `ready` đi qua `trace` (`event` = tên sự kiện).
 
 ## Vòng đời session
 

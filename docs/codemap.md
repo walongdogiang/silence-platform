@@ -93,6 +93,7 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Event log từng session, audit, ẩn secret | `packages/core/src/store/eventLog.ts` (`EventLog`, `<dataDir>/sessions/<id>/events.jsonl`), `store/audit.ts` (`AuditLog`), `store/redact.ts`; ghi tuần tự theo file `store/jsonl.ts` |
 | Snapshot git theo lượt (Undo) | `packages/core/src/git/snapshot.ts` (`takeSnapshot`, `restoreSnapshot`, `refs/silence/snap/<session>/<turn>`) |
 | Adapter Claude (Agent SDK): hook PreToolUse → `decide`, env cho phép, ánh xạ tool, sự kiện | `packages/core/src/backends/claude/index.ts` (`ClaudeBackend`), `toolMap.ts` (`toToolCall`, `CLAUDE_TOOLS`), `env.ts` (`claudeEnv`); test bằng `query` giả `claude.test.ts` |
+| Session của lõi: quyết định tool call (Risk Engine → Cân bằng → hỏi user), `session.*` RPC, `session.event`, diff trước khi ghi, taint, log/audit/snapshot | `packages/core/src/sessions/manager.ts` (`SessionManager.decide`, `toClient`), đăng ký method ở `core.ts::createCoreWithSessions`; hồ sơ/plugin `~/.silence` và thư mục dữ liệu lõi ở `sessions/personal.ts` (`loadPersonal`, `silenceHome`, `coreDataDir`); test `sessions/manager.test.ts` |
 | Studio khởi động lõi, IPC `silence-core` | `apps/studio/src/main/core.ts` (`startCore`, `coreEnabled`); `main/index.ts::connectCore` |
 
 ## Protocol (đổi cả hai)
