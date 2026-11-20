@@ -12,6 +12,10 @@ import { classify, shellPattern, type Verdict } from "../risk/classify.js";
 import type { AuditLog } from "../store/audit.js";
 import type { EventLog } from "../store/eventLog.js";
 import { loadPersonal, type Personal } from "./personal.js";
+import { scanRepoConfig, type RepoApprovals, type RepoReview } from "../repoConfig/review.js";
+
+/** JSON-RPC error: the repo config needs the user's review first (`data.review`: `RepoReview`). */
+export const REPO_CONFIG_REVIEW = -32010;
 
 /** `SessionEvent` of `packages/protocol` (subset the core emits). */
 export type ClientEvent =
@@ -46,6 +50,8 @@ export interface SessionManagerOptions {
   home: string;
   /** Lists the backend's own sessions (Claude: SDK `listSessions`). */
   listExternal?: (opts: { dir?: string; limit?: number }) => Promise<ExternalSession[]>;
+  /** Approved repo-config hashes (roadmap 1.6). */
+  approvals: RepoApprovals;
   /** Injected in tests; default `takeSnapshot`. */
   snapshot?: (root: string, session: string, turn: number) => Promise<string | null>;
   newId?: () => string;
@@ -72,6 +78,10 @@ interface Session {
   running: boolean;
   /** This turn already took in outside content (web, MCP): the Risk Engine tightens shell calls. */
   tainted: boolean;
+  /** The backend loads the repo's own config (approved, or nothing to review). */
+  projectConfig: boolean;
+  /** Hash of the repo config the session started with (empty when none). */
+  configHash: string;
 }
 
 const DIFF_MAX_BYTES = 512 * 1024;
@@ -114,6 +124,14 @@ export class SessionManager {
     const effort = str(p.effort) as Effort | undefined;
     const personal = await (this.personal ??= loadPersonal(this.o.home));
     const resume = str(p.resume_backend_session);
+    const unattended = p.unattended === true;
+    const review = await scanRepoConfig(cwd);
+    let projectConfig = true;
+    if (p.repo_config === "ignore") projectConfig = false;
+    else if (!(await this.o.approvals.isApproved(review.workspace, review.hash))) {
+      if (!unattended) throw reviewNeeded(review);
+      projectConfig = false; // nobody to ask: run without the repo's hooks, MCP servers and CLAUDE.md
+    }
 
     const s = {
       id,
@@ -121,7 +139,9 @@ export class SessionManager {
       backend: backendId,
       mode,
       ...(model ? { model } : {}),
-      unattended: p.unattended === true,
+      unattended,
+      projectConfig,
+      configHash: projectConfig ? review.hash : "",
       clients: new Set<CallContext>(ctx ? [ctx] : []),
       pending: new Map(),
       toolNames: new Map(),
@@ -131,6 +151,9 @@ export class SessionManager {
     } as Omit<Session, "handle"> as Session;
     this.sessions.set(id, s);
     await this.o.log.append(id, { type: "session.start", cwd: s.cwd, backend: backendId, mode, ...(model ? { model } : {}) });
+    if (review.hash) {
+      this.track(this.o.audit.append({ session: id, kind: "repo_config", detail: { hash: review.hash, items: review.items.length, loaded: projectConfig, by: p.repo_config === "ignore" ? "user" : projectConfig ? "approved" : "unattended" } }));
+    }
     try {
       s.handle = await backend.start(
         {
@@ -142,6 +165,7 @@ export class SessionManager {
           ...(personal.profile ? { systemAppend: personal.profile } : {}),
           ...(personal.plugins.length ? { plugins: personal.plugins } : {}),
           ...(resume ? { resume: { backendSessionId: resume, fork: p.fork === true } } : {}),
+          ...(projectConfig ? {} : { projectConfig: false }),
         },
         { decide: (call) => this.decide(s, call), emit: (ev) => this.onEvent(s, ev) },
       );
@@ -162,6 +186,14 @@ export class SessionManager {
     if (!text.trim() && !context) throw new RpcFailure(ErrorCodes.InvalidParams, "text is required");
     if (s.running) throw new RpcFailure(ErrorCodes.InvalidRequest, "a turn is already running");
     const images = parseImages(p.images);
+    if (s.projectConfig) {
+      // The repo config may have changed since the session started (the agent or a pull edited it).
+      const review = await scanRepoConfig(s.cwd);
+      if (review.hash !== s.configHash) {
+        if (!(await this.o.approvals.isApproved(review.workspace, review.hash))) throw reviewNeeded(review);
+        s.configHash = review.hash;
+      }
+    }
     s.turn += 1;
     s.running = true;
     s.tainted = false;
@@ -210,6 +242,27 @@ export class SessionManager {
       if (model) s.model = model;
       else delete s.model;
     }
+    return { ok: true };
+  }
+
+  /** What the repo config of `workspace` would run, and whether that exact content is approved. */
+  async reviewRepoConfig(params: unknown): Promise<RepoReview & { approved: boolean }> {
+    const ws = str(obj(params).workspace);
+    if (!ws) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
+    const review = await scanRepoConfig(ws);
+    return { ...review, approved: await this.o.approvals.isApproved(review.workspace, review.hash) };
+  }
+
+  /** Approve the reviewed config. `hash` must match the config on disk now (no swap after review). */
+  async approveRepoConfig(params: unknown): Promise<{ ok: true }> {
+    const p = obj(params);
+    const ws = str(p.workspace);
+    if (!ws) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
+    const review = await scanRepoConfig(ws);
+    if (!review.hash) return { ok: true };
+    if (p.hash !== review.hash) throw new RpcFailure(REPO_CONFIG_REVIEW, "the repo config changed since it was reviewed", { review });
+    await this.o.approvals.approve(review.workspace, review.hash);
+    await this.o.audit.append({ session: "", kind: "repo_config.approve", path: review.workspace, detail: { hash: review.hash, items: review.items } });
     return { ok: true };
   }
 
@@ -451,6 +504,10 @@ export class SessionManager {
       await this.o.log.append(s.id, { type: "session.end", reason });
     }
   }
+}
+
+function reviewNeeded(review: RepoReview): RpcFailure {
+  return new RpcFailure(REPO_CONFIG_REVIEW, `the repo config of ${review.workspace} runs commands outside tool calls and needs review`, { review });
 }
 
 /** File content after a write/edit call, or null when it cannot be computed. */

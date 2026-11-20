@@ -109,7 +109,7 @@ class ClaudeSession implements SessionHandle {
     return {
       cwd: s.cwd,
       env: claudeEnv(this.opts.env),
-      settingSources: ["project"],
+      settingSources: s.projectConfig === false ? [] : ["project"],
       permissionMode: toSdkMode(s.mode),
       tools: [...CLAUDE_TOOLS],
       systemPrompt: { type: "preset", preset: "claude_code", ...(s.systemAppend ? { append: s.systemAppend } : {}) },

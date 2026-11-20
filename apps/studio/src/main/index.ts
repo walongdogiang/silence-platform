@@ -11,6 +11,7 @@ import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
 import { isPngBytes } from "./clipboardImage";
 import { coreEnabled, startCore, type CoreHandle } from "./core";
 import { routeRpc, splitDelete } from "./coreRoute";
+import { REVIEW_CANCELLED, reviewDialog, reviewFromError } from "./repoReview";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../");
@@ -535,10 +536,29 @@ async function routedRpc(method: string, params?: unknown): Promise<unknown> {
     case "error":
       throw new Error(r.message);
     case "core": {
-      const out = await c!.client.call(r.method, r.params);
+      const out = await callCoreReviewed(c!, r.method, r.params);
       if (r.method === "session.create") coreSessions.add((out as { session_id: string }).session_id);
       return out;
     }
+  }
+}
+
+/** Call the core; when it asks for a repo config review (1.6), ask the user and retry once. */
+async function callCoreReviewed(c: CoreHandle, method: string, params: Record<string, unknown>): Promise<unknown> {
+  try {
+    return await c.client.call(method, params);
+  } catch (err) {
+    const review = reviewFromError(err);
+    if (!review) throw err;
+    const atCreate = method === "session.create";
+    const d = reviewDialog(review, atCreate);
+    const opts = { type: "warning" as const, title: "5ilence", message: d.message, detail: d.detail, buttons: d.buttons, cancelId: d.cancelId, defaultId: d.cancelId, noLink: true };
+    const { response } = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+    const choice = d.choices[response] ?? "cancel";
+    if (choice === "cancel") throw new Error(REVIEW_CANCELLED);
+    if (choice === "ignore") return c.client.call(method, { ...params, repo_config: "ignore" });
+    await c.client.call("repo_config.approve", { workspace: review.workspace, hash: review.hash });
+    return c.client.call(method, params);
   }
 }
 

@@ -3,6 +3,7 @@ import { RpcServer } from "./api/jsonrpc.js";
 import { ClaudeBackend } from "./backends/claude/index.js";
 import { AuditLog } from "./store/audit.js";
 import { EventLog } from "./store/eventLog.js";
+import { RepoApprovals } from "./repoConfig/review.js";
 import { SessionManager, type SessionManagerOptions } from "./sessions/manager.js";
 import { coreDataDir, silenceHome } from "./sessions/personal.js";
 
@@ -16,7 +17,7 @@ export interface CoreOptions {
   /** `~/.silence` (default `silenceHome()`). */
   home?: string;
   /** Overrides for tests: backends, external session listing, snapshots, ids. */
-  sessions?: Partial<Omit<SessionManagerOptions, "log" | "audit" | "home">>;
+  sessions?: Partial<Omit<SessionManagerOptions, "log" | "audit" | "home" | "approvals">>;
 }
 
 export interface Core {
@@ -42,6 +43,7 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
     log: new EventLog(dataDir),
     audit: new AuditLog(dataDir),
     home: opts.home ?? silenceHome(),
+    approvals: new RepoApprovals(dataDir),
     ...(opts.sessions?.snapshot ? { snapshot: opts.sessions.snapshot } : {}),
     ...(opts.sessions?.newId ? { newId: opts.sessions.newId } : {}),
   });
@@ -65,5 +67,7 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("session.set_model", (p) => sessions.setModel(p));
   server.register("session.close", (p) => sessions.close(p));
   server.register("session.list", (p) => sessions.list(p));
+  server.register("repo_config.review", (p) => sessions.reviewRepoConfig(p));
+  server.register("repo_config.approve", (p) => sessions.approveRepoConfig(p));
   return { server, sessions };
 }

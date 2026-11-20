@@ -41,6 +41,11 @@ export interface StartOptions {
   resume?: { backendSessionId: string; fork: boolean; atMessageId?: string };
   limits?: { maxTurns?: number; maxUsd?: number };
   sandbox?: SandboxRequest;
+  /**
+   * Load the repo's own config (CLAUDE.md, skills, settings hooks, MCP servers). Default true.
+   * The core sets false when the user did not approve the repo config (docs/adapters/claude-sdk.md).
+   */
+  projectConfig?: boolean;
 }
 
 export type ToolKind = "read" | "search" | "write" | "edit" | "shell" | "fetch" | "mcp" | "agent" | "plan" | "internal" | "other";

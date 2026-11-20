@@ -167,3 +167,11 @@ describe("helpers", () => {
     expect(t("CronCreate", {})).toMatchObject({ kind: "other", name: "CronCreate" });
   });
 });
+
+describe("ClaudeBackend repo config", () => {
+  it("skips project settings when the core did not approve the repo config", async () => {
+    const fq = fakeQuery(async function* () {});
+    await new ClaudeBackend({ queryFn: fq.fn, env: {} }).start({ sessionId: "c", cwd: "D:/ws", mode: "agent", projectConfig: false }, { decide: async () => ({ action: "allow" }), emit: () => {} });
+    expect(fq.options().settingSources).toEqual([]);
+  });
+});
