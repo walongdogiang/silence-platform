@@ -59,6 +59,7 @@ describe("loadPersonal", () => {
     const p = await loadPersonal(h, ws);
     expect(p.systemAppend).toBe("Nói tiếng Việt.\n\n## Project: shop\n\nDùng pnpm.");
     expect(p.project).toMatchObject({ name: "shop", lines: 1, loaded: true });
+    expect(p.projectName).toBe("shop");
     expect(p.plugin).toMatchObject({ name: "me", skills: ["pr-flow", "verify"], loaded: true });
     expect(p.plugins).toEqual([path.join(h, "plugin")]);
     expect(p.warnings).toEqual([]);
@@ -107,6 +108,6 @@ describe("personal layer in sessions", () => {
     writeFileSync(path.join(h, "profile.md"), "v2");
     await client.call("session.create", { workspace: ws });
     expect(started.map((s) => s.systemAppend)).toEqual(["v1", "v2"]);
-    await expect(client.call("profile.status", { workspace: ws })).resolves.toMatchObject({ home: h, plugin: { skills: ["pr-flow", "verify"] }, warnings: [] });
+    await expect(client.call("profile.status", { workspace: ws })).resolves.toMatchObject({ home: h, project: null, projectName: path.basename(ws), plugin: { skills: ["pr-flow", "verify"] }, warnings: [] });
   });
 });

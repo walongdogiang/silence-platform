@@ -56,6 +56,8 @@ export interface Personal {
   profile: ProfileFile | null;
   /** `~/.silence/projects/<repo>/profile.md` for the session's repo. */
   project: (ProfileFile & { name: string }) | null;
+  /** Project name for the workspace (set whenever a workspace was given), so the UI can say where to create its profile. */
+  projectName?: string;
   plugin: PluginInfo | null;
   /** Local plugin directories passed to the backend. */
   plugins: string[];
@@ -146,6 +148,7 @@ export async function loadPersonal(home: string, workspace?: string): Promise<Pe
   }
   if (workspace) {
     const name = await projectName(workspace);
+    out.projectName = name;
     const proj = await readProfile(path.join(home, "projects", name, "profile.md"), `projects/${name}/profile.md`, warnings);
     if (proj) {
       out.project = { ...proj.info, name };

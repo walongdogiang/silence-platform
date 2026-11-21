@@ -521,7 +521,7 @@ export class SessionManager {
 export type PersonalSummary = Omit<Personal, "systemAppend" | "plugins">;
 
 function personalSummary(p: Personal): PersonalSummary {
-  return { home: p.home, profile: p.profile, project: p.project, plugin: p.plugin, warnings: p.warnings };
+  return { home: p.home, profile: p.profile, project: p.project, ...(p.projectName ? { projectName: p.projectName } : {}), plugin: p.plugin, warnings: p.warnings };
 }
 
 function reviewNeeded(review: RepoReview): RpcFailure {

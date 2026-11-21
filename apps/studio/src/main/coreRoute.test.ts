@@ -33,6 +33,13 @@ describe("routeRpc", () => {
   });
 });
 
+describe("profile.status", () => {
+  it("goes to the core, or answers that it is unavailable when the core is off", () => {
+    expect(routeRpc("profile.status", { workspace: "D:/w" }, true, ids)).toEqual({ to: "core", method: "profile.status", params: { workspace: "D:/w" } });
+    expect(routeRpc("profile.status", { workspace: "D:/w" }, false, ids)).toEqual({ to: "local", result: { available: false } });
+  });
+});
+
 describe("toCoreModel", () => {
   it("maps catalog ids to Claude Code aliases and drops other vendors", () => {
     expect(toCoreModel("claude-sonnet")).toBe("sonnet");

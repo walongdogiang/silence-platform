@@ -120,5 +120,6 @@ Renderer `window.silence.rpc` (`apps/studio/src/preload/index.ts`) → main (`ap
 | Lịch sử chat, tab | `renderer/components/ChatHistoryPanel.tsx`, `ChatTabBar.tsx` |
 | Khung cửa sổ | `renderer/components/TitleBar.tsx`, `Sidebar.tsx`, `BottomPanel.tsx` |
 | Quyền (Settings) | `renderer/components/PermissionsSection.tsx` |
+| Hồ sơ `~/.silence` (Settings, chỉ đọc) | `renderer/components/settings/ProfileSection.tsx` (`ProfileView`, `fileText`); RPC `profile.status` đi lõi qua `main/coreRoute.ts` |
 | Thông báo lỗi cho user | `renderer/errorCopy.ts`, `components/ErrorCard.tsx` |
 | Theme, token màu | `renderer/theme/tokens.css`, `theme/appearance.ts`; spec: `docs/frontend/tokens.md` |

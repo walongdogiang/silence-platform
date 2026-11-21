@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
-import { Bell, Bot, Database, Info, Keyboard, MessageSquare, Palette, Plug, Search, Settings2, ShieldCheck, X } from "lucide-react";
+import { Bell, Bot, Database, Info, Keyboard, MessageSquare, Palette, Plug, Search, Settings2, ShieldCheck, UserRound, X } from "lucide-react";
 import { useT } from "../../i18n";
 import type { Appearance } from "../../theme/appearance";
 import type { Prefs } from "../../prefs";
@@ -22,6 +22,7 @@ import { AppearanceSection } from "./AppearanceSection";
 import { ChatSection } from "./ChatSection";
 import { DataSection } from "./DataSection";
 import { NotificationsSection } from "./NotificationsSection";
+import { ProfileSection } from "./ProfileSection";
 import { GeneralSection } from "./GeneralSection";
 import { ShortcutsSection } from "./ShortcutsSection";
 import { ToolsSection } from "./ToolsSection";
@@ -30,6 +31,7 @@ const ICONS: Record<SettingsSection, typeof Settings2> = {
   general: Settings2,
   appearance: Palette,
   chat: MessageSquare,
+  profile: UserRound,
   notifications: Bell,
   permissions: ShieldCheck,
   models: Bot,
@@ -265,6 +267,7 @@ export function SettingsDialog(props: {
                   />
                 ) : null}
                 {section === "chat" ? <ChatSection prefs={props.prefs} onPrefs={props.onPrefs} /> : null}
+                {section === "profile" ? <ProfileSection workspace={props.workspace} /> : null}
                 {section === "notifications" ? (
                   <NotificationsSection prefs={props.prefs} onPrefs={props.onPrefs} />
                 ) : null}
