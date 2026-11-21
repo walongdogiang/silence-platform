@@ -2,6 +2,11 @@ name: ci
 
 # Chạy trên mọi PR (base bất kỳ, kể cả PR xếp chồng) và mỗi lần push main. Không gọi model, không cần secret.
 # Không chạy eval trên CI (ADR 0004: eval cũ chờ xoá cùng Engine Rust).
+#
+# Job `engine` (Engine Rust, đã đóng băng, ~5–11 phút trên Windows) chỉ chạy khi thay đổi đụng tới thứ
+# Rust build hoặc test đọc (bộ lọc `rust` ở job `changes`). PR chỉ đổi TS/Studio thì `engine` = skipped.
+# `ci-ok` gom kết quả: đỏ nếu job nào hỏng hoặc bị huỷ, xanh nếu còn lại là success/skipped.
+# `main-guard` coi `skipped` là đạt (scripts/main-guard.mjs).
 
 on:
   pull_request:
@@ -22,8 +27,36 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Gồm cả file ngoài crates/ mà test Rust đọc: config/models.yaml, evals/*, risk-catalog.md.
+          filters: |
+            rust:
+              - "crates/**"
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - "rust-toolchain*"
+              - ".cargo/**"
+              - "config/**"
+              - "evals/**"
+              - "docs/security/risk-catalog.md"
+              - ".github/workflows/ci.yml"
+
   engine:
     name: engine (cargo test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,3 +90,18 @@ jobs:
         run: npx tsc --noEmit -p apps/studio
       - name: Unit tests
         run: npm test --workspace @silence/studio
+
+  ci-ok:
+    name: ci-ok
+    needs: [changes, engine, studio]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs passed or were skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "::error::a CI job ended with '$r'"; exit 1 ;; esac
+          done

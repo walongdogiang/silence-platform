@@ -1,0 +1,29 @@
+name: cache-cleanup
+
+# Cache của một PR (ref `refs/pull/<n>/merge`) chỉ chính PR đó dùng lại được. Khi PR đóng (merge hoặc
+# không), xoá chúng để repo không chạm trần 10 GB, vì vượt trần thì GitHub có thể xoá cả cache của main.
+# Không checkout code, không chạy gì từ PR.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: cache-cleanup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete this PR's caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: |
+          ids=$(gh api "repos/$REPO/actions/caches?ref=$REF&per_page=100" --paginate -q '.actions_caches[].id')
+          if [ -z "$ids" ]; then echo "no cache for $REF"; exit 0; fi
+          for id in $ids; do
+            gh api -X DELETE "repos/$REPO/actions/caches/$id" && echo "deleted $id"
+          done
