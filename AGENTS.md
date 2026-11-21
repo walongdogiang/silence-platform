@@ -43,6 +43,8 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 - Được: sửa code, chạy build/test, đọc log (không in API key).
 - Hỏi user trước: `git commit`, push, tag, amend, force.
 - Không commit `.env`, secrets, `node_modules/`.
+- **Không tự chọn thay user, không đoán ý.** Khi đã đưa phương án (a/b/c) hoặc hỏi user, phải chờ user chọn rõ rồi mới làm. Câu hỏi bị ngắt, bị từ chối hay chưa có trả lời thì **không** được coi là đồng ý với phương án khuyến nghị: dừng lại và hỏi lại. Việc, phạm vi hay thay đổi user chưa chọn thì không tự động sửa.
+- Chỉ commit, push, merge khi đã xong trọn một chức năng hoặc một việc (code + test + docs đã kiểm); không commit lẻ tẻ giữa chừng.
 
 ## Quy trình Git
 
