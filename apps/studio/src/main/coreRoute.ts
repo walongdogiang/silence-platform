@@ -40,6 +40,8 @@ function record(params: unknown): Record<string, unknown> {
 
 /** Where one renderer RPC goes. `coreSessions` = ids the core created in this run. */
 export function routeRpc(method: string, params: unknown, coreOn: boolean, coreSessions: ReadonlySet<string>): Route {
+  // Personal layer (~/.silence) lives in the core only: without it, say so instead of asking the Engine.
+  if (method === "profile.status") return coreOn ? { to: "core", method, params: record(params) } : { to: "local", result: { available: false } };
   if (!coreOn) return { to: "engine" };
   const p = record(params);
   if (method === "session.create") {

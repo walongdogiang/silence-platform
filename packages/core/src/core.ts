@@ -69,5 +69,6 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("session.list", (p) => sessions.list(p));
   server.register("repo_config.review", (p) => sessions.reviewRepoConfig(p));
   server.register("repo_config.approve", (p) => sessions.approveRepoConfig(p));
+  server.register("profile.status", (p) => sessions.profileStatus(p));
   return { server, sessions };
 }

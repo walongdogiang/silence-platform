@@ -6,6 +6,7 @@ export type SettingsSection =
   | "general"
   | "appearance"
   | "chat"
+  | "profile"
   | "notifications"
   | "permissions"
   | "models"
@@ -18,6 +19,7 @@ export const SECTIONS: { id: SettingsSection; label: MsgKey }[] = [
   { id: "general", label: "settings.general" },
   { id: "appearance", label: "settings.appearance" },
   { id: "chat", label: "settings.chat" },
+  { id: "profile", label: "settings.profile" },
   { id: "notifications", label: "settings.notifications" },
   { id: "permissions", label: "settings.permissions" },
   { id: "models", label: "settings.models" },
@@ -78,6 +80,9 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { id: "chat-view", section: "chat", label: "chat.view", desc: "chat.view.desc", keywords: "transcript thinking verbose suy nghĩ chi tiết tool" },
   { id: "chat-style", section: "chat", label: "chat.style", desc: "chat.style.desc", keywords: "style concise explanatory output phong cách ngắn gọn giải thích" },
   { id: "chat-title", section: "chat", label: "chat.autoTitle", desc: "chat.autoTitle.desc", keywords: "title rename tên chat" },
+  { id: "profile-main", section: "profile", label: "profile.main", desc: "set.profile.desc", keywords: "profile hồ sơ silence convention quy ước" },
+  { id: "profile-project", section: "profile", label: "profile.projectNone", desc: "set.profile.desc", keywords: "project profile hồ sơ dự án" },
+  { id: "profile-plugin", section: "profile", label: "profile.plugin", desc: "set.profile.desc", keywords: "plugin skill kỹ năng" },
   { id: "notif-permission", section: "notifications", label: "notif.permission", desc: "notif.permission.desc", keywords: "notification approve thông báo duyệt" },
   { id: "notif-done", section: "notifications", label: "notif.done", desc: "notif.done.desc", keywords: "notification done finished thông báo xong" },
   { id: "notif-flash", section: "notifications", label: "notif.flash", desc: "notif.flash.desc", keywords: "taskbar flash nháy" },

@@ -8,6 +8,7 @@ code:
   - apps/studio/src/renderer/components/ChatHistoryPanel.tsx
   - apps/studio/src/renderer/components/DiffPane.tsx
   - apps/studio/src/renderer/components/settings/SettingsDialog.tsx
+  - apps/studio/src/renderer/components/settings/ProfileSection.tsx
   - apps/studio/src/renderer/monaco.ts
 ---
 # Layout & shell
@@ -35,10 +36,11 @@ flowchart LR
 - **Thanh Agents** (panel lịch sử phải): nút góc trên phải ẩn/hiện panel — tooltip `Toggle Agents Side Bar (Ctrl+Alt+U)`. Khi ẩn, nút hiện lại ở cuối hàng tab. Không xóa lịch sử.
 - **Ẩn Chat Workspace:** titlebar còn; vùng giữa trống. Bấm icon Chat lại để hiện cả khối.
 - **Tab ngang** (`ChatTabBar.tsx`): icon bong bóng + tiêu đề + nút đóng; nút + = New Agent. Đóng tab không xóa lịch sử. Click lịch sử → mở/focus tab.
-- **Settings** (`settings/SettingsDialog.tsx`): nút Settings trên TitleBar (và Customize ở lịch sử, chip "More") mở **hộp lớn giữa màn hình** (~980×700, nền mờ; Esc / × / bấm nền để đóng; Tab không thoát ra ngoài hộp). Cột trái: ô **Tìm cài đặt**, rồi Chung · Giao diện · Trò chuyện · Thông báo · Quyền · Model · Công cụ (MCP) · Dữ liệu, ngăn cách, Phím tắt · Giới thiệu; mục cuối nhớ ở `silence.settings.section`. Bên phải: các hàng `SettingRow` (nhãn + mô tả bên trái, điều khiển bên phải). Tìm kiếm khớp nhãn/mô tả theo ngôn ngữ UI và từ khoá hai thứ tiếng, không phân biệt dấu (`settingsIndex.ts`); bấm kết quả → mở mục, cuộn tới hàng và nháy. Giao diện / ngôn ngữ / quyền áp dụng ngay. Tuỳ chọn không thuộc giao diện nằm ở `prefs.ts` (`silence.prefs.v1`):
+- **Settings** (`settings/SettingsDialog.tsx`): nút Settings trên TitleBar (và Customize ở lịch sử, chip "More") mở **hộp lớn giữa màn hình** (~980×700, nền mờ; Esc / × / bấm nền để đóng; Tab không thoát ra ngoài hộp). Cột trái: ô **Tìm cài đặt**, rồi Chung · Giao diện · Trò chuyện · Hồ sơ · Thông báo · Quyền · Model · Công cụ (MCP) · Dữ liệu, ngăn cách, Phím tắt · Giới thiệu; mục cuối nhớ ở `silence.settings.section`. Bên phải: các hàng `SettingRow` (nhãn + mô tả bên trái, điều khiển bên phải). Tìm kiếm khớp nhãn/mô tả theo ngôn ngữ UI và từ khoá hai thứ tiếng, không phân biệt dấu (`settingsIndex.ts`); bấm kết quả → mở mục, cuộn tới hàng và nháy. Giao diện / ngôn ngữ / quyền áp dụng ngay. Tuỳ chọn không thuộc giao diện nằm ở `prefs.ts` (`silence.prefs.v1`):
   - **Chung:** Mở lại các tab chat lần trước (tắt = mở với chat trống).
   - **Giao diện → Code & terminal:** font, cỡ chữ (12–15), minimap cho editor/diff và terminal; terminal lấy màu từ token theme.
   - **Trò chuyện:** chế độ xem mặc định (Gọn · Suy nghĩ · Chi tiết, xem `chat.md`), phong cách trả lời (`session.set_style` trước mỗi lượt), tự đặt tên chat (huy hiệu **Tốn lượt gọi** cho mọi tuỳ chọn có gọi model).
+  - **Hồ sơ** (`settings/ProfileSection.tsx`, chỉ đọc): hồ sơ cá nhân `~/.silence/profile.md`, hồ sơ project `~/.silence/projects/<repo>/profile.md` của workspace đang mở, plugin cá nhân (tên + skill), và cảnh báo (quá 60 dòng, có secret nên không nạp, plugin thiếu manifest). Mỗi dòng ghi đường dẫn và trạng thái (đã nạp / không nạp / trống / chưa có file); nút **Tải lại**. Dữ liệu từ `profile.status` của lõi TS; lõi chưa bật thì chỉ ghi "Cần lõi mới: mở Studio với SILENCE_CORE=1". Sửa file ngay trong `~/.silence`, chat mới dùng bản mới.
   - **Thông báo:** khi cần duyệt, khi agent xong (chỉ tên chat), nháy taskbar, giữ máy thức khi chạy (`powerSaveBlocker` ở main), nút Gửi thử. Chỉ báo khi cửa sổ không ở phía trước.
   - **Công cụ (MCP):** server của workspace (`.silence/mcp.json`); server có sẵn trong file phải được **Cho phép** trên máy này trước khi chạy; thêm server phải xác nhận lệnh; env chỉ hiện tên biến.
   - **Dữ liệu:** giữ lịch sử chat (Mãi mãi · 90 · 30 · 7 ngày, dọn khi mở Studio, chat ghim luôn giữ), Xoá toàn bộ (bấm hai lần), mở thư mục dữ liệu. Audit log không bao giờ bị xoá.
