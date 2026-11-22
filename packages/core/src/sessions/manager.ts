@@ -9,6 +9,8 @@ import { RpcFailure, ErrorCodes, type CallContext } from "../api/jsonrpc.js";
 import type { Backend, BackendEvent, Decision, Effort, Mode, SessionHandle, ToolCall } from "../backends/types.js";
 import { changedSince, takeSnapshot } from "../git/snapshot.js";
 import { toToolCall } from "../backends/claude/toolMap.js";
+import { applyLesson, LESSON_SYSTEM, lessonPrompt, lessonTargets, parseProposal, type LessonContext, type LessonProposal } from "../lessons/lessons.js";
+import { claudeOneShot, type OneShotResult } from "../backends/claude/oneShot.js";
 import { fixPrompt, loadVerify, MAX_FIX_ROUNDS, planChecks, runCheck, type CheckResult, type VerifyApprovals } from "../verify/verify.js";
 import { classify, shellPattern, type Verdict } from "../risk/classify.js";
 import { askModeAllows, ASK_MODE_REASON, impactOf, levelOf, modeAction, normalizeMode, type Level, type ModeAction, type PermMode } from "../permissions/modes.js";
@@ -60,6 +62,8 @@ export interface SessionManagerOptions {
   approvals: RepoApprovals;
   /** Approved commands of a repo's own `.silence/verify.yaml` (roadmap 1.8). */
   verifyApprovals: VerifyApprovals;
+  /** One Claude call without tools (lesson proposals). Injected in tests; default `claudeOneShot`. */
+  oneShot?: (system: string, prompt: string, o: { model?: string; cwd: string }) => Promise<OneShotResult>;
   /** Injected in tests; default `takeSnapshot`. */
   snapshot?: (root: string, session: string, turn: number) => Promise<string | null>;
   newId?: () => string;
@@ -129,6 +133,8 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   /** Log/audit writes started from events; `list` and `close` wait for them. */
   private readonly inflight = new Set<Promise<unknown>>();
+  /** Lesson proposals waiting for review (roadmap 1.9), by id. */
+  private readonly lessons = new Map<string, { lesson: string; ctx: LessonContext; proposal: LessonProposal; at: number }>();
 
   constructor(private readonly o: SessionManagerOptions) {}
 
@@ -338,6 +344,53 @@ export class SessionManager {
       files: { user: userRulesFile(this.o.home), project: projectRulesFile(this.o.home, project) },
       project,
     };
+  }
+
+  /**
+   * Lesson loop step 1 (roadmap 1.9): one Claude call proposes edits to the personal files from the
+   * lesson and the turn. Nothing is written until `lesson.apply`.
+   */
+  async lessonPropose(params: unknown): Promise<{ lesson_id: string; project: string; model: string; summary: string; edits: LessonProposal["edits"]; warnings: string[] }> {
+    const p = obj(params);
+    const lesson = typeof p.text === "string" ? p.text.trim() : "";
+    if (!lesson) throw new RpcFailure(ErrorCodes.InvalidParams, "text is required");
+    const workspace = str(p.workspace);
+    const project = workspace ? await projectName(workspace) : "default";
+    const ctx: LessonContext = { ...(str(p.user) ? { user: str(p.user)! } : {}), ...(str(p.answer) ? { answer: str(p.answer)! } : {}), ...(workspace ? { workspace } : {}) };
+    const targets = await lessonTargets(this.o.home, project);
+    const model = str(p.model) ?? "haiku";
+    const run = this.o.oneShot ?? ((system, prompt, o) => claudeOneShot(system, prompt, o));
+    const res = await run(LESSON_SYSTEM, lessonPrompt(lesson, ctx, project, targets), { model, cwd: this.o.home });
+    let proposal: LessonProposal;
+    try {
+      proposal = parseProposal(res.text, project, targets);
+    } catch (e) {
+      throw new RpcFailure(ErrorCodes.Internal, `could not read the proposal: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const id = randomUUID();
+    for (const [k, v] of this.lessons) if (Date.now() - v.at > 3_600_000) this.lessons.delete(k);
+    this.lessons.set(id, { lesson, ctx, proposal, at: Date.now() });
+    await this.o.audit.append({ session: "", kind: "lesson.propose", inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, usd: res.usage.usd, detail: { model: res.model, project, edits: proposal.edits.map((e) => e.file), warnings: proposal.warnings } });
+    return { lesson_id: id, project, model: res.model, summary: proposal.summary, edits: proposal.edits, warnings: proposal.warnings };
+  }
+
+  /** Lesson loop step 2: write the accepted edits + the lesson note, commit and push ~/.silence. */
+  async lessonApply(params: unknown): Promise<Awaited<ReturnType<typeof applyLesson>>> {
+    const p = obj(params);
+    const id = str(p.lesson_id) ?? "";
+    const entry = this.lessons.get(id);
+    if (!entry) throw new RpcFailure(ErrorCodes.InvalidParams, "unknown or expired lesson; propose again");
+    const idx = Array.isArray(p.accept) ? p.accept.filter((i): i is number => Number.isInteger(i)) : [];
+    const accepted = entry.proposal.edits.filter((_, i) => idx.includes(i));
+    let res: Awaited<ReturnType<typeof applyLesson>>;
+    try {
+      res = await applyLesson(this.o.home, entry.lesson, entry.ctx, entry.proposal, accepted);
+    } catch (e) {
+      throw new RpcFailure(ErrorCodes.InvalidRequest, e instanceof Error ? e.message : String(e));
+    }
+    this.lessons.delete(id);
+    await this.o.audit.append({ session: "", kind: "lesson.apply", detail: { written: res.written, lessonFile: res.lessonFile, commit: res.commit, pushed: res.pushed, note: res.note } });
+    return res;
   }
 
   /** Answer a `permission` event. */

@@ -72,6 +72,10 @@ export function routeRpc(method: string, params: unknown, coreOn: boolean, coreS
   if (method === "profile.status" || method === "permissions.rules") {
     return coreOn ? { to: "core", method, params: record(params) } : { to: "local", result: { available: false } };
   }
+  // Lesson loop (roadmap 1.9) lives in the core only.
+  if (method === "lesson.propose" || method === "lesson.apply") {
+    return coreOn ? { to: "core", method, params: record(params) } : { to: "error", message: "lessons need the new core (start Studio with SILENCE_CORE=1)" };
+  }
   if (!coreOn) return toEngine(method, params);
   const p = record(params);
   if (method === "session.create") {
