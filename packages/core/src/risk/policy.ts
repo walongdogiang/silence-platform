@@ -1,5 +1,5 @@
-// Built-in risk policy, loaded from packages/core/policy/default_policy.yaml (same file the Rust
-// Engine embeds until it is removed; a test keeps the two copies identical).
+// Built-in risk policy, loaded from packages/core/policy/default_policy.yaml. Started as a copy of the
+// Rust Engine's file; since the permission modes step the TS copy evolves on its own (Rust is frozen).
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 
@@ -37,6 +37,14 @@ export interface Policy {
   sandbox_covers: string[];
   always_ask: string[];
   never_escalate: string[];
+  /** Refused outright in Manual / Accept edits / Auto. */
+  hard_block: string[];
+  /** Bypass: still asked, with a countdown that ends in a refusal. */
+  bypass_countdown: string[];
+  /** Bypass: still asked. */
+  bypass_ask: string[];
+  /** The only shell codes Ask mode runs. */
+  read_only_shell: string[];
 }
 
 /** URL of the policy file; resolves from both `src/risk` and `dist/risk`. */
@@ -62,7 +70,7 @@ export function loadPolicy(text: string): Policy {
     r.match = str(r.match);
     if (r.flags_any) r.flags_any = str(r.flags_any);
   }
-  for (const key of ["exec_sinks", "downloaders", "interpreters", "inline_flags", "encoded_flags", "upload_flags", "secret_patterns", "policy_files", "never_remember", "taint_codes", "subcommand_programs", "sandbox_covers", "always_ask", "never_escalate"] as const) {
+  for (const key of ["exec_sinks", "downloaders", "interpreters", "inline_flags", "encoded_flags", "upload_flags", "secret_patterns", "policy_files", "never_remember", "taint_codes", "subcommand_programs", "sandbox_covers", "always_ask", "never_escalate", "hard_block", "bypass_countdown", "bypass_ask", "read_only_shell"] as const) {
     p[key] = str(p[key]);
   }
   p.aliases = Object.fromEntries(Object.entries(p.aliases).map(([k, v]) => [String(k), String(v)]));

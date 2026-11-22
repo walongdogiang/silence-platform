@@ -1466,6 +1466,47 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 /* Lý do từ Risk Engine (docs/security/permissions.md): tiêu đề đậm + giải thích. */
 .perm-reasons { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: var(--font-size-sm); color: var(--text-secondary); }
 .perm-reasons strong { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+/* Permission modes (TS core): yellow = needs attention, red = dangerous / blocked (docs/security/permissions.md). */
+.perm-card.perm-level-caution { border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
+.perm-card.perm-level-danger,
+.perm-card.perm-level-hard_block { border-color: color-mix(in srgb, var(--error) 55%, transparent); }
+.perm-level-caution > h4 .perm-tier { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+.perm-countdown { margin: 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--error); }
+.perm-details-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.perm-details-toggle:hover { color: var(--text-primary); }
+.perm-details { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: var(--font-size-sm); }
+.perm-details dt { color: var(--text-secondary); }
+.perm-details dd { margin: 0; color: var(--text-primary); }
+.perm-segments { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.perm-seg { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding-left: 8px; border-left: 3px solid var(--border-subtle); }
+.perm-seg.perm-level-caution { border-left-color: var(--warning); }
+.perm-seg.perm-level-danger, .perm-seg.perm-level-hard_block { border-left-color: var(--error); }
+.perm-seg span { color: var(--text-secondary); }
+.perm-impact { display: flex; flex-wrap: wrap; gap: 4px; }
+.perm-impact span { padding: 1px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-secondary); }
+.perm-tainted { margin: 4px 0 0; color: var(--warning); }
+/* Mode menu next to the chat input; Bypass stays red while it is on. */
+.mode-trigger.perm-trigger { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+.mode-trigger.perm-trigger:hover { color: var(--text-primary); background: var(--surface-hover); }
+.mode-trigger.perm-trigger-bypass { color: var(--error); border-color: color-mix(in srgb, var(--error) 55%, transparent); background: color-mix(in srgb, var(--error) 14%, transparent); }
+.perm-item-bypass { color: var(--error); }
+.mode-item.disabled, .mode-item[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.perm-mode-bypass strong { color: var(--error); }
+.perm-rules code { font-size: var(--font-size-sm); }
+.perm-rule-badge { display: inline-block; min-width: 42px; padding: 0 6px; border-radius: 99px; font-size: var(--font-size-sm); text-align: center; background: var(--surface-2); color: var(--text-secondary); }
+.perm-rule-badge.deny { background: color-mix(in srgb, var(--error) 16%, transparent); color: var(--error); }
+.perm-rule-badge.ask { background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); }
 .row { display: flex; gap: 6px; }
 
 .progress {

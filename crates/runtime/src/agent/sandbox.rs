@@ -213,6 +213,7 @@ pub(super) async fn ask_hosts(
         pattern: None,
         hosts: hosts.clone(),
         escalation: None,
+        ..Default::default()
     };
     let allowed = ask_card(session_arc, tx, "network", args, &risk, hosts.clone(), false).await;
     let _ = tc;

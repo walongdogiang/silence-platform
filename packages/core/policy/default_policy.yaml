@@ -203,8 +203,13 @@ codes:
   SYSTEM_CHANGE:
     tier: block
     title: Thay đổi hệ thống
-    detail: Format, phân vùng, boot, registry, execution policy, Defender/firewall, dịch vụ, tác vụ định kỳ, tắt máy.
-    hint: System configuration changes are blocked; ask the user to do it themselves.
+    detail: Registry, execution policy, Defender/firewall, dịch vụ, tác vụ định kỳ, tắt máy, quyền admin (sudo).
+    hint: System configuration changes need the user's approval every time; explain why it is needed.
+  DISK_DESTROY:
+    tier: block
+    title: Phá đĩa hoặc khởi động
+    detail: Format, phân vùng (diskpart), cấu hình khởi động (bcdedit), xoá shadow copy, ghi đè vùng trống. Mất dữ liệu không khôi phục được.
+    hint: Formatting, partitioning and boot changes are blocked; the user must do this themselves.
   SECRET_EXFIL:
     tier: block
     title: Gửi bí mật ra ngoài
@@ -274,12 +279,12 @@ aliases:
 # `flags_any`: rule applies only if one of these flags appears anywhere in the segment.
 commands:
   # system changes (block)
-  - { match: [format], code: SYSTEM_CHANGE }
-  - { match: [format-volume], code: SYSTEM_CHANGE }
-  - { match: [diskpart], code: SYSTEM_CHANGE }
-  - { match: [bcdedit], code: SYSTEM_CHANGE }
-  - { match: [vssadmin], code: SYSTEM_CHANGE }
-  - { match: [cipher], code: SYSTEM_CHANGE, flags_any: ["/w"] }
+  - { match: [format], code: DISK_DESTROY }
+  - { match: [format-volume], code: DISK_DESTROY }
+  - { match: [diskpart], code: DISK_DESTROY }
+  - { match: [bcdedit], code: DISK_DESTROY }
+  - { match: [vssadmin], code: DISK_DESTROY }
+  - { match: [cipher], code: DISK_DESTROY, flags_any: ["/w"] }
   - { match: [reg, add], code: SYSTEM_CHANGE }
   - { match: [reg, delete], code: SYSTEM_CHANGE }
   - { match: [reg, import], code: SYSTEM_CHANGE }
@@ -300,7 +305,7 @@ commands:
   - { match: [shutdown], code: SYSTEM_CHANGE }
   - { match: [stop-computer], code: SYSTEM_CHANGE }
   - { match: [restart-computer], code: SYSTEM_CHANGE }
-  - { match: [mkfs], code: SYSTEM_CHANGE }
+  - { match: [mkfs], code: DISK_DESTROY }
   - { match: [dd], code: SYSTEM_CHANGE }
   - { match: [chmod], code: SYSTEM_CHANGE, flags_any: ["-r", "777"] }
   - { match: [sudo], code: SYSTEM_CHANGE }
@@ -552,7 +557,7 @@ taint_codes: [NET_ACCESS, MCP_CALL, MCP_READ]
 # Programs whose first non-flag argument is part of the remembered pattern (`npm install *`).
 subcommand_programs: [git, npm, pnpm, yarn, bun, cargo, pip, pip3, uv, poetry, go, dotnet, winget, choco, scoop, docker, kubectl, npx, gh]
 # Workspace files only the Engine may write.
-policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml", ".silence/network.json"]
+policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml", ".silence/network.json", ".silence/permissions.yaml", "silence/core/repo-config-approvals.jsonl"]
 
 # --- Autonomous mode (sandbox Ready): who decides, see docs/security/permissions.md ---------
 # Codes a sandboxed run makes safe enough to skip the question. A call whose verdict has any
@@ -562,4 +567,13 @@ sandbox_covers: [UNKNOWN_COMMAND, RUN_SCRIPT, BUILD_TEST, INLINE_CODE, DYNAMIC_E
 # Always ask, even in the sandbox: they act with the real user's identity or leave the machine.
 always_ask: [GIT_NETWORK, GIT_COMMIT, GIT_DESTRUCTIVE, GH_WRITE, GH_MERGE, PKG_PUBLISH, MCP_CALL, ENV_READ]
 # Blocked calls that the escalation card may never offer to run: the card only has "Dừng".
-never_escalate: [POLICY_TAMPER, GIT_PUSH_DEFAULT, GIT_NO_VERIFY, SECRET_EXFIL, NET_DOWNLOAD_EXEC, ENCODED_COMMAND, FS_DELETE_SYSTEM]
+never_escalate: [POLICY_TAMPER, GIT_PUSH_DEFAULT, GIT_NO_VERIFY, SECRET_EXFIL, NET_DOWNLOAD_EXEC, ENCODED_COMMAND, FS_DELETE_SYSTEM, DISK_DESTROY]
+# Permission modes (docs/security/permissions.md, TS core only). Tier `block` shows as red (danger) and is
+# asked every time, never remembered; codes below are refused outright in Manual / Accept edits / Auto.
+hard_block: [FS_DELETE_SYSTEM, POLICY_TAMPER, SECRET_EXFIL, DISK_DESTROY]
+# Bypass permissions: these still ask, with a countdown that ends in a refusal.
+bypass_countdown: [FS_DELETE_SYSTEM, DISK_DESTROY]
+# Bypass permissions: these still ask (no countdown).
+bypass_ask: [SECRET_EXFIL]
+# Shell codes that only read: the only shell commands Ask mode runs.
+read_only_shell: [READ_CMD, GIT_READ, VERSION]

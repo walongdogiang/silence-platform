@@ -197,6 +197,15 @@ Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 
 
 ## Card xin quyền
 
+**Lõi TS (chế độ quyền mới, `components/PermissionCard.tsx`).** Khi `risk.level` có mặt (protocol 0.1.20, [security/permissions.md](../security/permissions.md)):
+
+- Viền và badge theo mức: **Cần chú ý** (vàng, `caution`), **Nguy hiểm** (đỏ, `danger`), **Bị chặn** (đỏ, `hard_block`, chỉ gặp ở Bypass với đếm ngược). Tiêu đề = lời giải thích của mã đầu tiên theo ngôn ngữ UI (`riskText` trong `i18n.ts`) + "cho phép <tool>?". Lệnh thật nguyên văn bên dưới.
+- Nút: **Cho phép một lần** (chính) · **Luôn cho phép `<luật>`** (chỉ khi lõi gửi `allow_rule`; lệnh đỏ không bao giờ có) · **Từ chối** · **Từ chối, thêm luật `<luật>`** (khi có `deny_rule`). Hai nút "luật" lưu vào `~/.silence/projects/<repo>/permissions.yaml`. Gửi `session.permission { decision }` (kèm `allow` cho Engine Rust).
+- **Chi tiết** thu gọn mặc định (`aria-expanded`); mở ra: **Lệnh làm gì** (từng đoạn của lệnh ghép, vạch màu theo mức) · **Vì sao cần chú ý** (tiêu đề + giải thích theo mã) · **Tác động** (dùng mạng, ngoài workspace, xoá dữ liệu, đổi hệ thống / admin, hoàn tác được hay không) · **Nguồn** (agent / subagent / verify / hook; cảnh báo khi lượt đã đọc nội dung ngoài) · **Cách an toàn hơn** · **Mã luật**.
+- Bypass: thẻ có dòng đỏ "Tự từ chối sau N giây" (`countdown_s`); hết giờ lõi tự từ chối.
+
+**Engine Rust (đóng băng).** Thẻ không có `risk.level` giữ bố cục cũ dưới đây.
+
 - Tiêu đề = lý do chính từ Risk Engine (`risk.reasons[0].title`) + "cho phép <tool>?". Lệnh shell hiện **nguyên văn** (không JSON); tool khác hiện JSON tham số.
 - Danh sách lý do: tiêu đề đậm + giải thích (`.perm-reasons`), mã nằm ở `title` để tra catalog.
 - Badge tầng cạnh tiêu đề (`Cần duyệt`). Nút: **Cho phép một lần** (chính), **Cho phép "<mẫu>" trong phiên này**, **Luôn cho phép "<mẫu>" trong workspace**, **Từ chối**. Hai nút giữa chỉ hiện khi Engine gửi `risk.pattern`; không có mẫu (pipeline, git huỷ thay đổi, secrets…) thì ẩn. Không còn checkbox "Nhớ". Chi tiết phạm vi: [security/permissions.md](../security/permissions.md).

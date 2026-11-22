@@ -11,7 +11,6 @@ import {
   ImagePlus,
   Infinity as InfinityIcon,
   List,
-  MessageCircle,
   Mic,
   Minus,
   Paperclip,
@@ -31,6 +30,7 @@ import {
   useState,
   type ClipboardEvent,
   type DragEvent,
+  type ReactNode,
 } from "react";
 import { modelName, modelTitle, pickerRows } from "../theme/modelsPrefs";
 import { MODE_LABEL, looksLikeEditRequest, type SessionMode } from "../modes";
@@ -59,7 +59,6 @@ const MODES = [
   { id: "Debug", title: "Debug", mode: "debug", desc: "mode.debugDesc", Icon: Bug },
   { id: "MultiTask", title: "MultiTask", mode: "multitask", desc: "mode.multitaskDesc", Icon: Users },
   { id: "Review", title: "Review", mode: "review", desc: "mode.reviewDesc", Icon: GitCompare },
-  { id: "Ask", title: "Ask", mode: "ask", desc: "mode.askDesc", Icon: MessageCircle },
 ] as const;
 
 /** "Claude Opus 5.5" → "Opus 5.5" for the compact trigger; other names unchanged. */
@@ -117,6 +116,8 @@ export function Composer(props: {
   onSendAs?: (mode: SessionMode) => void;
   onChip: (chip: string) => void;
   mode: SessionMode;
+  /** Permission mode picker shown right after the mode menu (Ask is a permission mode now). */
+  permMenu?: ReactNode;
   model: string;
   models: ModelInfo[];
   onModel: (id: string) => void;
@@ -588,6 +589,7 @@ export function Composer(props: {
             </div>
           ) : null}
         </div>
+        {props.permMenu}
         <div className="mode-dd" ref={modelRef}>
           <button
             type="button"

@@ -66,6 +66,9 @@ export function SettingsDialog(props: {
   workspace: string;
   permMode: UiPermMode;
   onPermMode: (m: UiPermMode) => void;
+  coreOn: boolean;
+  bypassEnabled: boolean;
+  onBypassEnabled: (on: boolean) => void;
   sandbox: SandboxStatus | null;
   onRefreshSandbox: () => Promise<void>;
   onSetupSandbox: () => Promise<void>;
@@ -276,6 +279,9 @@ export function SettingsDialog(props: {
                     workspace={props.workspace}
                     mode={props.permMode}
                     onMode={props.onPermMode}
+                    coreOn={props.coreOn}
+                    bypassEnabled={props.bypassEnabled}
+                    onBypassEnabled={props.onBypassEnabled}
                     sandbox={props.sandbox}
                     onRefreshSandbox={props.onRefreshSandbox}
                     onSetupSandbox={props.onSetupSandbox}

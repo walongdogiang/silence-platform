@@ -1,7 +1,10 @@
 ---
-description: Spec quyền của agent — 4 tầng rủi ro (auto/logged/ask/block), chế độ Thận trọng/Cân bằng/Tự chủ, Risk Engine, taint, nhớ quyền theo mẫu, card hỏi, nạp hướng dẫn cho AI, lộ trình B0–B4.
+description: Spec quyền — lõi TS 5 chế độ (Ask/Manual/Accept edits/Auto/Bypass), mức vàng/đỏ/chặn cứng, luật allow/ask/deny, thẻ hỏi; Engine Rust (đóng băng) 4 tầng, Risk Engine, taint.
 type: spec
 code:
+  - packages/core/src/permissions/modes.ts
+  - packages/core/src/permissions/rules.ts
+  - packages/core/src/sessions/manager.ts
   - crates/runtime/src/risk/mod.rs
   - crates/runtime/src/risk/command.rs
   - crates/runtime/src/agent/policy.rs
@@ -9,6 +12,49 @@ code:
   - crates/runtime/src/rpc.rs
 ---
 # Quyền của agent (permissions)
+
+## Lõi TS: 5 chế độ quyền (2026-11)
+
+Áp dụng cho session của lõi TS (`packages/core`, `SILENCE_CORE=1`). Phần từ mục "Nguyên tắc" trở xuống mô tả Engine Rust (đóng băng); Risk Engine và bảng mã vẫn dùng chung ý tưởng.
+
+Risk Engine gắn **mức** cho mỗi tool call (`permissions/modes.ts::levelOf`):
+
+| Mức | Màu | Từ tầng cũ | Ví dụ |
+| --- | --- | --- | --- |
+| `safe` | không màu | `auto`, `logged` | đọc, `git status`, sửa file trong workspace, `npm test` |
+| `caution` | vàng | `ask` | `npm install`, `git commit`, MCP, ngoài workspace |
+| `danger` | đỏ | `block` (trừ chặn cứng) | `git push origin main`, `--no-verify`, `curl … \| sh`, `-EncodedCommand`, `reg add HKLM`, `sudo` |
+| `hard_block` | đỏ, từ chối | `hard_block` trong policy | `FS_DELETE_SYSTEM`, `DISK_DESTROY` (`format`, `diskpart`, `bcdedit`, `mkfs`, `vssadmin`, `cipher /w`), `POLICY_TAMPER`, `SECRET_EXFIL` |
+
+Chế độ quyết định theo mức (`modeAction`):
+
+| Chế độ | Đọc / shell chỉ đọc | Sửa file trong workspace | Còn lại xanh | Vàng | Đỏ | Chặn cứng |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ask` | chạy | **không có** | không có (chỉ `READ_CMD`, `GIT_READ`, `VERSION`) | không có | không có | không có |
+| `manual` | chạy | hỏi | hỏi | hỏi | hỏi | từ chối |
+| `accept_edits` | chạy | chạy | hỏi | hỏi | hỏi | từ chối |
+| `auto` (mặc định) | chạy | chạy | chạy | hỏi | hỏi | từ chối |
+| `bypass` | chạy | chạy | chạy | chạy | chạy | `FS_DELETE_SYSTEM`, `DISK_DESTROY`: hỏi, đếm ngược 30 giây rồi tự từ chối; `SECRET_EXFIL`: hỏi; `POLICY_TAMPER`: chạy |
+
+Ask mode từ chối mọi tool khác (sửa file, MCP, mạng) kèm lời nhắc chuyển sang Manual/Auto (`ASK_MODE_REASON`). Giá trị đã lưu: `balanced`/`autonomous` → `auto`, `allowlist` → `manual`, `ask` cũ → Ask mới. `yolo` bị từ chối qua RPC.
+
+### Luật allow / ask / deny
+
+Cú pháp Claude Code: `Bash(npm test:*)` (tiền tố), `Bash(git status)` (đúng lệnh), `Edit(src/**)` (Edit gồm cả Write/MultiEdit/NotebookEdit), `Read(~/.ssh/**)`, `WebFetch(domain:example.com)`, `mcp__server`, `mcp__server__tool`.
+
+| Nguồn | File | Được dùng |
+| --- | --- | --- |
+| user | `~/.silence/permissions.yaml` | allow, ask, deny |
+| project | `~/.silence/projects/<repo>/permissions.yaml` (thẻ hỏi lưu vào đây) | allow, ask, deny |
+| repo | `.claude/settings.json` → `permissions` | **chỉ ask, deny** (repo chỉ được thắt chặt) |
+
+Thứ tự: luật deny → (Ask mode chặn tool không phải đọc) → chặn cứng / ngoại lệ Bypass → luật ask → luật allow (không áp cho đỏ) → chế độ. Deny thắng tất cả, kể cả Bypass. Với lệnh shell ghép, allow cần **mọi** đoạn khớp; ask/deny chỉ cần một đoạn. Không người trông: cái gì cần hỏi thì từ chối. Luật được đọc lại mỗi lượt. File luật là mục tiêu `POLICY_TAMPER`.
+
+### Thẻ hỏi
+
+`session.event` `permission` mang `risk` (protocol 0.1.20): `level`, `codes`, `segments` (từng đoạn của lệnh ghép), `impact` (`network`, `outside_workspace`, `deletes`, `admin`, `undoable`), `source`, `tainted`, `mode`, `allow_rule` (không có với lệnh đỏ), `deny_rule`, `countdown_s`. Trả lời bằng `session.permission { decision: allow_once | allow_always | deny | deny_always }` (vẫn gửi `allow`/`scope` cho Engine Rust). `*_always` thêm luật vào file project. UI dịch mã sang lời giải thích theo ngôn ngữ giao diện.
+
+Bypass: bật bằng công tắc trong Settings, có cảnh báo lần đầu và nhãn đỏ thường trực cạnh ô chat; cấu hình repo không bật được. Mọi bước vẫn hiện trong chat và ghi audit ở mọi chế độ.
 
 Bảng tra lệnh cụ thể: [risk-catalog.md](risk-catalog.md). Mối đe doạ: [threat-model.md](../threat-model.md).
 

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useT, type T } from "../i18n";
-import { PERM_MODES, sandboxReady, type UiPermMode } from "../permissionUi";
+import { acknowledgeBypass, bypassAcknowledged, PERM_MODES, permModeAvailable, type UiPermMode } from "../permissionUi";
 import type { NetworkList, SandboxStatus } from "../types";
-import { SettingRow } from "./settings/SettingRow";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { SettingRow, Switch } from "./settings/SettingRow";
 
 /** "edit:src/**" → { tool: "edit", scope: "src/**" }; "shell" → tool-wide. */
 function describe(entry: string, t: T) {
@@ -31,43 +32,113 @@ export function sandboxStateText(s: SandboxStatus | null, t: T): string {
   }
 }
 
-/** Chế độ quyền: Thận trọng / Cân bằng / Tự chủ (Tự chủ chỉ chọn được khi sandbox Ready). */
-function PermissionModePicker(props: { mode: UiPermMode; onMode: (m: UiPermMode) => void; sandbox: SandboxStatus | null }) {
+/** Chế độ quyền: Ask · Manual · Accept edits · Auto · Bypass (docs/security/permissions.md). */
+function PermissionModePicker(props: { mode: UiPermMode; onMode: (m: UiPermMode) => void; coreOn: boolean; bypassEnabled: boolean }) {
   const t = useT();
-  const ready = sandboxReady(props.sandbox);
+  const modes = PERM_MODES.filter((m) => m.id !== "bypass" || props.bypassEnabled);
   return (
-    <div className="perm-modes" role="radiogroup" aria-label={t("perms.modeLabel")}>
-      {PERM_MODES.map((m) => (
-        <label key={m.id} className={`perm-mode${props.mode === m.id ? " on" : ""}`}>
-          <input
-            type="radio"
-            name="perm-mode"
-            checked={props.mode === m.id}
-            onChange={() => props.onMode(m.id)}
-          />
-          <span>
-            <strong>{t(m.label)}</strong>
-            <em>{t(m.desc)}</em>
-          </span>
-        </label>
-      ))}
-      <label
-        className={`perm-mode${props.mode === "autonomous" ? " on" : ""}${ready ? "" : " disabled"}`}
-        title={ready ? undefined : t("perms.autonomousTip")}
-      >
-        <input
-          type="radio"
-          name="perm-mode"
-          checked={props.mode === "autonomous"}
-          disabled={!ready && props.mode !== "autonomous"}
-          onChange={() => props.onMode("autonomous")}
+    <>
+      <div className="perm-modes" role="radiogroup" aria-label={t("perms.modeLabel")}>
+        {modes.map((m) => {
+          const ok = permModeAvailable(m.id, props.coreOn, props.bypassEnabled);
+          return (
+            <label
+              key={m.id}
+              className={`perm-mode${props.mode === m.id ? " on" : ""}${ok ? "" : " disabled"}${m.id === "bypass" ? " perm-mode-bypass" : ""}`}
+              title={ok ? undefined : t("permmenu.needsCore")}
+            >
+              <input type="radio" name="perm-mode" checked={props.mode === m.id} disabled={!ok} onChange={() => props.onMode(m.id)} />
+              <span>
+                <strong>{t(m.label)}</strong>
+                <em>{t(m.desc)}</em>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {props.coreOn ? null : <p className="muted">{t("perms.mode.coreOff")}</p>}
+    </>
+  );
+}
+
+/** "Allow Bypass permissions mode": off by default; turning it on shows a warning the first time. */
+function BypassSwitch(props: { on: boolean; onChange: (on: boolean) => void; coreOn: boolean }) {
+  const t = useT();
+  const [warn, setWarn] = useState(false);
+  function toggle(next: boolean) {
+    if (next && !bypassAcknowledged()) setWarn(true);
+    else props.onChange(next);
+  }
+  return (
+    <>
+      <Switch checked={props.on} onChange={toggle} label={t("perms.bypass")} />
+      {warn ? (
+        <ConfirmDialog
+          title={t("perms.bypassWarn.title")}
+          body={t("perms.bypassWarn.body")}
+          confirmLabel={t("perms.bypassWarn.confirm")}
+          danger
+          onResult={(ok) => {
+            setWarn(false);
+            if (!ok) return;
+            acknowledgeBypass();
+            props.onChange(true);
+          }}
         />
-        <span>
-          <strong>{t("perms.autonomous")}</strong>
-          <em>{t("perms.autonomousDesc")}</em>
-        </span>
-      </label>
-    </div>
+      ) : null}
+    </>
+  );
+}
+
+type RuleList = { available?: false; rules?: Array<{ behavior: string; text: string; source: string }>; errors?: string[]; files?: { user: string; project: string }; project?: string };
+
+/** allow / ask / deny rules from the core (`permissions.rules`); edited in the files, read-only here. */
+function RulesList(props: { workspace: string }) {
+  const t = useT();
+  const [list, setList] = useState<RuleList | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!props.workspace) return;
+    let live = true;
+    setErr("");
+    window.silence
+      .rpc("permissions.rules", { workspace: props.workspace })
+      .then((r) => live && setList(r as RuleList))
+      .catch((e) => live && setErr(e instanceof Error ? e.message : String(e)));
+    return () => {
+      live = false;
+    };
+  }, [props.workspace]);
+  if (!props.workspace) return <p className="muted">{t("perms.openWorkspace")}</p>;
+  if (err) return <p className="perm-error" role="alert">{err}</p>;
+  if (!list) return <p className="muted">{t("common.loading")}</p>;
+  if (list.available === false) return <p className="muted">{t("perms.rules.coreOff")}</p>;
+  const sourceLabel = (s: string) => t(s === "repo" ? "perms.rules.source.repo" : s === "project" ? "perms.rules.source.project" : "perms.rules.source.user");
+  return (
+    <>
+      {list.rules?.length ? (
+        <ul className="perm-list perm-rules">
+          {list.rules.map((r, i) => (
+            <li key={`${r.source}-${r.behavior}-${r.text}-${i}`}>
+              <span>
+                <span className={`perm-rule-badge ${r.behavior}`}>{r.behavior}</span> <code>{r.text}</code>
+              </span>
+              <span className="muted">{sourceLabel(r.source)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">{t("perms.rules.none")}</p>
+      )}
+      {list.errors?.length ? (
+        <ul className="perm-reasons" role="alert">
+          {list.errors.map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+      ) : null}
+      {list.files ? <p className="muted">{t("perms.rules.files", { user: list.files.user, project: list.project ?? "", projectFile: list.files.project })}</p> : null}
+    </>
   );
 }
 
@@ -179,6 +250,10 @@ export function PermissionsSection(props: {
   workspace: string;
   mode: UiPermMode;
   onMode: (m: UiPermMode) => void;
+  /** The TS core is running (Ask, Bypass and rules need it). */
+  coreOn: boolean;
+  bypassEnabled: boolean;
+  onBypassEnabled: (on: boolean) => void;
   sandbox: SandboxStatus | null;
   onRefreshSandbox: () => Promise<void>;
   onSetupSandbox: () => Promise<void>;
@@ -217,7 +292,13 @@ export function PermissionsSection(props: {
   return (
     <>
       <SettingRow id="perm-mode" label={t("perms.mode")} desc={t("perms.mode.desc")} wide>
-        <PermissionModePicker mode={props.mode} onMode={props.onMode} sandbox={props.sandbox} />
+        <PermissionModePicker mode={props.mode} onMode={props.onMode} coreOn={props.coreOn} bypassEnabled={props.bypassEnabled} />
+      </SettingRow>
+      <SettingRow id="perm-bypass" label={t("perms.bypass")} desc={t("perms.bypass.desc")}>
+        <BypassSwitch on={props.bypassEnabled} onChange={props.onBypassEnabled} coreOn={props.coreOn} />
+      </SettingRow>
+      <SettingRow id="perm-rules" label={t("perms.rules")} desc={t("perms.rules.desc")} wide>
+        <RulesList workspace={props.workspace} />
       </SettingRow>
       <SettingRow id="perm-sandbox" label={t("sandbox.title")} desc={t("sandbox.desc")} wide>
         <SandboxControls status={props.sandbox} onRefresh={props.onRefreshSandbox} onSetup={props.onSetupSandbox} />

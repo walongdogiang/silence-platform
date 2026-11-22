@@ -65,10 +65,12 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("session.permission", (p) => sessions.permission(p));
   server.register("session.set_mode", (p) => sessions.setMode(p));
   server.register("session.set_model", (p) => sessions.setModel(p));
+  server.register("session.set_permission", (p) => sessions.setPermission(p));
   server.register("session.close", (p) => sessions.close(p));
   server.register("session.list", (p) => sessions.list(p));
   server.register("repo_config.review", (p) => sessions.reviewRepoConfig(p));
   server.register("repo_config.approve", (p) => sessions.approveRepoConfig(p));
   server.register("profile.status", (p) => sessions.profileStatus(p));
+  server.register("permissions.rules", (p) => sessions.listRules(p));
   return { server, sessions };
 }

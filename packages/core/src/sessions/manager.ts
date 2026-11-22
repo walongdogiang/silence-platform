@@ -9,9 +9,11 @@ import { RpcFailure, ErrorCodes, type CallContext } from "../api/jsonrpc.js";
 import type { Backend, BackendEvent, Decision, Effort, Mode, SessionHandle, ToolCall } from "../backends/types.js";
 import { takeSnapshot } from "../git/snapshot.js";
 import { classify, shellPattern, type Verdict } from "../risk/classify.js";
+import { askModeAllows, ASK_MODE_REASON, impactOf, levelOf, modeAction, normalizeMode, type Level, type ModeAction, type PermMode } from "../permissions/modes.js";
+import { addRule, loadRules, matchRules, projectRulesFile, ruleFor, shellSegments, userRulesFile, type RuleSet } from "../permissions/rules.js";
 import type { AuditLog } from "../store/audit.js";
 import type { EventLog } from "../store/eventLog.js";
-import { loadPersonal, type Personal } from "./personal.js";
+import { loadPersonal, projectName, type Personal } from "./personal.js";
 import { scanRepoConfig, type RepoApprovals, type RepoReview } from "../repoConfig/review.js";
 
 /** JSON-RPC error: the repo config needs the user's review first (`data.review`: `RepoReview`). */
@@ -57,8 +59,11 @@ export interface SessionManagerOptions {
   newId?: () => string;
 }
 
+/** Answer to a permission card. `allow_always` / `deny_always` also save a rule for the project. */
+export type PermAnswer = "allow_once" | "allow_always" | "deny" | "deny_always";
+
 interface Pending {
-  resolve: (allow: boolean) => void;
+  resolve: (answer: PermAnswer) => void;
   callId: string;
 }
 
@@ -80,6 +85,14 @@ interface Session {
   tainted: boolean;
   /** Problems found in `~/.silence` at start, shown once with the first turn. */
   personalWarnings: string[];
+  /** Permission mode (docs/security/permissions.md). */
+  permMode: PermMode;
+  /** allow / ask / deny rules, reloaded every turn and after a card saves one. */
+  rules: RuleSet;
+  /** `~/.silence/projects/<project>/`: where "Always allow" / "Deny always" save rules. */
+  project: string;
+  /** Turn whose git snapshot exists (an edit can be undone). */
+  snapshotTurn: number;
   /** The backend loads the repo's own config (approved, or nothing to review). */
   projectConfig: boolean;
   /** Hash of the repo config the session started with (empty when none). */
@@ -115,7 +128,8 @@ export class SessionManager {
     const p = obj(params);
     const cwd = str(p.workspace);
     if (!cwd) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
-    if (p.permission === "yolo") throw new RpcFailure(ErrorCodes.InvalidParams, "permission yolo is not allowed over RPC");
+    const permMode = p.permission === undefined && p.mode === "ask" ? "ask" : normalizeMode(p.permission);
+    if (!permMode) throw new RpcFailure(ErrorCodes.InvalidParams, "permission yolo is not allowed over RPC");
     const backendId = str(p.backend) ?? "claude";
     const backend = this.o.backends[backendId];
     if (!backend) throw new RpcFailure(ErrorCodes.InvalidParams, `unknown backend: ${backendId}`);
@@ -151,7 +165,12 @@ export class SessionManager {
       running: false,
       tainted: false,
       personalWarnings: personal.warnings,
+      permMode,
+      project: personal.projectName ?? path.basename(path.resolve(cwd)),
+      rules: { rules: [], errors: [] },
+      snapshotTurn: 0,
     } as Omit<Session, "handle"> as Session;
+    s.rules = await loadRules(this.o.home, s.project, s.cwd);
     this.sessions.set(id, s);
     await this.o.log.append(id, { type: "session.start", cwd: s.cwd, backend: backendId, mode, ...(model ? { model } : {}) });
     if (review.hash) {
@@ -204,6 +223,7 @@ export class SessionManager {
         s.configHash = review.hash;
       }
     }
+    s.rules = await loadRules(this.o.home, s.project, s.cwd);
     s.turn += 1;
     s.running = true;
     if (s.turn === 1 && s.personalWarnings.length) this.emit(s, { type: "trace", event: "profile", detail: { warnings: s.personalWarnings } });
@@ -211,7 +231,10 @@ export class SessionManager {
     await this.o.log.append(s.id, { type: "user", text });
     try {
       const ref = await (this.o.snapshot ?? takeSnapshot)(s.cwd, s.id, s.turn);
-      if (ref) this.track(this.o.audit.append({ session: s.id, kind: "snapshot", detail: { ref, turn: s.turn } }));
+      if (ref) {
+        s.snapshotTurn = s.turn;
+        this.track(this.o.audit.append({ session: s.id, kind: "snapshot", detail: { ref, turn: s.turn } }));
+      }
     } catch {
       /* no undo point for this turn; the turn still runs */
     }
@@ -236,11 +259,23 @@ export class SessionManager {
     const p = obj(params);
     const s = this.get(p.session_id);
     const mode = toMode(p.mode);
+    if (p.mode === "ask") s.permMode = "ask"; // legacy Composer "Ask" = the Ask permission mode
     if (mode !== s.mode) {
       s.mode = mode;
       await s.handle.setMode?.(mode);
     }
     return { ok: true };
+  }
+
+  /** Change the permission mode from the next tool call. `yolo` is refused. */
+  setPermission(params: unknown): { ok: true; permission: PermMode } {
+    const p = obj(params);
+    const s = this.get(p.session_id);
+    const mode = normalizeMode(p.permission);
+    if (!mode) throw new RpcFailure(ErrorCodes.InvalidParams, "permission yolo is not allowed over RPC");
+    if (mode !== s.permMode) this.track(this.o.audit.append({ session: s.id, kind: "permission_mode", detail: { from: s.permMode, to: mode } }));
+    s.permMode = mode;
+    return { ok: true, permission: mode };
   }
 
   /** Change the model; empty means the backend's default. */
@@ -277,6 +312,20 @@ export class SessionManager {
     return { ok: true };
   }
 
+  /** Rules that apply in `workspace` (user, project, repo ask/deny), and where to edit them. */
+  async listRules(params: unknown): Promise<{ rules: Array<{ behavior: string; text: string; source: string }>; errors: string[]; files: { user: string; project: string }; project: string }> {
+    const ws = str(obj(params).workspace);
+    if (!ws) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
+    const project = await projectName(ws);
+    const set = await loadRules(this.o.home, project, ws);
+    return {
+      rules: set.rules.map((r) => ({ behavior: r.behavior, text: r.text, source: r.source })),
+      errors: set.errors,
+      files: { user: userRulesFile(this.o.home), project: projectRulesFile(this.o.home, project) },
+      project,
+    };
+  }
+
   /** Answer a `permission` event. */
   permission(params: unknown): { ok: boolean } {
     const p = obj(params);
@@ -285,7 +334,7 @@ export class SessionManager {
     const pending = s.pending.get(rid);
     if (!pending) return { ok: false };
     s.pending.delete(rid);
-    pending.resolve(p.allow === true);
+    pending.resolve(toAnswer(p));
     return { ok: true };
   }
 
@@ -348,62 +397,115 @@ export class SessionManager {
       return await this.decideInner(s, call);
     } catch (e) {
       const reason = `harness error: ${e instanceof Error ? e.message : String(e)}`;
-      this.track(this.record(s, call, "error", ["INTERNAL_ERROR"], "deny", "policy"));
+      this.track(this.record(s, call, null, "error", "deny", "policy"));
       return { action: "deny", reason };
     }
   }
 
   private async decideInner(s: Session, call: ToolCall): Promise<Decision> {
     const v = classify(call.name, call.args, { workspace: s.cwd, tainted: s.tainted, mcpReadOnly: call.mcp?.readOnly ?? false });
+    const level = levelOf(v);
+    const rule = matchRules(s.rules, call);
+    const deny = async (reason: string, by: DecisionBy, detail: Record<string, unknown> = {}): Promise<Decision> => {
+      await this.record(s, call, v, level, "deny", by, detail);
+      return { action: "deny", reason };
+    };
 
-    // Ask mode: read-only. Writes, edits and any shell command that is not plain reading are refused.
-    if (s.mode === "ask" && (call.kind === "write" || call.kind === "edit" || (call.kind === "shell" && v.tier !== "auto"))) {
-      await this.record(s, call, v.tier, v.codes, "deny", "policy");
-      return { action: "deny", reason: "ask mode is read-only: describe the change instead of making it." };
-    }
+    // 1. A deny rule wins over everything, Bypass included.
+    if (rule?.behavior === "deny") return deny(`denied by the user's rule ${rule.text}. Do not retry it.`, "remembered", { rule: rule.text });
+    // 2. Ask mode only offers reading; nothing (not even an allow rule) widens it.
+    if (s.permMode === "ask" && !askModeAllows(call, v)) return deny(ASK_MODE_REASON, "policy");
 
-    let allow: boolean;
-    let by: "policy" | "user" | "unattended";
-    if (v.tier === "block") {
-      await this.record(s, call, v.tier, v.codes, "deny", "policy");
-      return { action: "deny", reason: v.blockMessage() };
-    } else if (v.tier === "ask") {
-      if (s.unattended) {
-        await this.record(s, call, v.tier, v.codes, "deny", "unattended");
-        return { action: "deny", reason: UNATTENDED_REASON };
-      }
-      allow = await this.askUser(s, call, v);
+    // 3. Hard blocks and Bypass exceptions come from the mode; otherwise ask/allow rules, then the mode.
+    const special = s.permMode === "bypass" ? modeAction("bypass", call, v).kind === "ask" : level === "hard_block";
+    let action: ModeAction;
+    let by: DecisionBy = "policy";
+    if (special) action = modeAction(s.permMode, call, v);
+    else if (rule?.behavior === "ask") action = { kind: "ask" };
+    else if (rule?.behavior === "allow" && level !== "danger") {
+      action = { kind: "allow" };
+      by = "remembered";
+    } else action = modeAction(s.permMode, call, v);
+
+    if (action.kind === "deny") return deny(action.reason, "policy");
+    if (action.kind === "ask") {
+      if (s.unattended) return deny(UNATTENDED_REASON, "unattended");
+      const answer = await this.askUser(s, call, v, level, action.countdownSec);
+      if (answer === "deny" || answer === "deny_always") return deny("the user declined this call. Do not retry it; ask what they want instead.", "user", { answer });
       by = "user";
-    } else {
-      allow = true;
-      by = "policy";
     }
-    await this.record(s, call, v.tier, v.codes, allow ? "allow" : "deny", by);
-    if (!allow) return { action: "deny", reason: "the user declined this call. Do not retry it; ask what they want instead." };
+    await this.record(s, call, v, level, "allow", by, rule && by === "remembered" ? { rule: rule.text } : {});
 
     if (call.name === "submit_plan" && typeof call.args.markdown === "string") this.emit(s, { type: "plan", markdown: call.args.markdown });
     if (call.kind === "write" || call.kind === "edit") await this.emitDiff(s, call);
     return { action: "allow" };
   }
 
-  private askUser(s: Session, call: ToolCall, v: Verdict): Promise<boolean> {
+  /** Show a permission card and wait. Red calls never offer "Always allow"; a countdown ends in a refusal. */
+  private async askUser(s: Session, call: ToolCall, v: Verdict, level: Level, countdownSec?: number): Promise<PermAnswer> {
     const requestId = randomUUID();
-    const pattern = call.kind === "shell" && typeof call.args.command === "string" ? shellPattern(call.args.command) ?? undefined : undefined;
-    return new Promise<boolean>((resolve) => {
-      s.pending.set(requestId, { resolve, callId: call.callId });
-      this.emit(s, { type: "permission", request_id: requestId, name: call.raw.tool, input: call.raw.input, reason: v.title(), risk: v.toRisk(pattern) });
+    const cmd = call.kind === "shell" && typeof call.args.command === "string" ? call.args.command : null;
+    const pattern = cmd ? shellPattern(cmd) : null;
+    const always = level === "safe" || level === "caution" ? ruleFor(call, pattern) : null;
+    const denyRule = ruleFor(call, pattern) ?? (cmd ? `${call.raw.tool}(${cmd.trim()})` : null);
+    const segs = cmd ? shellSegments(cmd) : [];
+    const ctx = { workspace: s.cwd, tainted: s.tainted, mcpReadOnly: call.mcp?.readOnly ?? false };
+    const risk = {
+      ...v.toRisk(pattern ?? undefined),
+      level,
+      codes: v.codes,
+      ...(segs.length > 1
+        ? {
+            segments: segs.map((text) => {
+              const sv = classify("shell", { command: text }, ctx);
+              return { text, level: levelOf(sv), codes: sv.codes };
+            }),
+          }
+        : {}),
+      impact: impactOf(v, call, s.snapshotTurn === s.turn),
+      source: call.parentCallId ? "subagent" : "agent",
+      tainted: s.tainted,
+      mode: s.permMode,
+      ...(always ? { allow_rule: always } : {}),
+      ...(denyRule ? { deny_rule: denyRule } : {}),
+      ...(countdownSec ? { countdown_s: countdownSec } : {}),
+    };
+    const answer = await new Promise<PermAnswer>((resolve) => {
+      let timer: NodeJS.Timeout | undefined;
+      const done = (a: PermAnswer) => {
+        if (timer) clearTimeout(timer);
+        resolve(a);
+      };
+      if (countdownSec) {
+        timer = setTimeout(() => {
+          if (s.pending.delete(requestId)) resolve("deny");
+        }, countdownSec * 1000);
+      }
+      s.pending.set(requestId, { resolve: done, callId: call.callId });
+      this.emit(s, { type: "permission", request_id: requestId, name: call.raw.tool, input: call.raw.input, reason: v.title(), risk });
     });
+    // Save the rule the card offered; "Always allow" is ignored where it was not offered (red calls).
+    const save = answer === "allow_always" ? always : answer === "deny_always" ? denyRule : null;
+    if (save) {
+      const file = projectRulesFile(this.o.home, s.project);
+      await addRule(file, answer === "allow_always" ? "allow" : "deny", save);
+      s.rules = await loadRules(this.o.home, s.project, s.cwd);
+      await this.o.audit.append({ session: s.id, kind: "rule.add", path: file, detail: { behavior: answer === "allow_always" ? "allow" : "deny", rule: save } });
+    }
+    return answer === "allow_always" && !always ? "allow_once" : answer;
   }
 
   private denyPending(s: Session): void {
-    for (const p of s.pending.values()) p.resolve(false);
+    for (const p of s.pending.values()) p.resolve("deny");
     s.pending.clear();
   }
 
-  private async record(s: Session, call: ToolCall, tier: string, codes: string[], action: "allow" | "deny", by: "policy" | "user" | "unattended"): Promise<void> {
+  private async record(s: Session, call: ToolCall, v: Verdict | null, level: Level | "error", action: "allow" | "deny", by: DecisionBy, extra: Record<string, unknown> = {}): Promise<void> {
+    const tier = v?.tier ?? "error";
+    const codes = v?.codes ?? ["INTERNAL_ERROR"];
     await this.o.log.append(s.id, { type: "decision", callId: call.callId, tool: call.raw.tool, tier, codes, action, by });
     const p = typeof call.args.path === "string" ? call.args.path : undefined;
-    await this.o.audit.append({ session: s.id, kind: "decision", tool: call.name, ...(p ? { path: p } : {}), detail: { tier, codes, action, by, callId: call.callId } });
+    await this.o.audit.append({ session: s.id, kind: "decision", tool: call.name, ...(p ? { path: p } : {}), detail: { tier, level, codes, action, by, mode: s.permMode, callId: call.callId, ...extra } });
   }
 
   /** Diff card before the write lands (Balanced: `applied`, the UI offers Undo). */
@@ -522,6 +624,16 @@ export type PersonalSummary = Omit<Personal, "systemAppend" | "plugins">;
 
 function personalSummary(p: Personal): PersonalSummary {
   return { home: p.home, profile: p.profile, project: p.project, ...(p.projectName ? { projectName: p.projectName } : {}), plugin: p.plugin, warnings: p.warnings };
+}
+
+type DecisionBy = "policy" | "user" | "remembered" | "unattended";
+
+/** `session.permission` params -> answer. Legacy `{allow, scope|remember}` still works. */
+function toAnswer(p: Record<string, unknown>): PermAnswer {
+  const d = p.decision;
+  if (d === "allow_once" || d === "allow_always" || d === "deny" || d === "deny_always") return d;
+  if (p.allow !== true) return "deny";
+  return p.scope === "workspace" || p.scope === "session" || p.remember === true ? "allow_always" : "allow_once";
 }
 
 function reviewNeeded(review: RepoReview): RpcFailure {

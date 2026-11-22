@@ -7,7 +7,7 @@ paths:
 
 Full spec: `docs/frontend/composer.md`.
 
-- Mode order: Plan, Agent, Debug, MultiTask, Review, Ask. Trigger: pill, `--accent` fill, `--on-accent` text. Auto immediately to the right, no border.
+- Mode order: Plan, Agent, Debug, MultiTask, Review (Ask is a permission mode now). Permission mode menu (`PermModeMenu`) sits right after the mode menu; Bypass keeps it red. Trigger: pill, `--accent` fill, `--on-accent` text. Auto immediately to the right, no border.
 - Placeholder from `i18n.ts` (`composer.placeholder`), in the UI language: EN `Plan, Build, / for skills, @ for context`, VI `Lập kế hoạch, xây dựng, / để dùng skill, @ để thêm ngữ cảnh`.
 - Files+Review row only if `files.length > 0`.
 - Empty tools: context **gauge** (not Image), paperclip, mic stub, waveform stub.

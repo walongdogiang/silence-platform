@@ -106,9 +106,12 @@
 - { cmd: "Remove-Item C:\\ -Recurse -Force", tier: block, code: FS_DELETE_SYSTEM }
 - { cmd: "Remove-Item $env:USERPROFILE\\Documents -Recurse", tier: block, code: FS_DELETE_SYSTEM }
 - { cmd: "rd /s /q C:\\Windows", tier: block, code: FS_DELETE_SYSTEM }
-- { cmd: "format D: /q", tier: block, code: SYSTEM_CHANGE }
-- { cmd: "diskpart", tier: block, code: SYSTEM_CHANGE }
-- { cmd: "bcdedit /set testsigning on", tier: block, code: SYSTEM_CHANGE }
+- { cmd: "format D: /q", tier: block, code: DISK_DESTROY }
+- { cmd: "diskpart", tier: block, code: DISK_DESTROY }
+- { cmd: "bcdedit /set testsigning on", tier: block, code: DISK_DESTROY }
+- { cmd: "Format-Volume -DriveLetter E", tier: block, code: DISK_DESTROY }
+- { cmd: "vssadmin delete shadows /all", tier: block, code: DISK_DESTROY }
+- { cmd: "cipher /w:C:", tier: block, code: DISK_DESTROY }
 - { cmd: "reg add HKLM\\Software\\X /v Y /d 1", tier: block, code: SYSTEM_CHANGE }
 - { cmd: "Set-ExecutionPolicy Unrestricted -Force", tier: block, code: SYSTEM_CHANGE }
 - { cmd: "Set-MpPreference -DisableRealtimeMonitoring $true", tier: block, code: SYSTEM_CHANGE }

@@ -84,17 +84,6 @@ describe("policy", () => {
     expect(missing).toEqual([]);
   });
 
-  it("stays identical to the Rust Engine copy while it exists", () => {
-    for (const [mine, name] of [
-      [POLICY_URL, "default_policy.yaml"],
-      [CORPUS_URL, "corpus.yaml"],
-    ] as const) {
-      const rust = new URL(`crates/runtime/src/risk/${name}`, repoRoot);
-      if (!existsSync(rust)) continue;
-      const norm = (s: string) => s.replace(/\r\n/g, "\n");
-      expect(norm(readFileSync(mine, "utf8")), `${name} differs from the Rust copy`).toBe(norm(readFileSync(rust, "utf8")));
-    }
-  });
 });
 
 describe("corpus", () => {
