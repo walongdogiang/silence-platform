@@ -86,6 +86,7 @@ import { loadModelPrefs, lockedModels, saveModelPrefs, visibleModels } from "./t
 import type { CliInfo, ContextUsage, ModelInfo, SandboxStatus, SessionEvent } from "./types";
 import { loadPrefs, savePrefs, type Prefs } from "./prefs";
 import { pinnedSessionIds, pruneThreads } from "./retention";
+import { activityAt } from "./threadActivity";
 
 /** Write the pending chat history (if any) to localStorage and clear it. */
 function flushHistory(pending: { current: ChatThread[] | null }) {
@@ -421,7 +422,14 @@ export function App() {
   /** Sửa `lines` của thread có session `sid`: thread đang mở → state `lines`; thread nền → bản lưu trong `threads`. */
   const linesFor = (sid: string, fn: (xs: ChatLine[]) => ChatLine[]) => {
     if (!sid || sid === sessionIdRef.current) setLines(fn);
-    else setThreads((xs) => xs.map((x) => (x.sessionId === sid ? { ...x, lines: fn(x.lines), updatedAt: Date.now() } : x)));
+    else
+      setThreads((xs) =>
+        xs.map((x) => {
+          if (x.sessionId !== sid) return x;
+          const next = fn(x.lines);
+          return { ...x, lines: next, updatedAt: activityAt(next, x.updatedAt) };
+        }),
+      );
   };
   // Id ảnh không còn trong IndexedDB: không hỏi lại mỗi lần `lines` đổi (stream token).
   const missedImagesRef = useRef(new Set<string>());
@@ -613,8 +621,8 @@ export function App() {
               lines,
               title: titleLocked(t) ? t.title : titleFrom(lines, t.title),
               preview: previewFrom(lines),
-              // Chỉ bump khi nội dung đổi; bấm chuyển chat không được reset bộ đếm giờ.
-              updatedAt: t.lines === lines && t.sessionId === sessionId ? t.updatedAt : Date.now(),
+              // Theo tin nhắn cuối (threadActivity.ts), không theo lần state đổi.
+              updatedAt: activityAt(lines, t.updatedAt),
             }
           : t,
       ),
@@ -664,7 +672,11 @@ export function App() {
         if (here) setLinesState(fn);
         else
           setThreads((xs) =>
-            xs.map((x) => (x.sessionId === sid ? { ...x, lines: fn(x.lines), updatedAt: Date.now() } : x)),
+            xs.map((x) => {
+              if (x.sessionId !== sid) return x;
+              const next = fn(x.lines);
+              return { ...x, lines: next, updatedAt: activityAt(next, x.updatedAt) };
+            }),
           );
       };
       /** Thread chạy nền có việc cho user (xong, lỗi, chờ duyệt): chấm unread trên lịch sử. */
@@ -1391,7 +1403,7 @@ export function App() {
               lines,
               title: titleLocked(x) ? x.title : titleFrom(lines, x.title),
               preview: previewFrom(lines),
-              updatedAt: x.lines === lines && x.sessionId === sessionId ? x.updatedAt : Date.now(),
+              updatedAt: activityAt(lines, x.updatedAt),
             }
           : x,
       ),
@@ -1569,7 +1581,7 @@ export function App() {
     const plan = planningStep();
     setLines((xs) => [
       ...xs,
-      turnImages.length ? { kind: "user", text, images: turnImages } : { kind: "user", text },
+      turnImages.length ? { kind: "user", text, images: turnImages, at: Date.now() } : { kind: "user", text, at: Date.now() },
       { kind: "narrate", verb: plan.verb, detail: plan.detail },
     ]);
     setBusy(true);
@@ -1829,7 +1841,7 @@ export function App() {
     const step = planningStep();
     setLines((xs) => [
       ...xs,
-      { kind: "user", text: t("app.approvePlanMsg") },
+      { kind: "user", text: t("app.approvePlanMsg"), at: Date.now() },
       { kind: "narrate", verb: step.verb, detail: step.detail },
     ]);
     setBusy(true);
@@ -2038,6 +2050,16 @@ export function App() {
           onForkFrom={(userLine) => void forkFrom(userLine)}
           onRewind={(userLine) => void rewindTo(userLine)}
           onRetryTurn={(userLine) => void rewindTo(userLine, true)}
+          onPinChapter={(userLine, title) =>
+            setLines((xs) =>
+              xs.map((l, i) => {
+                if (i !== userLine || l.kind !== "user") return l;
+                if (title) return { ...l, chapter: title };
+                const { chapter: _drop, ...rest } = l;
+                return rest;
+              }),
+            )
+          }
           onAttachMessage={attachMessage}
           onOpenWorkspace={() => void openWorkspace()}
           onChip={onChip}

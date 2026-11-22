@@ -88,14 +88,15 @@ export function TooltipLayer() {
       if (cur) {
         const text = cur.el.getAttribute("data-tip");
         if (!text || !cur.el.isConnected) setShown(null);
-        else if (text !== cur.text) setShown({ el: cur.el, text, parts: parseTip(text, notesRef.current) });
+        else if (tipKey(cur.el, text) !== cur.text)
+          setShown({ el: cur.el, text: tipKey(cur.el, text), parts: partsOf(cur.el, text, notesRef.current) });
       }
     });
     mo.observe(document.body, {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["title", "data-tip"],
+      attributeFilter: ["title", "data-tip", "data-tip-desc"],
       attributeOldValue: true,
     });
     return () => mo.disconnect();
@@ -112,7 +113,7 @@ export function TooltipLayer() {
     const show = (el: HTMLElement) => {
       const text = el.getAttribute("data-tip");
       if (!text) return;
-      setShown({ el, text, parts: parseTip(text, notesRef.current) });
+      setShown({ el, text: tipKey(el, text), parts: partsOf(el, text, notesRef.current) });
     };
     const schedule = (el: HTMLElement) => {
       if (shownRef.current?.el === el || pending === el) return;
@@ -194,6 +195,9 @@ export function TooltipLayer() {
         { left: r.left, top: r.top, width: r.width, height: r.height },
         { width: tip.width, height: tip.height },
         { width: window.innerWidth, height: window.innerHeight },
+        6,
+        8,
+        shown.el.getAttribute("data-tip-side") === "above" ? "above" : "below",
       ),
     );
   }, [shown]);
@@ -203,14 +207,25 @@ export function TooltipLayer() {
   return createPortal(
     <div
       ref={tipRef}
-      className={`app-tip${place ? ` on ${place.side}` : ""}`}
+      className={`app-tip${parts.desc ? " rich" : ""}${place ? ` on ${place.side}` : ""}`}
       aria-hidden="true"
       style={place ? { left: place.x, top: place.y } : { left: 0, top: 0 }}
     >
       <span className="app-tip-label">{parts.label}</span>
       {parts.note ? <span className="app-tip-note">{parts.note}</span> : null}
       {parts.keys ? <span className="app-tip-keys">{parts.keys.join("+")}</span> : null}
+      {parts.desc ? <span className="app-tip-desc">{parts.desc}</span> : null}
     </div>,
     document.body,
   );
 }
+
+/** Label + optional `data-tip-desc` line. */
+function partsOf(el: Element, text: string, notes: string[]): TipParts {
+  const desc = el.getAttribute("data-tip-desc")?.trim();
+  const parts = parseTip(text, notes);
+  return desc ? { ...parts, desc } : parts;
+}
+
+/** Re-render the tip when either the label or the description changes. */
+const tipKey = (el: Element, text: string) => `${text}\n${el.getAttribute("data-tip-desc") ?? ""}`;

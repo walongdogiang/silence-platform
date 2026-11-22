@@ -60,6 +60,11 @@ describe("placeTip", () => {
     expect(placeTip({ left: 450, top: 760, width: 100, height: 30 }, tip, vp)).toEqual({ x: 450, y: 730, side: "above" });
   });
 
+  it("prefer above: above when it fits, below when it does not", () => {
+    expect(placeTip({ left: 450, top: 300, width: 100, height: 30 }, tip, vp, 6, 8, "above").side).toBe("above");
+    expect(placeTip({ left: 450, top: 10, width: 100, height: 30 }, tip, vp, 6, 8, "above").side).toBe("below");
+  });
+
   it("clamps to the viewport edges", () => {
     expect(placeTip({ left: 0, top: 10, width: 20, height: 20 }, tip, vp).x).toBe(8);
     expect(placeTip({ left: 990, top: 10, width: 10, height: 20 }, tip, vp).x).toBe(892);
