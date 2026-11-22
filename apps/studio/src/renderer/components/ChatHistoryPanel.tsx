@@ -354,6 +354,8 @@ export function ChatHistoryPanel(props: {
   runState?: "running" | "waiting";
   /** Thread đang chạy lượt (có thể không phải thread đang mở). Mặc định = `activeId`. */
   runId?: string;
+  /** Every running thread (roadmap 1.11: several at once); wins over `runState` / `runId`. */
+  runStates?: Record<string, "running" | "waiting">;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -485,14 +487,15 @@ export function ChatHistoryPanel(props: {
     return items;
   }
   const runId = props.runId ?? props.activeId;
+  const stateOf = (id: string) => (props.runStates ? props.runStates[id] : id === runId ? props.runState : undefined);
   const dotClass = (id: string) => {
-    const state = id === runId ? props.runState : undefined;
+    const state = stateOf(id);
     if (state) return `history-dot on ${state}`;
     return id === props.activeId ? "history-dot on" : "history-dot";
   };
   const dotTitle = (id: string) =>
-    id === runId && props.runState
-      ? props.runState === "waiting"
+    stateOf(id)
+      ? stateOf(id) === "waiting"
         ? tr("history.waiting")
         : tr("history.running")
       : undefined;

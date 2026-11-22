@@ -3,6 +3,7 @@ import type { Appearance } from "../../theme/appearance";
 import { DEFAULT_SOURCE_KIND, loadDefaultSource, type ModelSource } from "../../effort";
 import type { Prefs } from "../../prefs";
 import { Segmented, SettingRow, Switch } from "./SettingRow";
+import { MAX_CONCURRENT } from "../../prefs";
 
 /** Settings → General: language, where the default source lives, startup. Reset lives in Appearance. */
 export function GeneralSection(props: {
@@ -39,6 +40,14 @@ export function GeneralSection(props: {
         <button type="button" className="btn-light" onClick={props.onOpenSources}>
           {t("set.change")}
         </button>
+      </SettingRow>
+      <SettingRow id="max-concurrent" label={t("gen.concurrent")} desc={t("gen.concurrent.desc")}>
+        <Segmented
+          label={t("gen.concurrent")}
+          value={String(props.prefs.maxConcurrent)}
+          onChange={(v) => props.onPrefs({ ...props.prefs, maxConcurrent: Number(v) })}
+          options={MAX_CONCURRENT.map((n) => ({ id: String(n), label: String(n) }))}
+        />
       </SettingRow>
       <SettingRow id="restore-tabs" label={t("gen.restore")} desc={t("gen.restore.desc")}>
         <Switch

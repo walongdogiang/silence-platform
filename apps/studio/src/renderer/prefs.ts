@@ -21,6 +21,8 @@ export type Prefs = {
   flashTaskbar: boolean;
   keepAwake: boolean;
   retentionDays: RetentionDays;
+  /** Turns running at once across chats (TS core, roadmap 1.11); more wait in line. */
+  maxConcurrent: number;
 };
 
 export const DEFAULT_CODE_FONT = "Cascadia Code, Consolas, monospace";
@@ -28,6 +30,7 @@ export const CODE_FONT_SIZES = [12, 13, 14, 15] as const;
 export const TRANSCRIPT_VIEWS: TranscriptView[] = ["compact", "thinking", "verbose"];
 export const RESPONSE_STYLES: ResponseStyle[] = ["default", "concise", "explanatory"];
 export const RETENTION_DAYS: RetentionDays[] = [0, 90, 30, 7];
+export const MAX_CONCURRENT = [1, 2, 3, 4] as const;
 
 export const DEFAULT_PREFS: Prefs = {
   version: 1,
@@ -43,6 +46,7 @@ export const DEFAULT_PREFS: Prefs = {
   flashTaskbar: true,
   keepAwake: false,
   retentionDays: 0,
+  maxConcurrent: 2,
 };
 
 const KEY = "silence.prefs.v1";
@@ -75,6 +79,7 @@ export function normalizePrefs(raw: unknown): Prefs {
     flashTaskbar: bool(p.flashTaskbar, d.flashTaskbar),
     keepAwake: bool(p.keepAwake, d.keepAwake),
     retentionDays: pick(p.retentionDays, RETENTION_DAYS, d.retentionDays),
+    maxConcurrent: pick(p.maxConcurrent, MAX_CONCURRENT as readonly number[], d.maxConcurrent),
   };
 }
 
