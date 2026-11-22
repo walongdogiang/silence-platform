@@ -1,4 +1,4 @@
-import { listSessions } from "@anthropic-ai/claude-agent-sdk";
+import { getSessionMessages, listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { RpcServer } from "./api/jsonrpc.js";
 import { ClaudeBackend } from "./backends/claude/index.js";
 import { AuditLog } from "./store/audit.js";
@@ -41,6 +41,7 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   const sessions = new SessionManager({
     backends: opts.sessions?.backends ?? { claude: new ClaudeBackend() },
     listExternal: opts.sessions?.listExternal ?? ((o) => listSessions(o)),
+    externalMessages: opts.sessions?.externalMessages ?? (async (id, dir) => (await getSessionMessages(id, dir ? { dir } : {})) as never),
     log: new EventLog(dataDir),
     audit: new AuditLog(dataDir),
     home: opts.home ?? silenceHome(),
@@ -76,6 +77,9 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("profile.status", (p) => sessions.profileStatus(p));
   server.register("permissions.rules", (p) => sessions.listRules(p));
   server.register("lesson.propose", (p) => sessions.lessonPropose(p));
+  server.register("metrics.summary", (p) => sessions.metricsSummary(p));
+  server.register("session.external", (p) => sessions.externalSessions(p));
+  server.register("session.external_messages", (p) => sessions.externalMessages(p));
   server.register("lesson.apply", (p) => sessions.lessonApply(p));
   return { server, sessions };
 }

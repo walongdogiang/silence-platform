@@ -69,7 +69,7 @@ function toEngine(method: string, params: unknown): Route {
 export function routeRpc(method: string, params: unknown, coreOn: boolean, coreSessions: ReadonlySet<string>): Route {
   if (method === "core.status") return { to: "local", result: { running: coreOn } };
   // Personal layer (~/.silence) and permission rules live in the core only: without it, say so.
-  if (method === "profile.status" || method === "permissions.rules") {
+  if (method === "profile.status" || method === "permissions.rules" || method === "metrics.summary" || method === "session.external" || method === "session.external_messages") {
     return coreOn ? { to: "core", method, params: record(params) } : { to: "local", result: { available: false } };
   }
   // Lesson loop (roadmap 1.9) lives in the core only.
@@ -89,6 +89,8 @@ export function routeRpc(method: string, params: unknown, coreOn: boolean, coreS
         ...(model ? { model } : {}),
         ...(p.effort ? { effort: p.effort } : {}),
         ...(p.permission ? { permission: p.permission } : {}),
+        // Continue a Claude desktop / terminal session in 5ilence (roadmap 1.10).
+        ...(typeof p.resume_backend_session === "string" ? { resume_backend_session: p.resume_backend_session } : {}),
       },
     };
   }
