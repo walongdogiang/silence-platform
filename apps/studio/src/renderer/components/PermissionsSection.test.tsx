@@ -1,43 +1,49 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { SandboxStatus } from "../types";
+import type { UiPermMode } from "../permissionUi";
 import { PermissionsSection, sandboxStateText } from "./PermissionsSection";
 import { translator } from "../i18n";
 
 const noop = async () => {};
 
-const html = (sandbox: SandboxStatus | null, mode: "ask" | "balanced" | "autonomous" = "balanced") =>
+const html = (sandbox: SandboxStatus | null, opts: { mode?: UiPermMode; coreOn?: boolean; bypass?: boolean } = {}) =>
   renderToStaticMarkup(
     <PermissionsSection
       workspace=""
-      mode={mode}
+      mode={opts.mode ?? "auto"}
       onMode={() => {}}
+      coreOn={opts.coreOn ?? true}
+      bypassEnabled={opts.bypass ?? false}
+      onBypassEnabled={() => {}}
       sandbox={sandbox}
       onRefreshSandbox={noop}
       onSetupSandbox={noop}
     />,
   );
 
-/** The `<input>` of the Autonomous radio (the third radio of the group). */
-function autonomousInput(out: string): string {
-  const radios = out.match(/<input[^>]*type="radio"[^>]*>/g) ?? [];
-  expect(radios).toHaveLength(3);
-  return radios[2];
-}
+const radios = (out: string) => out.match(/<input[^>]*type="radio"[^>]*>/g) ?? [];
+
+describe("PermissionsSection modes", () => {
+  it("lists Ask, Manual, Accept edits and Auto; Bypass only once its switch is on", () => {
+    const out = html(null);
+    expect(radios(out)).toHaveLength(4);
+    for (const label of ["Ask", "Manual", "Accept edits", "Auto (default)"]) expect(out).toContain(label);
+    expect(out).not.toContain("Everything runs without asking");
+    expect(radios(html(null, { bypass: true }))).toHaveLength(5);
+    expect(out).toContain("Allow Bypass permissions mode");
+  });
+
+  it("Ask and Bypass cannot be picked while the core is off", () => {
+    const r = radios(html(null, { coreOn: false, bypass: true }));
+    expect(r[0]).toContain("disabled");
+    expect(r[1]).not.toContain("disabled");
+    expect(r[4]).toContain("disabled");
+    expect(html(null, { coreOn: false })).toContain("SILENCE_CORE=1");
+  });
+});
 
 describe("PermissionsSection sandbox", () => {
-  it("Autonomous is selectable only when the sandbox is ready", () => {
-    expect(autonomousInput(html({ state: "ready" }))).not.toContain("disabled");
-    expect(autonomousInput(html({ state: "not_installed" }))).toContain("disabled");
-    expect(autonomousInput(html({ state: "degraded", reason: "x" }))).toContain("disabled");
-    expect(autonomousInput(html({ state: "unsupported" }))).toContain("disabled");
-    expect(autonomousInput(html(null))).toContain("disabled");
-  });
-
-  it("a selected Autonomous stays clickable so it can be unselected after the sandbox breaks", () => {
-    expect(autonomousInput(html({ state: "degraded", reason: "x" }, "autonomous"))).not.toContain("disabled");
-  });
-
   it("offers install when missing, repair when degraded, nothing when ready", () => {
     expect(html({ state: "not_installed" })).toContain("Install sandbox (UAC)");
     const degraded = html({ state: "degraded", reason: "firewall rule missing" });

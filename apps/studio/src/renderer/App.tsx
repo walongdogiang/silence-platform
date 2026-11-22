@@ -43,7 +43,9 @@ import {
 import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImages";
 import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
-import { autonomousFallbackNote, blockedStep, loadPermMode, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
+import { blockedStep, effectivePermMode, loadBypassEnabled, loadPermMode, saveBypassEnabled, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
+import type { PermAnswer } from "./types";
+import { PermModeMenu } from "./components/PermModeMenu";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import { liveProgress, useEvalLive } from "./evalLive";
@@ -378,8 +380,14 @@ export function App() {
   const [permError, setPermError] = useState(false);
   const [cost, setCost] = useState({ usd: 0, input_tokens: 0, output_tokens: 0, events: 0 });
   const [busy, setBusy] = useState(false);
-  /** Chế độ quyền (Settings): Cân bằng mặc định hoặc Thận trọng. Gửi lên Engine mỗi lượt. */
+  /** Permission mode the user picked (Auto by default); sent with every turn. docs/security/permissions.md */
   const [permMode, setPermMode] = useState<UiPermMode>(() => loadPermMode());
+  /** Settings → Permissions → "Allow Bypass permissions mode" (off by default). */
+  const [bypassEnabled, setBypassEnabled] = useState<boolean>(() => loadBypassEnabled());
+  /** The TS core runs chat sessions (`SILENCE_CORE=1`); Ask, Bypass and rules need it. */
+  const [coreOn, setCoreOn] = useState(false);
+  /** What sessions actually get: an unavailable pick (Ask/Bypass without the core) runs as Auto. */
+  const permEff = effectivePermMode(permMode, coreOn, bypassEnabled);
   /** Sandbox lệnh (`sandbox.status`, Engine cache 30 s). `null` = chưa biết / Engine cũ. */
   const [sandbox, setSandbox] = useState<SandboxStatus | null>(null);
   /** Run pulse của lượt đang chạy: giờ bắt đầu, token/USD cộng từ `cost`, cờ Stop (`docs/frontend/status.md`). */
@@ -459,6 +467,18 @@ export function App() {
   const spend = spendByThread[activeThreadId] ?? EMPTY_SPEND;
   /** Context của session hiện tại (`session.context`) — khác `cost` (tổng chi phí mọi session). */
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+
+  // Is the TS core running? Main answers locally (`core.status`); an old main without it means no.
+  useEffect(() => {
+    let live = true;
+    window.silence
+      ?.rpc("core.status", {})
+      .then((r) => live && setCoreOn(Boolean((r as { running?: boolean } | null)?.running)))
+      .catch(() => live && setCoreOn(false));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Trạng thái sandbox: lúc mở app, khi đổi chế độ quyền và khi đóng Settings (có thể vừa cài xong).
   useEffect(() => {
@@ -1112,7 +1132,7 @@ export function App() {
       window.silence.rpc("session.create", { workspace: dir, model, mode, permission }) as Promise<{ session_id: string }>;
     let created: { session_id: string };
     try {
-      created = await create(permMode);
+      created = await create(permEff);
     } catch (e) {
       if (!/unknown variant/i.test(e instanceof Error ? e.message : String(e))) throw e;
       setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.oldEngineBalanced")}`]);
@@ -1627,7 +1647,7 @@ export function App() {
       // Engine restart (watch mode) loses the Auto preference: re-send it with the turn.
       await window.silence.rpc("providers.set_preferred", { provider: preferredFor(source) }).catch(() => undefined);
       // Session cũ (resume) giữ chế độ quyền lúc tạo: đồng bộ lại theo Settings trước mỗi lượt.
-      await window.silence.rpc("session.set_permission", { session_id: sid, permission: permMode }).catch(() => undefined);
+      await window.silence.rpc("session.set_permission", { session_id: sid, permission: permEff }).catch(() => undefined);
       if (turnImages.length) {
         // Engine build cũ (vd. chỉ UI được hot-reload) bỏ qua `images` im lặng: model không thấy ảnh.
         const pong = (await window.silence.rpc("ping", {})) as { protocol?: unknown } | null;
@@ -1796,8 +1816,12 @@ export function App() {
       Debug: "debug",
       MultiTask: "multitask",
       Review: "review",
-      Ask: "ask",
     };
+    if (chip === "Ask") {
+      // Ask is a permission mode now (read-only); the hub chip switches to it when the core runs.
+      if (coreOn) changePermMode("ask");
+      return;
+    }
     if (chip === "ReviewChanges") {
       // Nút Review ở hàng Files: chuyển sang Review và điền sẵn yêu cầu nếu ô nhập đang trống.
       setMode("review");
@@ -1805,6 +1829,44 @@ export function App() {
       focusComposer();
     } else if (byChip[chip]) setMode(byChip[chip]);
     else if (chip === "More") openSettings();
+  }
+
+  /** Pick a permission mode (menu by the chat input or Settings); applies to the open session now. */
+  function changePermMode(m: UiPermMode) {
+    setPermMode(m);
+    savePermMode(m);
+    const eff = effectivePermMode(m, coreOn, bypassEnabled);
+    if (sessionId) {
+      void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: eff }).catch(() => undefined);
+    }
+  }
+
+  /** Settings switch; turning Bypass off while in Bypass falls back to Auto. */
+  function changeBypassEnabled(on: boolean) {
+    setBypassEnabled(on);
+    saveBypassEnabled(on);
+    if (!on && permMode === "bypass") changePermMode("auto");
+  }
+
+  /** Answer a TS core permission card. `allow`/`scope` are sent too for the Rust Engine's reader. */
+  async function answerCorePerm(a: PermAnswer) {
+    if (!perm || permBusy) return;
+    setPermBusy(true);
+    setPermError(false);
+    try {
+      await window.silence.rpc("session.permission", {
+        session_id: perm.session_id,
+        request_id: perm.request_id,
+        decision: a,
+        allow: a === "allow_once" || a === "allow_always",
+        scope: "once",
+      });
+      setPerm(null);
+    } catch {
+      setPermError(true);
+    } finally {
+      setPermBusy(false);
+    }
   }
 
   async function answerPerm(allow: boolean, scope: PermScope) {
@@ -1927,6 +1989,15 @@ export function App() {
 
   const composerEl = (
     <Composer
+      permMenu={
+        <PermModeMenu
+          mode={permEff}
+          onMode={changePermMode}
+          coreOn={coreOn}
+          bypassEnabled={bypassEnabled}
+          onOpenSettings={() => openSettings("permissions")}
+        />
+      }
       prompt={prompt}
       onPrompt={setPrompt}
       images={images}
@@ -2017,7 +2088,6 @@ export function App() {
           lines={lines}
           plan={plan}
           perm={permHere}
-          sandboxNote={autonomousFallbackNote(permMode, sandbox, t)}
           onOpenPermissions={() => openSettings("permissions")}
           diff={diff}
           sessionId={sessionId}
@@ -2039,6 +2109,7 @@ export function App() {
           permError={permError}
           onAllow={(scope) => void answerPerm(true, scope)}
           onDeny={() => void answerPerm(false, "once")}
+          onAnswer={(a) => void answerCorePerm(a)}
           onApplyDiff={() => void applyDiff()}
           onRejectDiff={() => void rejectDiff()}
           onShowDiff={() => {
@@ -2281,14 +2352,10 @@ export function App() {
           onRefreshSandbox={refreshSandbox}
           onSetupSandbox={setupSandbox}
           permMode={permMode}
-          onPermMode={(m) => {
-            setPermMode(m);
-            savePermMode(m);
-            // Áp dụng ngay cho phiên đang mở (các phiên khác đồng bộ ở lượt gửi kế tiếp).
-            if (sessionId) {
-              void window.silence.rpc("session.set_permission", { session_id: sessionId, permission: m }).catch(() => undefined);
-            }
-          }}
+          onPermMode={changePermMode}
+          coreOn={coreOn}
+          bypassEnabled={bypassEnabled}
+          onBypassEnabled={changeBypassEnabled}
           models={{
             catalog: models,
             prefs: modelPrefs,

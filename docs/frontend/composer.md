@@ -28,7 +28,9 @@ Bám Cursor chat input. File: `components/Composer.tsx`.
 
 ## Mode
 
-Thứ tự menu: **Plan → Agent → Debug → MultiTask → Review → Ask**. Icon: List, Infinity, Bug, Users, GitCompare, MessageCircle.
+Thứ tự menu: **Plan → Agent → Debug → MultiTask → Review**. Icon: List, Infinity, Bug, Users, GitCompare. **Ask** không còn là mode của Composer: nó là một chế độ quyền (menu bên phải, dưới).
+
+**Chế độ quyền** (`components/PermModeMenu.tsx`), ngay sau menu mode, trước model: **Ask · Manual · Accept edits · Auto (mặc định) · Bypass permissions**, mô tả ở tooltip. Ask và Bypass mờ khi lõi TS chưa chạy (`core.status`); Bypass còn cần công tắc trong Settings → Quyền (bấm mục mờ mở Settings). Đang ở Bypass thì nút trigger **đỏ** thường trực. Chọn ở đây hay ở Settings là cùng một giá trị (`silence.permission.mode`), áp ngay cho phiên đang mở (`session.set_permission`) và gửi lại trước mỗi lượt. Chi tiết: `docs/security/permissions.md`.
 
 Nút trigger: pill 22px, `border-radius: 999px`, nền `--accent`, chữ/icon `--on-accent` (đen trên copper). Auto **sát phải** mode, **không viền**.
 
@@ -41,7 +43,6 @@ Mỗi mode gửi đúng `mode` cho Engine (hồ sơ ở `profile()` trong `crate
 | Debug | `debug` | Như Agent + quy trình tái hiện → giả thuyết → bằng chứng → sửa nhỏ nhất → chạy lại. Auto dùng tier `strong`. Gửi kèm 60 dòng cuối tab Output (`context` của `session.prompt`, Engine redact). |
 | MultiTask | `multitask` | Như Agent; tách việc độc lập và giao cho sub-agent `task` (hiện chạy tuần tự). |
 | Review | `review` | Chỉ đọc; review thay đổi chưa commit, báo lỗi theo mức độ kèm `path:line`. Auto dùng `strong`. Nút **Review** ở hàng Files chọn mode này và điền sẵn yêu cầu. |
-| Ask | `ask` | Chỉ đọc, hỏi đáp; không sửa. |
 
 Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat.md`). Mode chỉ đọc (Plan/Ask/Review): không có `write`/`edit`/`shell`/`task`, chỉ MCP tool có `readOnlyHint`; Engine từ chối tool ghi kể cả khi model tự gọi. Sub-agent ghi file luôn đi qua permission + diff như agent chính. Mode được đồng bộ bằng `session.set_mode` trước mỗi `session.prompt`.
 

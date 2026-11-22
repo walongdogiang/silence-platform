@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Perm } from "./models";
 import {
-  autonomousFallbackNote,
   blockedStep,
+  effectivePermMode,
   hostsText,
   normalizePermMode,
   permEscalation,
   permHosts,
+  permModeAvailable,
   rememberPattern,
-  sandboxReady,
   scopeLabels,
   tierBadge,
 } from "./permissionUi";
@@ -48,12 +48,25 @@ describe("permission card helpers", () => {
     expect(scopeLabels(p, vi)?.session).toBe("Cho phép src/** trong phiên này");
   });
 
-  it("only known modes are restored; anything else falls back to balanced", () => {
-    expect(normalizePermMode("ask")).toBe("ask");
-    expect(normalizePermMode("balanced")).toBe("balanced");
-    expect(normalizePermMode("autonomous")).toBe("autonomous");
-    expect(normalizePermMode("yolo")).toBe("balanced");
-    expect(normalizePermMode(null)).toBe("balanced");
+  it("restores the five modes and maps legacy values (old Cautious ask = new Ask)", () => {
+    for (const m of ["ask", "manual", "accept_edits", "auto", "bypass"]) expect(normalizePermMode(m)).toBe(m);
+    expect(normalizePermMode("balanced")).toBe("auto");
+    expect(normalizePermMode("autonomous")).toBe("auto");
+    expect(normalizePermMode("allowlist")).toBe("manual");
+    expect(normalizePermMode("yolo")).toBe("auto");
+    expect(normalizePermMode(null)).toBe("auto");
+  });
+
+  it("Ask and Bypass need the core; Bypass also needs the Settings switch; otherwise Auto runs", () => {
+    expect(permModeAvailable("manual", false, false)).toBe(true);
+    expect(permModeAvailable("ask", false, false)).toBe(false);
+    expect(permModeAvailable("ask", true, false)).toBe(true);
+    expect(permModeAvailable("bypass", true, false)).toBe(false);
+    expect(permModeAvailable("bypass", true, true)).toBe(true);
+    expect(permModeAvailable("bypass", false, true)).toBe(false);
+    expect(effectivePermMode("bypass", true, false)).toBe("auto");
+    expect(effectivePermMode("ask", false, false)).toBe("auto");
+    expect(effectivePermMode("accept_edits", false, false)).toBe("accept_edits");
   });
 
   it("a host card offers host scopes, not a command pattern", () => {
@@ -80,19 +93,6 @@ describe("permission card helpers", () => {
     expect(permEscalation(shell("npm install *"))).toBeNull();
   });
 
-  it("explains why Autonomous runs like Balanced when the sandbox is not ready", () => {
-    const ready = { state: "ready" } as const;
-    expect(sandboxReady(ready)).toBe(true);
-    expect(sandboxReady(null)).toBe(false);
-    expect(autonomousFallbackNote("autonomous", ready, vi)).toBeNull();
-    expect(autonomousFallbackNote("balanced", { state: "not_installed" }, vi)).toBeNull();
-    expect(autonomousFallbackNote("autonomous", null, vi)).toBeNull();
-    expect(autonomousFallbackNote("autonomous", { state: "not_installed" }, vi)).toContain("chưa cài sandbox");
-    expect(autonomousFallbackNote("autonomous", { state: "degraded", reason: "firewall rule missing" }, en)).toContain(
-      "firewall rule missing",
-    );
-    expect(autonomousFallbackNote("autonomous", { state: "unsupported" }, en)).toContain("not available");
-  });
 
   it("builds a Blocked step from the policy.blocked trace", () => {
     expect(blockedStep({ code: "NET_DOWNLOAD_EXEC", title: "Tải về rồi chạy ngay" })).toEqual({

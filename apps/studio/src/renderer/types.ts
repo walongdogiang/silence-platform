@@ -20,7 +20,24 @@ export type PermissionRisk = {
   hosts?: string[];
   /** Escalation card (repeated blocks); `stop_only` = only "Dừng" is offered. */
   escalation?: { count: number; stop_only: boolean; blocked: string[] };
+  /** Below: TS core permission modes only (protocol 0.1.20). */
+  level?: RiskLevel;
+  codes?: string[];
+  segments?: { text: string; level: RiskLevel; codes: string[] }[];
+  impact?: { network: boolean; outside_workspace: boolean; deletes: boolean; admin: boolean; undoable: boolean };
+  source?: "agent" | "subagent" | "verify" | "hook";
+  tainted?: boolean;
+  mode?: string;
+  /** Rule "Always allow" saves; absent for red calls. */
+  allow_rule?: string;
+  deny_rule?: string;
+  /** Bypass: seconds before the card refuses on its own. */
+  countdown_s?: number;
 };
+/** Display level on the core's permission card: none, yellow, red, refused outright. */
+export type RiskLevel = "safe" | "caution" | "danger" | "hard_block";
+/** Answer on the core's permission card (`session.permission.decision`). */
+export type PermAnswer = "allow_once" | "allow_always" | "deny" | "deny_always";
 
 /** Copy of `packages/protocol` SandboxStatus / NetworkList (`sandbox.status`, `network.list`). */
 export type SandboxStatus =
