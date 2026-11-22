@@ -48,6 +48,7 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
     verifyApprovals: new VerifyApprovals(dataDir),
     ...(opts.sessions?.snapshot ? { snapshot: opts.sessions.snapshot } : {}),
     ...(opts.sessions?.newId ? { newId: opts.sessions.newId } : {}),
+    ...(opts.sessions?.oneShot ? { oneShot: opts.sessions.oneShot } : {}),
   });
   server.register("core.ping", () => "pong");
   server.register("core.info", () => ({
@@ -74,5 +75,7 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("repo_config.approve", (p) => sessions.approveRepoConfig(p));
   server.register("profile.status", (p) => sessions.profileStatus(p));
   server.register("permissions.rules", (p) => sessions.listRules(p));
+  server.register("lesson.propose", (p) => sessions.lessonPropose(p));
+  server.register("lesson.apply", (p) => sessions.lessonApply(p));
   return { server, sessions };
 }

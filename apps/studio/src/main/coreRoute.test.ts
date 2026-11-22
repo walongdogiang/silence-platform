@@ -49,6 +49,13 @@ describe("permission modes", () => {
   });
 });
 
+describe("lessons", () => {
+  it("go to the core, and fail clearly without it", () => {
+    expect(routeRpc("lesson.propose", { text: "x" }, true, ids)).toEqual({ to: "core", method: "lesson.propose", params: { text: "x" } });
+    expect(routeRpc("lesson.apply", { lesson_id: "l" }, false, ids)).toMatchObject({ to: "error", message: expect.stringContaining("SILENCE_CORE=1") });
+  });
+});
+
 describe("profile.status", () => {
   it("goes to the core, or answers that it is unavailable when the core is off", () => {
     expect(routeRpc("profile.status", { workspace: "D:/w" }, true, ids)).toEqual({ to: "core", method: "profile.status", params: { workspace: "D:/w" } });

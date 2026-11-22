@@ -19,3 +19,5 @@ export { normalizeMode, levelOf, modeAction, askModeAllows, impactOf, PERM_MODES
 export { parseRule, ruleMatches, matchRules, loadRules, addRule, ruleFor, shellSegments, userRulesFile, projectRulesFile, shellMatches as ruleShellMatches, type Rule, type RuleBehavior, type RuleSource, type RuleSet } from "./permissions/rules.js";
 export { loadVerify, planChecks, runCheck, splitSequence, fixPrompt, pathMatches, commandHash, VerifyApprovals, MAX_FIX_ROUNDS, DEFAULT_TIMEOUT_SEC, type VerifyConfig, type VerifyRule, type CheckResult } from "./verify/verify.js";
 export { changedSince } from "./git/snapshot.js";
+export { lessonTargets, lessonPrompt, parseProposal, applyLesson, targetKind, LESSON_SYSTEM, type LessonTarget, type LessonEdit, type LessonProposal, type LessonContext, type ApplyResult } from "./lessons/lessons.js";
+export { claudeOneShot, type OneShotResult, type OneShotOptions, type OneShotQueryFn } from "./backends/claude/oneShot.js";
