@@ -97,13 +97,13 @@ describe("MarkdownMessage render", () => {
     const done = html(
       '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="5" height="5"/></svg>\n```',
     );
-    expect(done).toContain('class="visual-card"');
+    expect(done).toContain('class="visual"');
     expect(done).toContain('src="data:image/svg+xml;charset=utf-8,%3Csvg');
     // SVG của model chỉ nằm trong data URL của <img>, không chèn thẳng vào DOM.
     expect(done).not.toContain('<rect width="5"');
     // Đã xong mà SVG cụt: hiện mã.
     const cut = html('```svg\n<svg viewBox="0 0 10 10"><rect');
-    expect(cut).not.toContain("visual-card");
+    expect(cut).not.toContain('class="visual');
     expect(cut).toContain("code-card");
   });
 
@@ -125,21 +125,34 @@ describe("MarkdownMessage render", () => {
       '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><title>Mèo</title><defs><linearGradient id="g"/></defs><rect width="800" height="600" rx="12" fill="url(#g)"/><circle r="5"/></svg>\n```';
     const diagram =
       '```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><rect x="20" y="20" width="120" height="40" rx="8" fill="#456"/></svg>\n```';
-    expect(html(scene)).toContain('class="visual-card bleed"');
+    expect(html(scene)).toContain('class="visual bleed"');
     expect(html(diagram)).not.toContain("bleed");
 
-    // Hover: Tải + Copy luôn có; Chỉnh sửa chỉ khi có onEditImage. Header không còn nút "Chỉnh".
+    // Một cụm nút duy nhất trên ảnh: Chỉnh sửa (khi có onEditImage) → Copy → Tải → ⋯. Không header, không pill đè ảnh.
     const edit = inVi(<MarkdownMessage text={scene} onEditImage={() => {}} />);
-    expect(edit).toContain('aria-label="Tải ảnh"');
-    expect(edit).toContain('aria-label="Copy dạng ảnh"');
+    const tools = edit.split('role="toolbar"')[1];
+    expect(tools.indexOf('aria-label="Chỉnh sửa hình ảnh"')).toBeGreaterThan(-1);
+    expect(tools.indexOf('aria-label="Chỉnh sửa hình ảnh"')).toBeLessThan(tools.indexOf('aria-label="Copy dạng ảnh"'));
+    expect(tools.indexOf('aria-label="Copy dạng ảnh"')).toBeLessThan(tools.indexOf('aria-label="Tải ảnh"'));
+    expect(tools.indexOf('aria-label="Tải ảnh"')).toBeLessThan(tools.indexOf('aria-label="Thêm"'));
     // Nút Copy chỉ icon: hai icon (Copy, ✓) xếp chồng để chuyển mượt khi copy xong.
     expect(edit).toContain("img-frame-swap");
     expect(edit).not.toContain("Đã copy</span>");
-    expect(edit).toContain('aria-label="Chỉnh sửa hình ảnh"');
-    expect(edit.split('class="code-card-head"')[1].split("visual-body")[0]).not.toContain("Chỉnh");
+    expect(edit).not.toContain("code-card-head");
     const plain = html(scene);
     expect(plain).toContain('aria-label="Tải ảnh"');
     expect(plain).not.toContain("Chỉnh sửa");
+  });
+
+  it("SVG: mã không hiện mặc định; <title> làm caption, không có title thì không caption", () => {
+    const titled = inVi(
+      <MarkdownMessage text={'```svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>Mèo</title><rect/></svg>\n```'} />,
+    );
+    expect(titled).toContain('<figcaption class="visual-caption"');
+    expect(titled).not.toContain("visual-code");
+    expect(titled).not.toContain("&lt;svg");
+    const untitled = inVi(<MarkdownMessage text={'```svg\n<svg viewBox="0 0 10 10"><rect/></svg>\n```'} />);
+    expect(untitled).not.toContain("figcaption");
   });
 
   it("follows the UI language from LangContext", () => {

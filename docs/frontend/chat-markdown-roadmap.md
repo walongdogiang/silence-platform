@@ -15,9 +15,9 @@ Cố ý **chưa** làm — mở lại khi cần.
 
 - [x] Render Markdown an toàn trên `Turn.ai.text` (streaming; fence chưa đóng).
 - [x] Không bật HTML thô; chặn XSS / `javascript:` links; chặn ảnh từ xa.
-- [x] Khối ` ```svg ` vẽ thành hình minh hoạ trong chat (`VisualBlock`; `SYSTEM` mục Visuals; eval X24 sơ đồ, X25 tranh). Ô chờ "Đang vẽ…" đúng tỉ lệ khi stream; `<title>` làm tiêu đề card + alt; cao ≤ 400px, tranh tràn mép; nút **Chỉnh**; lightbox Lưu PNG 2x / SVG.
+- [x] Khối ` ```svg ` vẽ thành hình minh hoạ trong chat (`VisualBlock`; `SYSTEM` mục Visuals; eval X24 sơ đồ, X25 tranh). Ô chờ "Đang vẽ…" đúng tỉ lệ khi stream; không header, `<title>` làm caption + alt; cao ≤ 400px, tranh tràn mép; mã SVG ẩn sau menu ⋯ (Copy mã / Xem mã mở bên dưới); lightbox Lưu PNG 2x / SVG.
 - [ ] Hình minh hoạ P2: gợi ý chỉnh thành chip bấm được; phiên bản v1/v2 của cùng hình; Lưu vào workspace (qua diff duyệt).
-- [x] Ảnh trong chat: hover Tải / Copy / Chỉnh sửa (`ImageFrame`); trình chỉnh sửa toàn màn hình (`ImageEditor`): phác hoạ, chữ, khung, mũi tên, ghim bình luận có toạ độ `viewBox` → Gửi cho agent (đính PNG + prompt).
+- [x] Ảnh trong chat: hover một cụm Chỉnh sửa / Copy / Tải / ⋯ (`ImageFrame`); trình chỉnh sửa toàn màn hình (`ImageEditor`): phác hoạ, chữ, khung, mũi tên, ghim bình luận có toạ độ `viewBox` → Gửi cho agent (đính PNG + prompt).
 - [ ] Gỡ nền / Xóa vật thể trong trình chỉnh sửa: cần model sửa ảnh (đang "chưa gắn").
 - [ ] Zoom bằng con lăn trong lightbox.
 - [ ] Mermaid (` ```mermaid `) cho sơ đồ phức tạp: cần thư viện, render `securityLevel: strict`.

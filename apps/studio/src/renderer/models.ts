@@ -7,7 +7,7 @@ export type ChatLine =
    * `images`: data URL ảnh dán (trong bộ nhớ, không vào localStorage); `imageIds`: key ảnh trong
    * IndexedDB (`imageStore.ts`) để mở lại thread; `imageCount`: số ảnh, dùng khi không lấy lại được.
    */
-  | { kind: "user"; text: string; images?: string[]; imageIds?: string[]; imageCount?: number }
+  | { kind: "user"; text: string; images?: string[]; imageIds?: string[]; imageCount?: number; /** Lúc gửi (ms); tin cũ không có. */ at?: number; /** Tên chương khi lượt này được ghim. */ chapter?: string }
   | { kind: "token"; text: string }
   | { kind: "tool"; name: string; output: string }
   /**

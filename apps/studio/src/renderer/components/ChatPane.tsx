@@ -3,7 +3,6 @@ import {
   CheckCircle2,
   ChevronDown,
   FileText,
-  GitBranch,
   History,
   Quote,
   RefreshCw,
@@ -15,8 +14,12 @@ import {
   GitCompare,
   Info,
   ListChecks,
+  Pause,
+  Pin,
   RotateCcw,
   Sparkles,
+  Square,
+  Volume2,
 } from "lucide-react";
 import {
   useCallback,
@@ -50,6 +53,11 @@ import { MarkdownMessage } from "./MarkdownMessage";
 import { ImageLightbox, type LightboxState } from "./ImageLightbox";
 import { ImageEditor } from "./ImageEditor";
 import { ImageFrame } from "./ImageFrame";
+import { UserMessage } from "./UserMessage";
+import { MessageTime } from "./MessageTime";
+import { ForkIcon } from "./ForkIcon";
+import { ChapterNav, chapterTitle, chaptersFrom } from "./ChapterNav";
+import { canReadAloud, pauseSpeech, resumeSpeech, speak, stopSpeech, useSpeechStatus } from "../readAloud";
 import type { EditTarget } from "../imageActions";
 import { ImageRefStrip } from "./WorkspaceImage";
 import { SoftScroll } from "./SoftScroll";
@@ -70,6 +78,10 @@ type Turn = {
   /** Ảnh dán kèm (data URL, chỉ trong phiên) hoặc số ảnh khi mở lại từ lịch sử. */
   userImages?: string[];
   userImageCount?: number;
+  /** Lúc gửi tin user (ms); tin cũ không có. */
+  userAt?: number;
+  /** Tên chương nếu lượt này được ghim (lưu trên dòng user). */
+  chapter?: string;
   worked?: { ms: number; at: number };
   thought?: { ms?: number; brief: string; body?: string };
   narrations: NarrateStep[];
@@ -110,6 +122,8 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
         user: l.text,
         userImages: l.images ?? [],
         userImageCount: l.imageCount ?? 0,
+        userAt: l.at,
+        chapter: l.chapter,
         traces: [],
         narrations: [],
         errors: [],
@@ -121,6 +135,8 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
       const t = ensure(i);
       t.worked = { ms: l.ms, at: l.at };
       if (t.ai && !t.ai.at) t.ai.at = l.at;
+      // Tin user cũ chưa lưu `at`: lượt bắt đầu đúng lúc gửi nên giờ gửi = lúc xong − thời gian chạy.
+      if (t.startLine >= 0 && t.userAt == null && l.at > 0 && Number.isFinite(l.ms)) t.userAt = l.at - l.ms;
     } else if (l.kind === "thought") {
       const t = ensure(i);
       const prev = t.thought?.body ?? "";
@@ -307,41 +323,24 @@ function summaryLabel(turn: Turn, run: RunMeter | null, now: number, awaitingPer
   return formatWorked(turn.worked?.ms, t);
 }
 
-/** Icon Fork Chat kiểu Cursor — thân dọc, tách hai nhánh chéo có mũi tên. */
-function ForkChatIcon(props: { size?: number; strokeWidth?: number }) {
-  const size = props.size ?? 13;
-  const sw = props.strokeWidth ?? 1.75;
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={sw}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 22V11" />
-      <path d="M12 11 4.5 5" />
-      <path d="M12 11 19.5 5" />
-      <path d="M4.5 5 4.5 2.25M4.5 5 1.75 5" />
-      <path d="M19.5 5 19.5 2.25M19.5 5 22.25 5" />
-    </svg>
-  );
-}
-
 const COPY_FEEDBACK_MS = 2200;
 
 function AiFooter(props: {
   text: string;
+  /** Lúc trả lời xong (ms); hiện sau các nút. */
+  at?: number;
   canFork?: boolean;
   forkDisabled?: boolean;
   onFork?: () => void;
   onCopied?: () => void;
+  /** Ghim lượt này làm chương (mục lục chương). Không có = lượt không ghim được (không có tin user). */
+  pinned?: boolean;
+  onPin?: () => void;
+  /** Khoá cho Đọc to; không có = không đọc (đang stream). */
+  speechId?: string;
 }) {
   const t = useT();
+  const speaking = useSpeechStatus(props.speechId ?? "") !== "idle" && Boolean(props.speechId);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | null>(null);
 
@@ -367,11 +366,13 @@ function AiFooter(props: {
   }
 
   return (
-    <div className="msg-ai-foot">
+    // Đang đọc to thì giữ hàng hiện (không phải rê chuột mới thấy nút Tạm dừng).
+    <div className={`msg-ai-foot${speaking ? " is-active" : ""}`}>
       <button
         type="button"
         className={`msg-ai-action msg-ai-copy${copied ? " is-copied" : ""}`}
-        title={t("chat.copyMessage")}
+        title={copied ? t("common.copied") : t("chat.copyMessage")}
+        data-tip-side="above"
         aria-label={copied ? t("common.copied") : t("chat.copyMessage")}
         onClick={() => void copy()}
       >
@@ -387,14 +388,72 @@ function AiFooter(props: {
           type="button"
           className="msg-ai-action"
           title={t("chat.fork")}
+          data-tip-desc={t(props.forkDisabled ? "msgMenu.busyDesc" : "msgMenu.forkAiDesc")}
+          data-tip-side="above"
           aria-label={t("chat.fork")}
-          disabled={props.forkDisabled}
-          onClick={() => props.onFork?.()}
+          aria-disabled={props.forkDisabled || undefined}
+          onClick={props.forkDisabled ? undefined : () => props.onFork?.()}
         >
-          <ForkChatIcon size={13} strokeWidth={1.75} />
+          <ForkIcon size={14} strokeWidth={1.75} />
         </button>
       ) : null}
+      {props.onPin ? (
+        <button
+          type="button"
+          className={`msg-ai-action${props.pinned ? " is-on" : ""}`}
+          title={t(props.pinned ? "chapter.unpin" : "chapter.pin")}
+          data-tip-desc={t(props.pinned ? "chapter.unpinDesc" : "chapter.pinDesc")}
+          data-tip-side="above"
+          aria-label={t(props.pinned ? "chapter.unpin" : "chapter.pin")}
+          aria-pressed={Boolean(props.pinned)}
+          onClick={props.onPin}
+        >
+          <Pin size={14} strokeWidth={1.75} />
+        </button>
+      ) : null}
+      {props.speechId && canReadAloud() ? <ReadAloudButtons id={props.speechId} text={props.text} /> : null}
+      {props.at ? <MessageTime at={props.at} /> : null}
     </div>
+  );
+}
+
+/**
+ * Đọc to (như Claude): 🔊 Đọc to → ⏸ Tạm dừng → 🔊 Tiếp tục (nút sáng). Thêm ■ Dừng khi đang đọc /
+ * tạm dừng (Claude không có) để tắt hẳn mà không phải đọc hết.
+ */
+function ReadAloudButtons(props: { id: string; text: string }) {
+  const t = useT();
+  const status = useSpeechStatus(props.id);
+  const label = status === "speaking" ? t("speech.pause") : status === "paused" ? t("speech.resume") : t("speech.read");
+  return (
+    <>
+      <button
+        type="button"
+        className={`msg-ai-action${status !== "idle" ? " is-on" : ""}`}
+        title={label}
+        data-tip-side="above"
+        aria-label={label}
+        onClick={() => {
+          if (status === "speaking") pauseSpeech();
+          else if (status === "paused") resumeSpeech();
+          else speak(props.id, props.text);
+        }}
+      >
+        {status === "speaking" ? <Pause size={14} strokeWidth={1.75} /> : <Volume2 size={14} strokeWidth={1.75} />}
+      </button>
+      {status !== "idle" ? (
+        <button
+          type="button"
+          className="msg-ai-action"
+          title={t("speech.stop")}
+          data-tip-side="above"
+          aria-label={t("speech.stop")}
+          onClick={stopSpeech}
+        >
+          <Square size={12} strokeWidth={2} />
+        </button>
+      ) : null}
+    </>
   );
 }
 
@@ -603,6 +662,8 @@ export function ChatPane(props: {
   onForkFrom?: (userLine: number) => void;
   /** Menu chuột phải trên câu trả lời của lượt cuối → Retry: bỏ câu trả lời, gửi lại tin user. */
   onRetryTurn?: (userLine: number) => void;
+  /** Ghim / bỏ ghim lượt mở bằng dòng user `userLine` làm chương (`title` null = bỏ ghim). */
+  onPinChapter?: (userLine: number, title: string | null) => void;
   /** Settings → Chat → default view: which blocks of a turn start open. */
   transcript?: TranscriptView;
   /** "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn prompt. Trả lỗi nếu không đính được. */
@@ -612,6 +673,10 @@ export function ChatPane(props: {
   const steps = props.plan ? planSteps(props.plan) : [];
   const turns = useMemo(() => groupTurns(props.lines, Boolean(props.busy)), [props.lines, props.busy]);
   const logRef = useRef<HTMLDivElement>(null);
+  const startLabel = t("chapter.start");
+  const chapters = useMemo(() => chaptersFrom(turns, startLabel), [turns, startLabel]);
+  // Đổi phiên / đóng khung chat: dừng đọc to (không để giọng đọc chạy tiếp của chat khác).
+  useEffect(() => () => stopSpeech(), [props.sessionId]);
   const [copyToast, setCopyToast] = useState(false);
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const openImages = useCallback((images: string[], index: number) => setLightbox({ images, index }), []);
@@ -756,7 +821,7 @@ export function ChatPane(props: {
         id: "fork",
         label: t("msgMenu.fork"),
         desc: t(locked ? "msgMenu.busyDesc" : "msgMenu.forkDesc"),
-        icon: <GitBranch size={14} />,
+        icon: <ForkIcon size={14} />,
         kbd: "F",
         disabled: locked,
         run: done(() => props.onForkFrom?.(turn.startLine)),
@@ -766,7 +831,7 @@ export function ChatPane(props: {
         id: "fork",
         label: t("chat.fork"),
         desc: t("msgMenu.forkAiDesc"),
-        icon: <GitBranch size={14} />,
+        icon: <ForkIcon size={14} />,
         kbd: "F",
         disabled: Boolean(props.busy),
         run: done(() => props.onForkChat?.(turn.endLine)),
@@ -817,6 +882,7 @@ export function ChatPane(props: {
           <span>{t("chat.copiedToast")}</span>
         </div>
       ) : null}
+      <ChapterNav chapters={chapters} viewport={logRef} />
       <SoftScroll viewportRef={logRef} deps={[props.lines, props.plan, turns.length, props.busy]}>
       <div className="log">
         {props.lines.length === 0 && !props.plan && (
@@ -876,17 +942,15 @@ export function ChatPane(props: {
             turn.worked || turn.ai || turn.traces.length || turn.narrations.length || turn.thought || turn.live || turn.checkpoint,
           );
           return (
-            <div key={i} className={`msg-turn${menu?.turn === i ? " menu-open" : ""}`}>
+            <div key={i} data-turn={i} className={`msg-turn${menu?.turn === i ? " menu-open" : ""}`}>
               {turn.user || turn.userImages?.length || turn.userImageCount ? (
-                <div className="msg-user">
-                  <div
-                    className="msg-bubble"
-                    tabIndex={0}
-                    aria-haspopup="menu"
-                    onContextMenu={(e) => openMenu(e, i, "user")}
-                    onKeyDown={(e) => openMenu(e, i, "user")}
-                  >
-                    {turn.userImages?.length ? (
+                <UserMessage
+                  text={turn.user}
+                  at={turn.userAt}
+                  live={turn.live}
+                  busy={props.busy}
+                  images={
+                    turn.userImages?.length ? (
                       <div className="msg-images">
                         {turn.userImages.map((src, j) => (
                           <ImageFrame
@@ -901,36 +965,18 @@ export function ChatPane(props: {
                       </div>
                     ) : turn.userImageCount ? (
                       <span className="msg-images-note">{t("chat.imagesNotSaved", { n: turn.userImageCount })}</span>
-                    ) : null}
-                    {turn.user}
-                  </div>
-                  {turn.live ? null : (
-                    <div className="msg-user-actions">
-                      <button
-                        type="button"
-                        className="msg-ai-action"
-                        title={t("chat.copyMessage")}
-                        aria-label={t("chat.copyMessage")}
-                        disabled={!turn.user.trim()}
-                        onClick={() => copyText(turn.user)}
-                      >
-                        <Copy size={13} strokeWidth={1.75} />
-                      </button>
-                      {i === turns.length - 1 && turn.startLine >= 0 && props.onRetryTurn && (turn.ai || turn.errors.length) ? (
-                        <button
-                          type="button"
-                          className="msg-ai-action"
-                          title={t(props.busy ? "msgMenu.busyDesc" : "msgMenu.retry")}
-                          aria-label={t("msgMenu.retry")}
-                          disabled={Boolean(props.busy)}
-                          onClick={() => props.onRetryTurn?.(turn.startLine)}
-                        >
-                          <RefreshCw size={13} strokeWidth={1.75} />
-                        </button>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
+                    ) : null
+                  }
+                  onCopy={copyText}
+                  onMenu={(e) => openMenu(e, i, "user")}
+                  onRetry={
+                    i === turns.length - 1 && turn.startLine >= 0 && props.onRetryTurn && (turn.ai || turn.errors.length)
+                      ? () => props.onRetryTurn?.(turn.startLine)
+                      : undefined
+                  }
+                  onRewind={turn.startLine >= 0 && props.onRewind ? () => props.onRewind?.(turn.startLine) : undefined}
+                  onFork={turn.startLine >= 0 && props.onForkFrom ? () => props.onForkFrom?.(turn.startLine) : undefined}
+                />
               ) : null}
               {showMeta ? (
                 <AgentMeta
@@ -956,10 +1002,22 @@ export function ChatPane(props: {
                   )}
                   <AiFooter
                     text={turn.ai.text}
+                    at={turn.live ? undefined : turn.ai.at}
                     canFork={Boolean(props.onForkChat) && !turn.live}
                     forkDisabled={Boolean(props.busy)}
                     onFork={() => props.onForkChat?.(turn.endLine)}
                     onCopied={showCopyToast}
+                    pinned={Boolean(turn.chapter)}
+                    onPin={
+                      props.onPinChapter && turn.startLine >= 0 && !turn.live
+                        ? () =>
+                            props.onPinChapter?.(
+                              turn.startLine,
+                              turn.chapter ? null : chapterTitle(turn.user) || t("chapter.untitled"),
+                            )
+                        : undefined
+                    }
+                    speechId={turn.live ? undefined : `${props.sessionId}:${turn.endLine}`}
                   />
                 </div>
               ) : null}

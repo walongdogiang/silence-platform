@@ -1,10 +1,10 @@
-import { Code2, Image as ImageIcon, Maximize2 } from "lucide-react";
+import { Code2, FileCode2, Image as ImageIcon } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { svgDataUrl } from "./DiffCard";
 import { CodeBlock } from "./CodeView";
 import { svgViewBox } from "../pastedImages";
 import type { EditTarget } from "../imageActions";
-import { ImageFrame } from "./ImageFrame";
+import { ImageFrame, type ImageMoreItem } from "./ImageFrame";
 import { useT } from "../i18n";
 
 /** Chiều cao tối đa của hình trong chat (px); xem đầy đủ thì phóng to. Khớp `.visual-*` trong CSS. */
@@ -75,7 +75,9 @@ const fitWidth = (vb: { w: number; h: number }) => `min(100%, ${Math.round((VISU
  * Hiện bằng `<img src="data:image/svg+xml…">`: SVG trong `<img>` không chạy script, không tải
  * tài nguyên ngoài, nên an toàn với nội dung model viết.
  * Đang stream (`streaming`, chưa có `</svg>`) → ô chờ "Đang vẽ…" đúng tỉ lệ `viewBox` thay vì đổ
- * mã ra chat. Đã xong mà SVG cụt / hỏng → hiện mã. Hover hình: Tải / Copy / Chỉnh sửa (`ImageFrame`).
+ * mã ra chat. Đã xong mà SVG cụt / hỏng → hiện mã. Không header: hình là trọng tâm, `<title>` làm
+ * caption mờ bên dưới. Hover hình: một cụm Chỉnh sửa / Copy / Tải / ⋯ (`ImageFrame`); ⋯ có
+ * Copy mã SVG và Xem mã (ngăn mã mở bên dưới, hình vẫn giữ chỗ).
  */
 export function VisualBlock(props: {
   text: string;
@@ -86,7 +88,7 @@ export function VisualBlock(props: {
   const t = useT();
   const text = props.text.replace(/\n$/, "");
   const complete = isCompleteSvg(text);
-  const [view, setView] = useState<"image" | "code">("image");
+  const [showCode, setShowCode] = useState(false);
   const [broken, setBroken] = useState(false);
   const vb = svgViewBox(text);
 
@@ -96,14 +98,13 @@ export function VisualBlock(props: {
         ? { aspectRatio: `${vb.w} / ${vb.h}`, width: fitWidth(vb) }
         : { height: 220, width: "100%" };
       return (
-        <div className="visual-card visual-pending" role="status" aria-live="polite">
-          <div className="code-card-head">
-            <ImageIcon size={13} className="visual-icon" />
-            <span className="visual-label">{t("visual.drawing")}</span>
+        <div className="visual visual-pending" role="status" aria-live="polite">
+          <div className="visual-placeholder" style={box}>
+            <span className="visual-label">
+              <ImageIcon size={14} aria-hidden />
+              {t("visual.drawing")}
+            </span>
             <span className="visual-size">{formatSize(text.length)}</span>
-          </div>
-          <div className="visual-body">
-            <div className="visual-placeholder" style={box} aria-hidden />
           </div>
         </div>
       );
@@ -112,54 +113,42 @@ export function VisualBlock(props: {
   }
   const title = svgTitle(text);
   const label = title ?? t("visual.untitled");
-  if (view === "code" || broken) {
+  if (broken) {
     return (
-      <div className="visual-card">
-        <div className="visual-switch">
-          {broken ? (
-            <span className="visual-note">{t("visual.broken")}</span>
-          ) : (
-            <button type="button" className="code-copy" onClick={() => setView("image")} title={t("visual.showImageTip")}>
-              <ImageIcon size={13} />
-              <span>{t("visual.image")}</span>
-            </button>
-          )}
-        </div>
+      <div className="visual visual-broken">
+        <span className="visual-note" role="status">
+          {t("visual.broken")}
+        </span>
         <CodeBlock lang="svg" text={text} />
       </div>
     );
   }
   const url = svgDataUrl(text.trim());
   const bleed = isFullBleedSvg(text);
-  // Tranh: card co theo bề rộng hình, hình sát mép. Sơ đồ: card full, hình giữa có lề.
-  const cardStyle: CSSProperties | undefined = bleed && vb ? { width: fitWidth(vb) } : undefined;
+  // Tranh: khối co theo bề rộng hình, hình sát mép, bo góc. Sơ đồ: nền nhạt full, hình giữa có lề.
+  const boxStyle: CSSProperties | undefined = bleed && vb ? { width: fitWidth(vb) } : undefined;
   const imgStyle: CSSProperties | undefined = vb
     ? { aspectRatio: `${vb.w} / ${vb.h}`, width: bleed ? "100%" : fitWidth(vb) }
     : undefined;
+  const more: ImageMoreItem[] = [
+    {
+      key: "copy-svg",
+      label: t("visual.copySvg"),
+      icon: <FileCode2 size={15} />,
+      onSelect: () => navigator.clipboard.writeText(text),
+      done: t("visual.svgCopied"),
+      failed: t("img.copyFailedShort"),
+    },
+    {
+      key: "code",
+      label: showCode ? t("visual.hideCode") : t("visual.showCode"),
+      icon: <Code2 size={15} />,
+      onSelect: () => setShowCode((v) => !v),
+    },
+  ];
   return (
-    <figure className={`visual-card${bleed ? " bleed" : ""}`} style={cardStyle}>
-      <div className="code-card-head">
-        <ImageIcon size={13} className="visual-icon" />
-        <span className="visual-label" title={label}>
-          {label}
-        </span>
-        <button type="button" className="code-copy" onClick={() => setView("code")} title={t("visual.showCodeTip")}>
-          <Code2 size={13} />
-          <span>{t("diff.code")}</span>
-        </button>
-        {props.onOpenImage ? (
-          <button
-            type="button"
-            className="code-copy"
-            onClick={() => props.onOpenImage?.([url], 0)}
-            title={t("visual.zoomTip")}
-            aria-label={t("img.zoom")}
-          >
-            <Maximize2 size={13} />
-          </button>
-        ) : null}
-      </div>
-      <div className="visual-body">
+    <figure className={`visual${bleed ? " bleed" : ""}`}>
+      <div className="visual-body" style={boxStyle}>
         <ImageFrame
           src={url}
           alt={label}
@@ -169,8 +158,19 @@ export function VisualBlock(props: {
           onOpen={() => props.onOpenImage?.([url], 0)}
           onEdit={props.onEdit ? () => props.onEdit?.({ src: url, title: title ?? undefined }) : undefined}
           onImgError={() => setBroken(true)}
+          more={more}
         />
       </div>
+      {title ? (
+        <figcaption className="visual-caption" style={boxStyle} title={title}>
+          {title}
+        </figcaption>
+      ) : null}
+      {showCode ? (
+        <div className="visual-code">
+          <CodeBlock lang="svg" text={text} />
+        </div>
+      ) : null}
     </figure>
   );
 }

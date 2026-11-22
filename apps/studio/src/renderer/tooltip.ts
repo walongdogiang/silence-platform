@@ -7,6 +7,8 @@ export type TipParts = {
   keys?: string[];
   /** Muted note, e.g. "not wired yet". */
   note?: string;
+  /** Second line under the label (from `data-tip-desc`), e.g. what "Fork from here" does. */
+  desc?: string;
 };
 
 const KEY_TOKEN = /^(Ctrl|Alt|Shift|Cmd|Meta|Win|Esc|Enter|Tab|Space|Del|Delete|Backspace|Home|End|F\d{1,2}|[A-Z0-9]|[←→↑↓,./;'[\]\\`=-])$/;
@@ -52,7 +54,8 @@ export type Placement = { x: number; y: number; side: "below" | "above" };
 
 /**
  * Center the tip under the anchor (above when it does not fit below), clamped to the
- * viewport with `margin` px on each side.
+ * viewport with `margin` px on each side. `prefer: "above"` flips the preference
+ * (above unless it does not fit) — used by message action rows, like Claude.
  */
 export function placeTip(
   anchor: Rect,
@@ -60,11 +63,14 @@ export function placeTip(
   viewport: { width: number; height: number },
   gap = 6,
   margin = 8,
+  prefer: Placement["side"] = "below",
 ): Placement {
   const below = anchor.top + anchor.height + gap;
   const above = anchor.top - gap - tip.height;
   const fitsBelow = below + tip.height <= viewport.height - margin;
-  const side: Placement["side"] = fitsBelow || above < margin ? "below" : "above";
+  const fitsAbove = above >= margin;
+  const side: Placement["side"] =
+    prefer === "above" ? (fitsAbove || !fitsBelow ? "above" : "below") : fitsBelow || !fitsAbove ? "below" : "above";
   const rawX = anchor.left + anchor.width / 2 - tip.width / 2;
   const maxX = Math.max(margin, viewport.width - margin - tip.width);
   const x = Math.round(Math.min(Math.max(rawX, margin), maxX));
