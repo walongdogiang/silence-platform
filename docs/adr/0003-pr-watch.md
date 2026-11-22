@@ -77,7 +77,7 @@ Mỗi bước một PR. Bước 2–3 có giá trị độc lập. Đến hết 
 
 1. `docs`: ADR này + [../pr-watch.md](../pr-watch.md).
 2. `feat(risk)`: lớp 1 (`GIT_PUSH_DEFAULT`, `GIT_NO_VERIFY`, `GH_MERGE`) + corpus test + `risk-catalog.md`; lớp 2 (`.githooks/pre-push`).
-3. `ci`: lớp 4, workflow `main-guard.yml`.
+3. `ci`: lớp 4, workflow `main-guard.yml`. Chỉ xét check/status bắt đầu **trước** lúc PR merge: check chạy sau đó (ví dụ `cache-cleanup` khi PR đóng) không phải CI của PR và từng gây báo động giả (#47, #52).
 4. `feat(protocol)`: kiểu Watch, RPC `watch.*`, notification `watch.event`; `PROTOCOL_VERSION` 0.1.20.
 5. `feat(engine)`: store watch, RPC, reconcile khi khởi động (chưa poll).
 6. `feat(engine)`: monitor `gh`, incident, debounce, commit status `5ilence/watch`.
