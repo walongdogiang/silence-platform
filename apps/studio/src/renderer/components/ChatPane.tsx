@@ -20,6 +20,7 @@ import {
   Sparkles,
   Square,
   Volume2,
+  GraduationCap,
 } from "lucide-react";
 import {
   useCallback,
@@ -348,6 +349,8 @@ function AiFooter(props: {
   onPin?: () => void;
   /** Khoá cho Đọc to; không có = không đọc (đang stream). */
   speechId?: string;
+  /** "Record a lesson" about this turn (TS core, roadmap 1.9). */
+  onLesson?: () => void;
 }) {
   const t = useT();
   const speaking = useSpeechStatus(props.speechId ?? "") !== "idle" && Boolean(props.speechId);
@@ -422,6 +425,19 @@ function AiFooter(props: {
         </button>
       ) : null}
       {props.speechId && canReadAloud() ? <ReadAloudButtons id={props.speechId} text={props.text} /> : null}
+      {props.onLesson ? (
+        <button
+          type="button"
+          className="msg-ai-action"
+          title={t("lesson.button")}
+          data-tip-desc={t("lesson.buttonDesc")}
+          data-tip-side="above"
+          aria-label={t("lesson.button")}
+          onClick={props.onLesson}
+        >
+          <GraduationCap size={14} strokeWidth={1.75} />
+        </button>
+      ) : null}
       {props.at ? <MessageTime at={props.at} /> : null}
     </div>
   );
@@ -677,6 +693,8 @@ export function ChatPane(props: {
   onRetryTurn?: (userLine: number) => void;
   /** Ghim / bỏ ghim lượt mở bằng dòng user `userLine` làm chương (`title` null = bỏ ghim). */
   onPinChapter?: (userLine: number, title: string | null) => void;
+  /** Open "Record a lesson" for a finished turn (needs the TS core). */
+  onLesson?: (user: string, answer: string) => void;
   /** Settings → Chat → default view: which blocks of a turn start open. */
   transcript?: TranscriptView;
   /** "Gửi cho agent" từ trình chỉnh sửa ảnh: đính PNG đã đánh dấu + điền sẵn prompt. Trả lỗi nếu không đính được. */
@@ -1026,6 +1044,7 @@ export function ChatPane(props: {
                         : undefined
                     }
                     speechId={turn.live ? undefined : `${props.sessionId}:${turn.endLine}`}
+                    onLesson={props.onLesson && !turn.live ? () => props.onLesson?.(turn.user, turn.ai?.text ?? "") : undefined}
                   />
                 </div>
               ) : null}

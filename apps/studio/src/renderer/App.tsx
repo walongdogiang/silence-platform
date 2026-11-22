@@ -46,6 +46,7 @@ import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
 import { blockedStep, effectivePermMode, loadBypassEnabled, loadPermMode, saveBypassEnabled, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
 import type { PermAnswer } from "./types";
 import { PermModeMenu } from "./components/PermModeMenu";
+import { LessonDialog } from "./components/LessonDialog";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import { liveProgress, useEvalLive } from "./evalLive";
@@ -386,6 +387,8 @@ export function App() {
   const [bypassEnabled, setBypassEnabled] = useState<boolean>(() => loadBypassEnabled());
   /** The TS core runs chat sessions (`SILENCE_CORE=1`); Ask, Bypass and rules need it. */
   const [coreOn, setCoreOn] = useState(false);
+  /** "Record a lesson" dialog for one turn (roadmap 1.9); null = closed. */
+  const [lessonFor, setLessonFor] = useState<{ user: string; answer: string } | null>(null);
   /** What sessions actually get: an unavailable pick (Ask/Bypass without the core) runs as Auto. */
   const permEff = effectivePermMode(permMode, coreOn, bypassEnabled);
   /** Sandbox lệnh (`sandbox.status`, Engine cache 30 s). `null` = chưa biết / Engine cũ. */
@@ -2117,6 +2120,7 @@ export function App() {
           onAllow={(scope) => void answerPerm(true, scope)}
           onDeny={() => void answerPerm(false, "once")}
           onAnswer={(a) => void answerCorePerm(a)}
+          onLesson={coreOn ? (user, answer) => setLessonFor({ user, answer }) : undefined}
           onApplyDiff={() => void applyDiff()}
           onRejectDiff={() => void rejectDiff()}
           onShowDiff={() => {
@@ -2336,6 +2340,9 @@ export function App() {
           />
         ) : null}
       </div>
+      {lessonFor ? (
+        <LessonDialog workspace={workspace} user={lessonFor.user} answer={lessonFor.answer} onClose={() => setLessonFor(null)} />
+      ) : null}
       {settings ? (
         <SettingsDialog
           open={settings}

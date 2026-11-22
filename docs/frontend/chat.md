@@ -103,7 +103,7 @@ Chuột phải vào bubble user hoặc câu trả lời AI → `MessageMenu` (c�
 
 **Tin của user** (`UserMessage`, kiểu Claude Code): bong bóng **căn phải**, rộng theo nội dung (≤ 85%, ≤ 720px), bo 14px; ảnh dán nằm **trên** bong bóng, cũng căn phải. Tin cao quá 280px thì thu gọn (mờ dần ở đáy) với nút **Xem thêm / Thu gọn**. **Hàng ngay dưới bong bóng**, căn phải (như Claude): **giờ gửi** rồi nhóm nút. **Mặc định ẩn cả hàng** (giờ lẫn nút), rê chuột / focus vào tin mới hiện; giữ chỗ sẵn nên không nhảy layout; đang ở trạng thái "Đã copy" thì giữ hiện; màn hình cảm ứng luôn hiện. Chân câu trả lời AI (Copy · Fork · giờ) cũng vậy: ẩn, rê / focus vào câu trả lời mới hiện. Nút theo thứ tự **Fork từ đây** · **Quay lại đây** (↺; hộp xác nhận rồi đưa tin về composer để sửa) · **Thử lại** (chỉ lượt cuối đã có trả lời hoặc lỗi) · **Copy** (icon đổi sang ✓ khoảng 1,8 giây). Tooltip kiểu Claude, hiện **phía trên** nút: tiêu đề đậm + một dòng mô tả (`data-tip-desc` của `TooltipLayer`, `data-tip-side="above"`). Fork / Quay lại / Thử lại khoá khi đang chạy bằng `aria-disabled` (không phải `disabled`) nên vẫn rê được và dòng mô tả đổi thành lý do khoá. Chân câu trả lời AI dùng cùng kiểu tooltip (Fork chat có mô tả). Không còn thanh nổi đè lên mép bong bóng.
 
-**Chân câu trả lời AI** (như Claude, thứ tự): Copy · Fork chat · **Ghim làm chương** · **Đọc to** · giờ.
+**Chân câu trả lời AI** (như Claude, thứ tự): Copy · Fork chat · **Ghim làm chương** · **Đọc to** · **Ghi bài học** (chỉ khi lõi TS chạy, xem mục Ghi bài học) · giờ.
 
 - **Ghim làm chương** (📌): ghi `chapter` (tên = dòng đầu của tin user lượt đó, ≤ 60 ký tự; tin chỉ có ảnh → "Lượt không tên") lên dòng `user` mở lượt, nên lưu cùng thread. Bấm lần nữa = bỏ ghim. Đã ghim → nút sáng. Ghim / bỏ ghim không đổi thời gian của chat trong lịch sử (xem **Thời gian của chat** dưới).
 
@@ -194,6 +194,16 @@ Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 
 - File `.svg`: header có toggle **Xem trước / Mã**, mặc định Xem trước — hình vẽ từ nội dung đề xuất (`after`, data URL trong `<img>`, nền ô caro), bấm để phóng to. Chưa Apply vẫn xem được.
 - Footer căn phải: **Reject** (ghost) rồi **Apply** (primary). Không ghi file nếu chưa Apply. Áp dụng cho mode Thận trọng (`ask`), nơi Engine stage file.
 - Mode Cân bằng: Engine đã ghi file (event `diff{applied:true}`, tầng 1). Footer hiện "✓ Đã áp dụng" bên trái và **Hoàn tác** (ghost) bên phải; Hoàn tác ghi lại `before` qua `diff.apply` (như Restore checkpoint). Xem `docs/security/permissions.md`.
+
+## Ghi bài học
+
+Nút **Ghi bài học** (🎓, `GraduationCap`) ở chân câu trả lời đã xong, chỉ khi lõi TS chạy. Mở `components/LessonDialog.tsx` (roadmap 1.9):
+
+1. **Viết:** ô "Lần sau agent nên làm khác điều gì?", chọn model (Haiku mặc định · Sonnet · Opus; ghi rõ tốn một ít quota), nút **Đề xuất sửa** (khoá khi ô trống). Lượt đó (tin user + câu trả lời) gửi kèm làm ngữ cảnh.
+2. **Duyệt:** tóm tắt + mỗi file một khối: checkbox (chọn sẵn), đường dẫn `~/.silence/…`, nhãn **mới** nếu tạo file, `+N −M`, lý do, diff (`DiffTable`, cao ≤ 260px). Phần model đề xuất mà lõi bỏ (không được phép, có secret…) liệt kê "Đã bỏ: …". Nút **Áp dụng N và commit**, hoặc **Chỉ lưu bài học** khi bỏ chọn hết.
+3. **Xong:** "Đã lưu N file, commit `sha` và push lên GitHub", hoặc báo push / commit không được kèm lý do; đường dẫn ghi chú bài học `~/.silence/lessons/<ngày>-<tên>.md`.
+
+Esc / bấm nền / Huỷ đóng hộp (trừ lúc đang đề xuất hoặc đang commit). Không ghi file nào trước khi bấm Áp dụng.
 
 ## Thẻ Kiểm chứng
 
