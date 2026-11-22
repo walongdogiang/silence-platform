@@ -75,3 +75,27 @@ export async function restoreSnapshot(root: string, session: string, turn: numbe
   if ((await git(root, ["rev-parse", "-q", "--verify", name])) === null) throw new Error(`no snapshot for turn ${turn}`);
   if ((await git(root, ["restore", "--source", name, "--worktree", "--", "."])) === null) throw new Error("git restore failed");
 }
+
+/**
+ * Files that differ between the turn's snapshot and the workspace now (tracked and untracked, `/`
+ * separated, relative to the repo root). Uses a temporary index, so the user's index is untouched.
+ * `null` when there is no snapshot (not a git repo, or the snapshot failed).
+ */
+export async function changedSince(root: string, session: string, turn: number): Promise<string[] | null> {
+  const name = ref(session, turn);
+  const base = await git(root, ["rev-parse", "-q", "--verify", `${name}^{tree}`]);
+  if (!base) return null;
+  const gd = await git(root, ["rev-parse", "--absolute-git-dir"]);
+  if (!gd) return null;
+  const idx = path.join(gd, `silence-diff-${session}-${turn}.idx`);
+  try {
+    if ((await git(root, ["add", "-A", "--", "."], { GIT_INDEX_FILE: idx })) === null) return null;
+    const now = await git(root, ["write-tree"], { GIT_INDEX_FILE: idx });
+    if (!now) return null;
+    const out = await git(root, ["diff-tree", "-r", "--name-only", "--no-renames", base, now]);
+    if (out === null) return null;
+    return out.split("\n").map((l) => l.trim()).filter(Boolean);
+  } finally {
+    await rm(idx, { force: true });
+  }
+}

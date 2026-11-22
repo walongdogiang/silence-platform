@@ -49,6 +49,7 @@ import { formatDuration, pulseLabel, pulseTip, runPhase, type RunMeter } from ".
 import type { PermScope } from "../permissionUi";
 import type { PermAnswer } from "../types";
 import { PermissionCard } from "./PermissionCard";
+import { VerifyCard, type VerifyLine } from "./VerifyCard";
 import { DiffCard } from "./DiffCard";
 import { ErrorCard } from "./ErrorCard";
 import { MarkdownMessage } from "./MarkdownMessage";
@@ -92,6 +93,8 @@ type Turn = {
   ai?: { text: string; at?: number };
   errors: Extract<ChatLine, { kind: "error" }>[];
   suggest?: Extract<ChatLine, { kind: "mode_suggest" }>;
+  /** Check rounds after the turn (roadmap 1.8), oldest first. */
+  verify?: VerifyLine[];
   live?: boolean;
   /** Index dòng cuối (inclusive) trong `lines` thuộc turn này — dùng Fork Chat */
   endLine: number;
@@ -151,9 +154,14 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
       ensure(i).narrations.push(lineToStep(l));
     } else if (l.kind === "checkpoint") {
       ensure(i).checkpoint = { id: l.id, at: l.at, label: l.label, files: l.files };
+    } else if (l.kind === "verify") {
+      const t = ensure(i);
+      t.verify = [...(t.verify ?? []), l];
     } else if (l.kind === "token") {
       const t = ensure(i);
-      if (t.ai) t.ai.text += l.text;
+      // The agent's answer to a failed check round starts a new paragraph of the same turn.
+      const afterVerify = lines[i - 1]?.kind === "verify";
+      if (t.ai) t.ai.text += afterVerify && t.ai.text ? `\n\n${l.text}` : l.text;
       else t.ai = { text: l.text, at: t.worked?.at };
     } else if (l.kind === "error") {
       ensure(i).errors.push(l);
@@ -1047,6 +1055,7 @@ export function ChatPane(props: {
                   </div>
                 </div>
               ) : null}
+              {turn.verify?.length ? <VerifyCard rounds={turn.verify} /> : null}
               {turn.errors.map((e, j) => (
                 <ErrorCard
                   key={`err-${j}`}

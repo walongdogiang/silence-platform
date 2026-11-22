@@ -195,6 +195,16 @@ Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 
 - Footer căn phải: **Reject** (ghost) rồi **Apply** (primary). Không ghi file nếu chưa Apply. Áp dụng cho mode Thận trọng (`ask`), nơi Engine stage file.
 - Mode Cân bằng: Engine đã ghi file (event `diff{applied:true}`, tầng 1). Footer hiện "✓ Đã áp dụng" bên trái và **Hoàn tác** (ghost) bên phải; Hoàn tác ghi lại `before` qua `diff.apply` (như Restore checkpoint). Xem `docs/security/permissions.md`.
 
+## Thẻ Kiểm chứng
+
+`components/VerifyCard.tsx`, cuối lượt, khi lõi TS gửi `verify` (roadmap 1.8, `docs/adapters/protocol.md` → Sau mỗi lượt: kiểm chứng):
+
+- Tiêu đề theo trạng thái: **Kiểm chứng đạt** (xanh) · **Kiểm chứng chưa đạt, agent đang sửa (lần n/2)** (vàng) · **Vẫn chưa đạt sau n lần sửa** / **Kiểm chứng chưa đạt** (đỏ) · **Kiểm chứng đạt sau n lần sửa**. Dòng phụ: số file đổi · nguồn (verify.yaml của bạn / của repo).
+- Mỗi lệnh một hàng: icon đạt / lỗi / không chạy, lệnh (mono, cắt bằng `…`), thời gian; lệnh lỗi có **Output** thu gọn (`<details>`, cao ≤ 220px); lệnh không chạy ghi lý do (từ chối, không người trông). Kiểm cặp file hợp đồng hiện là một hàng riêng.
+- Các vòng trước gom trong **Các lần trước (n)** thu gọn dưới vòng mới nhất.
+- Câu trả lời của agent ở vòng sửa nằm trong cùng lượt, bắt đầu bằng đoạn mới (`groupTurns`).
+- Lệnh của repo chưa duyệt hiện thẻ xin quyền như tool call, nguồn **Lệnh verify của repo**; "Luôn cho phép" duyệt đúng lệnh đó.
+
 ## Card xin quyền
 
 **Lõi TS (chế độ quyền mới, `components/PermissionCard.tsx`).** Khi `risk.level` có mặt (protocol 0.1.20, [security/permissions.md](../security/permissions.md)):

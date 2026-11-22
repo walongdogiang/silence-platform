@@ -28,6 +28,16 @@ export type ChatLine =
   | { kind: "sys"; text: string }
   | { kind: "error"; message: string; info?: ErrorInfo }
   | { kind: "worked"; ms: number; at: number }
+  /** Checks after the turn (TS core, `verify` event). One line per round; `final` = no fix follows. */
+  | {
+      kind: "verify";
+      ok: boolean;
+      round: number;
+      final: boolean;
+      source: "user" | "repo";
+      changed: number;
+      checks: { command: string; ok: boolean; skipped?: string; ms: number; output: string }[];
+    }
   | {
       kind: "narrate";
       verb: string;

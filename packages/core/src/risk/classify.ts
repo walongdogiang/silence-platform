@@ -170,7 +170,8 @@ function checkPath(raw: string, ws: string, how: PathUse, v: Verdict): void {
   const p0 = raw.replace(/^["']+|["']+$/g, "").replace(/^@+/, "");
   const norm = p0.replace(/\\/g, "/").toLowerCase();
   // Per-project permission rules live in ~/.silence/projects/<repo>/permissions.yaml (TS core).
-  const projectRules = norm.includes(".silence/projects/") && norm.endsWith("/permissions.yaml");
+  // and the trusted verify commands in ~/.silence/projects/<repo>/verify.yaml (they run without asking).
+  const projectRules = norm.includes(".silence/projects/") && (norm.endsWith("/permissions.yaml") || norm.endsWith("/verify.yaml"));
   if (how !== "read" && (projectRules || p.policy_files.some((f) => norm.endsWith(f)))) {
     v.add("POLICY_TAMPER");
     return;

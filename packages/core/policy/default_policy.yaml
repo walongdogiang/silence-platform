@@ -557,7 +557,7 @@ taint_codes: [NET_ACCESS, MCP_CALL, MCP_READ]
 # Programs whose first non-flag argument is part of the remembered pattern (`npm install *`).
 subcommand_programs: [git, npm, pnpm, yarn, bun, cargo, pip, pip3, uv, poetry, go, dotnet, winget, choco, scoop, docker, kubectl, npx, gh]
 # Workspace files only the Engine may write.
-policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml", ".silence/network.json", ".silence/permissions.yaml", "silence/core/repo-config-approvals.jsonl"]
+policy_files: [".silence/permissions.json", ".silence/policy.yaml", ".silence/policy.toml", ".silence/network.json", ".silence/permissions.yaml", "silence/core/repo-config-approvals.jsonl", "silence/core/verify-approvals.jsonl"]
 
 # --- Autonomous mode (sandbox Ready): who decides, see docs/security/permissions.md ---------
 # Codes a sandboxed run makes safe enough to skip the question. A call whose verdict has any

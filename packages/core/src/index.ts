@@ -17,3 +17,5 @@ export { loadPersonal, silenceHome, coreDataDir, projectName, looksLikeSecret, P
 export { scanRepoConfig, hashItems, RepoApprovals, type RepoItem, type RepoItemKind, type RepoReview } from "./repoConfig/review.js";
 export { normalizeMode, levelOf, modeAction, askModeAllows, impactOf, PERM_MODES, DEFAULT_MODE, BYPASS_COUNTDOWN_SEC, ASK_MODE_REASON, type PermMode, type Level, type ModeAction, type Impact } from "./permissions/modes.js";
 export { parseRule, ruleMatches, matchRules, loadRules, addRule, ruleFor, shellSegments, userRulesFile, projectRulesFile, shellMatches as ruleShellMatches, type Rule, type RuleBehavior, type RuleSource, type RuleSet } from "./permissions/rules.js";
+export { loadVerify, planChecks, runCheck, splitSequence, fixPrompt, pathMatches, commandHash, VerifyApprovals, MAX_FIX_ROUNDS, DEFAULT_TIMEOUT_SEC, type VerifyConfig, type VerifyRule, type CheckResult } from "./verify/verify.js";
+export { changedSince } from "./git/snapshot.js";
