@@ -16,8 +16,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
-  Workflow,
-} from "lucide-react";
+  Workflow, TerminalSquare } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -28,6 +27,7 @@ import {
   type ReactNode,
 } from "react";
 import { translate, useT, type MsgKey, type T } from "../i18n";
+import type { ExternalItem } from "./ExternalSessionView";
 import type { ChatLine, ChatThread } from "../models";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { SoftScroll } from "./SoftScroll";
@@ -315,6 +315,37 @@ function HistoryItemMenu(props: {
   );
 }
 
+/** "Claude desktop / terminal" group: outside sessions, newest first, filtered by the search box. */
+function ExternalGroup(props: { external: { items: ExternalItem[]; openId?: string; onOpen: (item: ExternalItem) => void }; open: boolean; onToggle: () => void; q: string }) {
+  const tr = useT();
+  const q = props.q.trim().toLowerCase();
+  const items = q ? props.external.items.filter((x) => `${x.title} ${x.workspace}`.toLowerCase().includes(q)) : props.external.items;
+  if (q && !items.length) return null;
+  return (
+    <section className="history-external">
+      <button type="button" className={`history-group history-group-toggle${props.open ? " open" : ""}`} aria-expanded={props.open} onClick={props.onToggle}>
+        <ChevronRight size={12} />
+        {tr("history.external", { count: items.length })}
+      </button>
+      {props.open
+        ? items.slice(0, 50).map((x) => (
+            <button
+              key={x.backend_session_id}
+              type="button"
+              className={`history-item history-external-item${props.external.openId === x.backend_session_id ? " active" : ""}`}
+              title={x.workspace}
+              onClick={() => props.external.onOpen(x)}
+            >
+              <TerminalSquare size={13} aria-hidden="true" />
+              <span className="history-title">{x.title || tr("external.untitled")}</span>
+              <small className="history-ext-where">{x.workspace.split(/[\\/]/).filter(Boolean).pop() ?? ""}</small>
+            </button>
+          ))
+        : null}
+    </section>
+  );
+}
+
 export function ChatHistoryPanel(props: {
   workspace: string;
   threads: ChatThread[];
@@ -336,8 +367,11 @@ export function ChatHistoryPanel(props: {
   forkDisabled?: boolean;
   onCustomize: () => void;
   onToggle: () => void;
+  /** Sessions made in Claude desktop / terminal (TS core, roadmap 1.10); opened read-only. */
+  external?: { items: ExternalItem[]; openId?: string; onOpen: (item: ExternalItem) => void };
 }) {
   const tr = useT();
+  const [extOpen, setExtOpen] = useState(false);
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<{ id: string; anchor: DOMRect; trigger: HTMLElement } | null>(null);
   /** Chat đang chờ xác nhận xoá; `trigger` = nút ⋯ để trả focus khi huỷ. */
@@ -649,6 +683,9 @@ export function ChatHistoryPanel(props: {
             {g.items.map(row)}
           </section>
         ))}
+        {props.external && props.external.items.length > 0 ? (
+          <ExternalGroup external={props.external} open={extOpen || Boolean(q)} onToggle={() => setExtOpen((v) => !v)} q={q} />
+        ) : null}
         {archived.length > 0 && (
           <section className="history-archived">
             <button
