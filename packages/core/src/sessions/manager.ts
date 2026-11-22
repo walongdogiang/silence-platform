@@ -7,7 +7,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { RpcFailure, ErrorCodes, type CallContext } from "../api/jsonrpc.js";
 import type { Backend, BackendEvent, Decision, Effort, Mode, SessionHandle, ToolCall } from "../backends/types.js";
-import { takeSnapshot } from "../git/snapshot.js";
+import { changedSince, takeSnapshot } from "../git/snapshot.js";
+import { toToolCall } from "../backends/claude/toolMap.js";
+import { fixPrompt, loadVerify, MAX_FIX_ROUNDS, planChecks, runCheck, type CheckResult, type VerifyApprovals } from "../verify/verify.js";
 import { classify, shellPattern, type Verdict } from "../risk/classify.js";
 import { askModeAllows, ASK_MODE_REASON, impactOf, levelOf, modeAction, normalizeMode, type Level, type ModeAction, type PermMode } from "../permissions/modes.js";
 import { addRule, loadRules, matchRules, projectRulesFile, ruleFor, shellSegments, userRulesFile, type RuleSet } from "../permissions/rules.js";
@@ -31,6 +33,8 @@ export type ClientEvent =
   | { type: "trace"; event: string; detail: unknown }
   | { type: "cost"; input_tokens: number; output_tokens: number; usd: number; cache_read_tokens?: number; cache_write_tokens?: number }
   | { type: "done"; stop: string }
+  /** Checks after a turn (roadmap 1.8). `final` = no more fix rounds follow this one. */
+  | { type: "verify"; ok: boolean; round: number; final: boolean; source: "user" | "repo"; changed: number; checks: CheckResult[] }
   | { type: "error"; message: string; error?: { code: string; retryable: boolean; detail: string } };
 
 /** A session made outside 5ilence (Claude desktop, terminal), from the SDK's `listSessions`. */
@@ -54,6 +58,8 @@ export interface SessionManagerOptions {
   listExternal?: (opts: { dir?: string; limit?: number }) => Promise<ExternalSession[]>;
   /** Approved repo-config hashes (roadmap 1.6). */
   approvals: RepoApprovals;
+  /** Approved commands of a repo's own `.silence/verify.yaml` (roadmap 1.8). */
+  verifyApprovals: VerifyApprovals;
   /** Injected in tests; default `takeSnapshot`. */
   snapshot?: (root: string, session: string, turn: number) => Promise<string | null>;
   newId?: () => string;
@@ -93,6 +99,10 @@ interface Session {
   project: string;
   /** Turn whose git snapshot exists (an edit can be undone). */
   snapshotTurn: number;
+  /** Fix rounds already sent for this turn's failed checks (0..MAX_FIX_ROUNDS). */
+  verifyRound: number;
+  /** Paths written or edited this turn (fallback for "changed files" outside git). */
+  editedPaths: Set<string>;
   /** The backend loads the repo's own config (approved, or nothing to review). */
   projectConfig: boolean;
   /** Hash of the repo config the session started with (empty when none). */
@@ -169,6 +179,8 @@ export class SessionManager {
       project: personal.projectName ?? path.basename(path.resolve(cwd)),
       rules: { rules: [], errors: [] },
       snapshotTurn: 0,
+      verifyRound: 0,
+      editedPaths: new Set<string>(),
     } as Omit<Session, "handle"> as Session;
     s.rules = await loadRules(this.o.home, s.project, s.cwd);
     this.sessions.set(id, s);
@@ -226,6 +238,8 @@ export class SessionManager {
     s.rules = await loadRules(this.o.home, s.project, s.cwd);
     s.turn += 1;
     s.running = true;
+    s.verifyRound = 0;
+    s.editedPaths.clear();
     if (s.turn === 1 && s.personalWarnings.length) this.emit(s, { type: "trace", event: "profile", detail: { warnings: s.personalWarnings } });
     s.tainted = false;
     await this.o.log.append(s.id, { type: "user", text });
@@ -446,8 +460,11 @@ export class SessionManager {
     const requestId = randomUUID();
     const cmd = call.kind === "shell" && typeof call.args.command === "string" ? call.args.command : null;
     const pattern = cmd ? shellPattern(cmd) : null;
-    const always = level === "safe" || level === "caution" ? ruleFor(call, pattern) : null;
-    const denyRule = ruleFor(call, pattern) ?? (cmd ? `${call.raw.tool}(${cmd.trim()})` : null);
+    // A repo's verify command: "Always allow" approves that exact command (not a Bash rule the agent
+    // could reuse); no deny rule is offered, since it would also bind the agent.
+    const isVerify = call.origin === "verify";
+    const always = level === "safe" || level === "caution" ? (isVerify ? (cmd?.trim() ?? null) : ruleFor(call, pattern)) : null;
+    const denyRule = isVerify ? null : (ruleFor(call, pattern) ?? (cmd ? `${call.raw.tool}(${cmd.trim()})` : null));
     const segs = cmd ? shellSegments(cmd) : [];
     const ctx = { workspace: s.cwd, tainted: s.tainted, mcpReadOnly: call.mcp?.readOnly ?? false };
     const risk = {
@@ -463,7 +480,7 @@ export class SessionManager {
           }
         : {}),
       impact: impactOf(v, call, s.snapshotTurn === s.turn),
-      source: call.parentCallId ? "subagent" : "agent",
+      source: call.origin ?? (call.parentCallId ? "subagent" : "agent"),
       tainted: s.tainted,
       mode: s.permMode,
       ...(always ? { allow_rule: always } : {}),
@@ -485,7 +502,7 @@ export class SessionManager {
       this.emit(s, { type: "permission", request_id: requestId, name: call.raw.tool, input: call.raw.input, reason: v.title(), risk });
     });
     // Save the rule the card offered; "Always allow" is ignored where it was not offered (red calls).
-    const save = answer === "allow_always" ? always : answer === "deny_always" ? denyRule : null;
+    const save = isVerify ? null : answer === "allow_always" ? always : answer === "deny_always" ? denyRule : null;
     if (save) {
       const file = projectRulesFile(this.o.home, s.project);
       await addRule(file, answer === "allow_always" ? "allow" : "deny", save);
@@ -493,6 +510,99 @@ export class SessionManager {
       await this.o.audit.append({ session: s.id, kind: "rule.add", path: file, detail: { behavior: answer === "allow_always" ? "allow" : "deny", rule: save } });
     }
     return answer === "allow_always" && !always ? "allow_once" : answer;
+  }
+
+  // ---- verification (roadmap 1.8) -----------------------------------------------------------
+
+  private finishTurn(s: Session, stop: string): ClientEvent {
+    s.running = false;
+    s.verifyRound = 0;
+    this.denyPending(s);
+    return { type: "done", stop };
+  }
+
+  /** Files changed this turn: snapshot diff, or the paths the agent wrote/edited when there is no git. */
+  private async changedFiles(s: Session): Promise<string[]> {
+    if (s.snapshotTurn === s.turn) {
+      const fromGit = await changedSince(s.cwd, s.id, s.turn);
+      if (fromGit) return fromGit;
+    }
+    return [...s.editedPaths].map((p) => path.relative(s.cwd, path.resolve(s.cwd, p)).split(path.sep).join("/"));
+  }
+
+  /** Run the checks for this turn's changes; on failure send the errors back (at most MAX_FIX_ROUNDS). */
+  private async afterTurn(s: Session, stop: string): Promise<void> {
+    try {
+      const changed = await this.changedFiles(s);
+      const cfg = changed.length ? await loadVerify(this.o.home, s.project, s.cwd) : null;
+      const plan = cfg ? planChecks(cfg, changed) : null;
+      if (!cfg || !plan || (!plan.commands.length && !plan.pairErrors.length)) {
+        this.emit(s, this.finishTurn(s, stop));
+        return;
+      }
+      const checks: CheckResult[] = plan.pairErrors.map((e) => ({ command: "pairs", ok: false, ms: 0, output: e }));
+      for (const c of plan.commands) {
+        const gate = cfg.source === "repo" ? await this.gateVerify(s, c.run) : "run";
+        if (gate !== "run") {
+          checks.push({ command: c.run, ok: false, skipped: gate, ms: 0, output: "" });
+          continue;
+        }
+        checks.push(await runCheck(c.run, s.cwd, c.timeoutSec));
+      }
+      const failed = checks.filter((r) => !r.ok && !r.skipped);
+      const ok = failed.length === 0;
+      const round = s.verifyRound;
+      const retry = !ok && round < MAX_FIX_ROUNDS && s.running;
+      await this.o.log.append(s.id, { type: "verify", ok, commands: checks.map((r) => r.command), ...(ok ? {} : { output: failed.map((r) => `$ ${r.command}\n${r.output}`).join("\n\n").slice(0, 8000) }) });
+      this.track(this.o.audit.append({ session: s.id, kind: "verify", detail: { ok, round, source: cfg.source, changed: changed.length, checks: checks.map((r) => ({ command: r.command, ok: r.ok, skipped: r.skipped, ms: r.ms })) } }));
+      this.emit(s, { type: "verify", ok, round, final: !retry, source: cfg.source, changed: changed.length, checks });
+      if (retry) {
+        s.verifyRound = round + 1;
+        await s.handle.send({ text: fixPrompt(failed, s.verifyRound) });
+        return; // the fix turn ends in another turn.end, which checks again
+      }
+      this.emit(s, this.finishTurn(s, stop));
+    } catch (e) {
+      this.emit(s, { type: "error", message: `verify failed to run: ${e instanceof Error ? e.message : String(e)}` });
+      this.emit(s, this.finishTurn(s, stop));
+    }
+  }
+
+  /**
+   * A command from the repo's own verify.yaml (untrusted, decision 4d): approved and unchanged → run;
+   * otherwise the same flow as a tool call (deny rules, hard blocks, Bypass) and a permission card.
+   * Unattended → refused. Returns "run" or why it was skipped.
+   */
+  private async gateVerify(s: Session, command: string): Promise<"run" | string> {
+    const call = { ...toToolCall({ toolName: "Bash", input: { command }, toolUseId: `verify-${randomUUID()}`, cwd: s.cwd }), origin: "verify" as const };
+    const v = classify(call.name, call.args, { workspace: s.cwd, tainted: false, mcpReadOnly: false });
+    const level = levelOf(v);
+    const rule = matchRules(s.rules, call);
+    const deny = async (why: string, by: DecisionBy) => {
+      await this.record(s, call, v, level, "deny", by, { origin: "verify" });
+      return why;
+    };
+    if (rule?.behavior === "deny") return deny(`denied by rule ${rule.text}`, "remembered");
+    const special = s.permMode === "bypass" ? modeAction("bypass", call, v) : null;
+    if (level === "hard_block" && s.permMode !== "bypass") return deny(v.blockMessage(), "policy");
+    let countdown: number | undefined;
+    if (special?.kind === "ask") countdown = special.countdownSec;
+    else if (level !== "hard_block" && (await this.o.verifyApprovals.isApproved(s.cwd, command))) {
+      await this.record(s, call, v, level, "allow", "remembered", { origin: "verify" });
+      return "run";
+    } else if (s.permMode === "bypass" && special?.kind === "allow") {
+      await this.record(s, call, v, level, "allow", "policy", { origin: "verify" });
+      return "run";
+    }
+    if (s.unattended) return deny("needs approval (unattended)", "unattended");
+    const answer = await this.askUser(s, call, v, level, countdown);
+    if (answer === "deny" || answer === "deny_always") return deny("declined", "user");
+    if (answer === "allow_always" && level !== "danger" && level !== "hard_block") {
+      await this.o.verifyApprovals.approve(s.cwd, command);
+      this.track(this.o.audit.append({ session: s.id, kind: "verify.approve", detail: { command } }));
+    }
+    await this.record(s, call, v, level, "allow", "user", { origin: "verify" });
+    return "run";
   }
 
   private denyPending(s: Session): void {
@@ -563,6 +673,7 @@ export class SessionManager {
         return { type: "thinking", text: ev.text };
       case "tool.start":
         s.toolNames.set(ev.callId, ev.name);
+        if ((ev.name === "write" || ev.name === "edit") && typeof ev.args.path === "string") s.editedPaths.add(ev.args.path);
         return { type: "tool_start", call_id: ev.callId, name: ev.name, input: ev.args };
       case "tool.end":
         if (ev.untrusted) s.tainted = true;
@@ -570,9 +681,12 @@ export class SessionManager {
       case "usage":
         return { type: "cost", input_tokens: ev.inputTokens, output_tokens: ev.outputTokens, usd: ev.usd, cache_read_tokens: ev.cacheRead, cache_write_tokens: ev.cacheWrite };
       case "turn.end":
-        s.running = false;
-        this.denyPending(s);
-        return { type: "done", stop: ev.stop };
+        // A completed turn that edited files is checked first; `done` is sent once checks finish.
+        if (ev.stop === "completed" && s.permMode !== "ask") {
+          void this.afterTurn(s, ev.stop);
+          return null;
+        }
+        return this.finishTurn(s, ev.stop);
       case "error":
         return { type: "error", message: ev.message, error: { code: ev.code, retryable: ev.retryable, detail: ev.message } };
       case "ready":

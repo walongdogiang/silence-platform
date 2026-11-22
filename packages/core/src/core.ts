@@ -4,6 +4,7 @@ import { ClaudeBackend } from "./backends/claude/index.js";
 import { AuditLog } from "./store/audit.js";
 import { EventLog } from "./store/eventLog.js";
 import { RepoApprovals } from "./repoConfig/review.js";
+import { VerifyApprovals } from "./verify/verify.js";
 import { SessionManager, type SessionManagerOptions } from "./sessions/manager.js";
 import { coreDataDir, silenceHome } from "./sessions/personal.js";
 
@@ -17,7 +18,7 @@ export interface CoreOptions {
   /** `~/.silence` (default `silenceHome()`). */
   home?: string;
   /** Overrides for tests: backends, external session listing, snapshots, ids. */
-  sessions?: Partial<Omit<SessionManagerOptions, "log" | "audit" | "home" | "approvals">>;
+  sessions?: Partial<Omit<SessionManagerOptions, "log" | "audit" | "home" | "approvals" | "verifyApprovals">>;
 }
 
 export interface Core {
@@ -44,6 +45,7 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
     audit: new AuditLog(dataDir),
     home: opts.home ?? silenceHome(),
     approvals: new RepoApprovals(dataDir),
+    verifyApprovals: new VerifyApprovals(dataDir),
     ...(opts.sessions?.snapshot ? { snapshot: opts.sessions.snapshot } : {}),
     ...(opts.sessions?.newId ? { newId: opts.sessions.newId } : {}),
   });

@@ -114,6 +114,15 @@ start ──ready──► idle ──send──► running ──turn.end──
 
 Sau `turn.end{completed}` có file đổi, lõi chạy lệnh trong `verify.yaml` (ưu tiên `~/.silence/projects/<repo>/verify.yaml`, sau đó `.silence/verify.yaml` trong repo) khớp phạm vi file đổi. Fail thì gửi lỗi đã cắt gọn bằng `send`, tối đa 2 lần, rồi báo người dùng. Adapter không cần biết bước này. "Báo xong sai" (agent nói xong, kiểm chứng fail) được ghi làm số liệu.
 
+Đã làm ở 1.8 (`packages/core/src/verify/verify.ts`, `sessions/manager.ts::afterTurn`):
+
+- **File:** `rules: [{ when: [glob…], run: "<lệnh>", timeout_s? }]` và `pairs: [[a, b]]` (cặp file hợp đồng phải đổi cùng nhau). File của user (`~/.silence/projects/<repo>/verify.yaml`) có thì dùng, không thì dùng của repo.
+- **File đổi:** so cây snapshot đầu lượt với cây hiện tại (`git/snapshot.ts::changedSince`, index tạm, bắt cả file mới/xoá và file do shell sửa); không có git thì dùng đường dẫn agent đã write/edit. Không file nào đổi, hoặc không lệnh nào khớp: không chạy gì. Chế độ Ask: không kiểm chứng.
+- **Chạy:** mỗi lệnh khớp một lần, theo thứ tự trong file. Lệnh có `;` được tách ở cấp ngoài cùng và chạy lần lượt, dừng ở phần đầu tiên hỏng (PowerShell 5.1 trả về trạng thái của phần cuối nên `a; b` sẽ che lỗi của `a`). Windows dùng PowerShell, nơi khác `sh`. Timeout mặc định 600 giây. Output giữ phần cuối 6000 ký tự, đã che secret.
+- **Lệnh của repo (4d):** lệnh trong `.silence/verify.yaml` của repo đã duyệt và không đổi (`<dataDir>/verify-approvals.jsonl`, theo workspace + nội dung lệnh) thì chạy; lệnh mới hoặc đã đổi đi qua cùng luồng quyền (luật deny, chặn cứng, Bypass) và thẻ hỏi với `source: "verify"`. "Luôn cho phép" ở đây duyệt đúng lệnh đó, không lưu luật Bash (để agent không dùng lại được); không có "Từ chối, thêm luật". Không người trông: bỏ qua (`skipped`). File `verify.yaml` của user và file duyệt là mục tiêu `POLICY_TAMPER`.
+- **Vòng sửa:** fail thì lõi gửi `[5ilence verify] …` kèm lệnh và output lỗi, tối đa `MAX_FIX_ROUNDS` = 2; mỗi vòng kết thúc thì kiểm lại. `done` chỉ gửi khi kiểm chứng xong.
+- **Sự kiện** `session.event` `verify` (protocol 0.1.21): `{ ok, round, final, source, changed, checks: [{ command, ok, skipped?, exit_code?, ms, output }] }`. Ghi event log (`verify`) và audit (`verify`, `verify.approve`).
+
 ## Hàng đợi, song song, quota
 
 - Mỗi lượt là một **job**: `interactive`, `background`, `scheduled`. Ưu tiên `interactive` > `scheduled` > `background`.

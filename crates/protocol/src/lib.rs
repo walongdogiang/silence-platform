@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.20";
+pub const PROTOCOL_VERSION: &str = "0.1.21";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -345,6 +345,20 @@ pub struct PermissionRisk {
     pub countdown_s: Option<u32>,
 }
 
+/// One check of a `verify` event (0.1.21).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct VerifyCheck {
+    pub command: String,
+    pub ok: bool,
+    /// Not run: refused by the permission flow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub ms: u64,
+    pub output: String,
+}
+
 /// One segment of a compound shell command on the permission card (0.1.20).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RiskSegment {
@@ -557,6 +571,17 @@ pub enum SessionEvent {
     },
     Done {
         stop: String,
+    },
+    /// TS core (0.1.21): checks after a turn (`verify.yaml`). `final` = no fix round follows.
+    /// The Rust Engine never sends it.
+    Verify {
+        ok: bool,
+        round: u32,
+        #[serde(rename = "final")]
+        final_: bool,
+        source: String,
+        changed: u32,
+        checks: Vec<VerifyCheck>,
     },
     Error {
         message: String,

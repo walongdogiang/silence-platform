@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.20";
+export const PROTOCOL_VERSION = "0.1.21";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -119,6 +119,8 @@ export type PermissionAnswer = "allow_once" | "allow_always" | "deny" | "deny_al
  * `PermissionMode`; Studio maps when the core is off.
  */
 export type CorePermissionMode = "ask" | "manual" | "accept_edits" | "auto" | "bypass";
+/** One check of a `verify` event (0.1.21). `skipped` = not run (refused). */
+export type VerifyCheck = { command: string; ok: boolean; skipped?: string; exit_code?: number | null; ms: number; output: string };
 /** Display level on the permission card: none, yellow, red, refused outright. */
 export type RiskLevel = "safe" | "caution" | "danger" | "hard_block";
 export type RiskSegment = { text: string; level: RiskLevel; codes: string[] };
@@ -187,6 +189,8 @@ export type SessionEvent =
   /** Agent's headless browser (0.1.18): address, title, small JPEG `frame` (data URL), totals of console errors / failed requests. Empty `url` = closed. Not logged. */
   | { type: "browser"; url: string; title: string; frame?: string; errors: number; failed: number }
   | { type: "done"; stop: string }
+  /** TS core (0.1.21): checks after a turn. `final` = no fix round follows. */
+  | { type: "verify"; ok: boolean; round: number; final: boolean; source: "user" | "repo"; changed: number; checks: VerifyCheck[] }
   | { type: "error"; message: string; error?: ErrorInfo };
 
 /** One line of `sessions/<session_id>/events.jsonl` (append-only, written by the Engine). */

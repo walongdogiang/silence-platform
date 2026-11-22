@@ -62,6 +62,8 @@ export interface ToolCall {
   mcp?: { server: string; tool: string; readOnly: boolean };
   /** Set when the call runs inside a subagent. */
   parentCallId?: string;
+  /** Not from the model: a check the core runs after a turn (`verify`) or a hook (`hook`). */
+  origin?: "verify" | "hook";
   cwd: string;
 }
 
