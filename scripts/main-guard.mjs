@@ -49,15 +49,23 @@ function mergedPr(sha) {
   return prs.find((p) => p.merged_at && p.base?.ref === base) ?? null;
 }
 
-/** Check/status chưa đạt trên head commit của PR. Bỏ qua context của 5ilence (`5ilence/*`). */
-function failingChecks(headSha) {
+/**
+ * Check/status chưa đạt trên head commit của PR lúc merge. Bỏ qua context của 5ilence (`5ilence/*`)
+ * và mọi check bắt đầu SAU lúc merge: đó không phải CI của PR (ví dụ `cache-cleanup` chạy khi PR
+ * đóng) và còn đang chạy khi main-guard kiểm, sẽ thành báo động giả.
+ */
+function isAfterMerge(startedAt, mergedAt) {
+  return Boolean(startedAt && mergedAt && Date.parse(startedAt) > Date.parse(mergedAt));
+}
+
+function failingChecks(headSha, mergedAt) {
   const bad = [];
-  const runs = api(`repos/${repo}/commits/${headSha}/check-runs?per_page=100`)?.check_runs ?? [];
+  const runs = (api(`repos/${repo}/commits/${headSha}/check-runs?per_page=100`)?.check_runs ?? []).filter((r) => !isAfterMerge(r.started_at, mergedAt));
   for (const r of runs) {
     if (r.status !== "completed") bad.push(`${r.name}: chưa chạy xong (${r.status})`);
     else if (!OK_CONCLUSIONS.has(r.conclusion)) bad.push(`${r.name}: ${r.conclusion}`);
   }
-  const statuses = api(`repos/${repo}/commits/${headSha}/status`)?.statuses ?? [];
+  const statuses = (api(`repos/${repo}/commits/${headSha}/status`)?.statuses ?? []).filter((st) => !isAfterMerge(st.created_at, mergedAt));
   for (const s of statuses) {
     if (s.context.startsWith("5ilence/")) continue;
     if (s.state !== "success") bad.push(`${s.context}: ${s.state}`);
@@ -77,7 +85,7 @@ for (const c of pushedCommits()) {
     violations.push({ sha: c.sha, why: `push thẳng vào \`${base}\`, không qua pull request${c.message ? ` (“${c.message}”)` : ""}` });
     continue;
   }
-  if (!checkedPrs.has(pr.number)) checkedPrs.set(pr.number, failingChecks(pr.head.sha));
+  if (!checkedPrs.has(pr.number)) checkedPrs.set(pr.number, failingChecks(pr.head.sha, pr.merged_at));
   const { bad, total } = checkedPrs.get(pr.number);
   if (bad.length) {
     violations.push({ sha: c.sha, why: `PR #${pr.number} được merge khi CI chưa xanh: ${bad.join("; ")}` });
