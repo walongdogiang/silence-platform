@@ -530,7 +530,7 @@ async function routedRpc(method: string, params?: unknown): Promise<unknown> {
   const r = routeRpc(method, params, c !== null, coreSessions);
   switch (r.to) {
     case "engine":
-      return rpc(method, params);
+      return rpc(method, r.params ?? params);
     case "local":
       return r.result;
     case "error":

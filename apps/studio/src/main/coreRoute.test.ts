@@ -9,11 +9,11 @@ describe("routeRpc", () => {
     expect(routeRpc("session.prompt", { session_id: "core-1", text: "x" }, false, ids)).toEqual({ to: "engine" });
   });
 
-  it("creates chat sessions on the core, without the Engine-only permission mode", () => {
+  it("creates chat sessions on the core with the permission mode (the core reads legacy names)", () => {
     expect(routeRpc("session.create", { workspace: "D:/w", model: "claude-opus@cli", mode: "plan", permission: "balanced" }, true, ids)).toEqual({
       to: "core",
       method: "session.create",
-      params: { workspace: "D:/w", mode: "plan", model: "opus" },
+      params: { workspace: "D:/w", mode: "plan", model: "opus", permission: "balanced" },
     });
     expect(routeRpc("session.create", { workspace: "D:/w", model: "auto" }, true, ids)).toEqual({ to: "core", method: "session.create", params: { workspace: "D:/w" } });
   });
@@ -30,6 +30,22 @@ describe("routeRpc", () => {
     expect(routeRpc("session.set_effort", { session_id: "core-1", effort: "high" }, true, ids)).toEqual({ to: "local", result: {} });
     expect(routeRpc("session.rewind", { session_id: "core-1", keep_user_turns: 1 }, true, ids)).toMatchObject({ to: "error" });
     expect(routeRpc("session.context", { session_id: "core-1" }, true, ids)).toMatchObject({ to: "error" });
+  });
+});
+
+describe("permission modes", () => {
+  it("passes the mode to the core and maps it for the Rust Engine", () => {
+    expect(routeRpc("session.create", { workspace: "D:/w", permission: "accept_edits" }, true, ids)).toMatchObject({ to: "core", params: { permission: "accept_edits" } });
+    expect(routeRpc("session.create", { workspace: "D:/w", permission: "manual" }, false, ids)).toEqual({ to: "engine", params: { workspace: "D:/w", permission: "ask" } });
+    expect(routeRpc("session.set_permission", { session_id: "old", permission: "bypass" }, true, ids)).toEqual({ to: "engine", params: { session_id: "old", permission: "balanced" } });
+    expect(routeRpc("session.set_permission", { session_id: "core-1", permission: "bypass" }, true, ids)).toEqual({ to: "core", method: "session.set_permission", params: { session_id: "core-1", permission: "bypass" } });
+    expect(routeRpc("fs.tree", { workspace: "D:/w" }, false, ids)).toEqual({ to: "engine" });
+  });
+
+  it("answers core.status and permissions.rules without the Engine", () => {
+    expect(routeRpc("core.status", {}, true, ids)).toEqual({ to: "local", result: { running: true } });
+    expect(routeRpc("core.status", {}, false, ids)).toEqual({ to: "local", result: { running: false } });
+    expect(routeRpc("permissions.rules", { workspace: "D:/w" }, false, ids)).toEqual({ to: "local", result: { available: false } });
   });
 });
 

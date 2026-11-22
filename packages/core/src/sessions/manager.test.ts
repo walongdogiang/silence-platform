@@ -93,7 +93,7 @@ describe("SessionManager", () => {
       yield init;
       yield text("Xin ");
       outs.push(await hook("Read", { file_path: "a.txt" }, "t1"));
-      outs.push(await hook("Bash", { command: "git push origin main" }, "t2"));
+      outs.push(await hook("Bash", { command: "format C: /q" }, "t2"));
       outs.push(await hook("Bash", { command: "npm install lodash" }, "t3"));
       outs.push(await hook("Edit", { file_path: "a.txt", old_string: "world", new_string: "5ilence" }, "t4"));
       yield { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "hello world" }] } };
@@ -118,7 +118,7 @@ describe("SessionManager", () => {
     await t.next((e) => e.type === "done");
 
     expect(outs.map((x) => (x as { hookSpecificOutput: { permissionDecision: string } }).hookSpecificOutput.permissionDecision)).toEqual(["allow", "deny", "allow", "allow"]);
-    expect((outs[1] as { hookSpecificOutput: { permissionDecisionReason: string } }).hookSpecificOutput.permissionDecisionReason).toContain("GIT_PUSH_DEFAULT");
+    expect((outs[1] as { hookSpecificOutput: { permissionDecisionReason: string } }).hookSpecificOutput.permissionDecisionReason).toContain("DISK_DESTROY");
     const types = t.events.map((e) => e.type);
     expect(types).toContain("token");
     expect(types).toContain("tool_start");

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "0.1.19";
+pub const PROTOCOL_VERSION: &str = "0.1.20";
 
 /// Schema version of one line in a session `events.jsonl`.
 pub const EVENT_LOG_VERSION: u32 = 1;
@@ -298,7 +298,9 @@ pub enum PermissionMode {
 }
 
 /// Why a permission is asked: risk tier and reason codes from the Risk Engine.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Fields after `escalation` (0.1.20) are set only by the TS core's permission modes; the Rust
+/// Engine leaves them empty.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PermissionRisk {
     /// `auto` | `logged` | `ask` | `block`
     pub tier: String,
@@ -312,6 +314,54 @@ pub struct PermissionRisk {
     /// Set when this card is an escalation (repeated blocks), not a normal permission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escalation: Option<Escalation>,
+    /// `safe` | `caution` (yellow) | `danger` (red) | `hard_block`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    /// Every reason code of the call (the card maps them to text in the UI language).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub codes: Vec<String>,
+    /// One entry per segment of a compound shell command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segments: Vec<RiskSegment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<RiskImpact>,
+    /// `agent` | `subagent` (later: `verify`, `hook`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The turn already took in outside content (web, MCP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tainted: Option<bool>,
+    /// Permission mode the call was judged under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Rule "Always allow" saves, e.g. `Bash(npm install:*)`. Absent for red calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_rule: Option<String>,
+    /// Rule "Deny always" saves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deny_rule: Option<String>,
+    /// Bypass: seconds before the card refuses on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub countdown_s: Option<u32>,
+}
+
+/// One segment of a compound shell command on the permission card (0.1.20).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RiskSegment {
+    pub text: String,
+    pub level: String,
+    pub codes: Vec<String>,
+}
+
+/// What running the call touches (0.1.20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RiskImpact {
+    pub network: bool,
+    pub outside_workspace: bool,
+    pub deletes: bool,
+    pub admin: bool,
+    /// A per-turn snapshot can undo it.
+    pub undoable: bool,
 }
 
 /// Escalation card: the agent was blocked `count` times in a row this turn.
@@ -362,6 +412,10 @@ pub struct PermissionDecision {
     pub remember: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<PermissionScope>,
+    /// TS core (0.1.20): `allow_once` | `allow_always` | `deny` | `deny_always`. The Rust Engine
+    /// ignores it and reads `allow` / `scope`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<String>,
 }
 
 /// How long an approval lasts. A deny never persists.

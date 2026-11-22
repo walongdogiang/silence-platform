@@ -20,7 +20,7 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 
 - Renderer không gọi model; không fs/shell/MCP trực tiếp; không napi-rs làm IPC chính.
 - Không fork VS Code trong phạm vi năm 1 của [`docs/PRD.md`](docs/PRD.md).
-- Sản phẩm: diff + audit; permission mặc định **Cân bằng** (an toàn/đảo ngược được thì tự chạy có hiển thị; rủi ro thì hỏi kèm giải thích; nguy hiểm thì chặn — `docs/security/permissions.md`); không silent YOLO; không bind LAN.
+- Sản phẩm: diff + audit; chế độ quyền mặc định **Auto** (an toàn thì tự chạy có hiển thị; vàng/đỏ thì hỏi kèm giải thích; chặn cứng thì từ chối — `docs/security/permissions.md`). **Bypass permissions** chỉ do user tự bật bằng công tắc trong Settings (cấu hình repo không bật được); vẫn hiển thị mọi bước và ghi audit. Chặn cứng ở Manual / Accept edits / Auto: xoá hệ thống (`FS_DELETE_SYSTEM`), phá đĩa/khởi động (`DISK_DESTROY`), sửa file quyền (`POLICY_TAMPER`), gửi bí mật ra ngoài (`SECRET_EXFIL`). Không bind LAN.
 - Nói với user tiếng Việt.
 
 ## Sửa X thì đụng đâu

@@ -233,6 +233,7 @@ impl Verdict {
             pattern,
             hosts: Vec::new(),
             escalation: None,
+            ..Default::default()
         }
     }
 }

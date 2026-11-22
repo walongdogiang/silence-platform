@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = "0.1.19";
+export const PROTOCOL_VERSION = "0.1.20";
 
 /** Schema version of one line in a session `events.jsonl`. */
 export const EVENT_LOG_VERSION = 1;
@@ -109,7 +109,20 @@ export type PermissionDecision = {
   /** Legacy: `true` = `scope: "workspace"`. */
   remember?: boolean;
   scope?: PermissionScope;
+  /** TS core (0.1.20). Keep sending `allow` too: the Rust Engine reads only `allow` / `scope`. */
+  decision?: PermissionAnswer;
 };
+/** Answer on the TS core's permission card; `*_always` also saves a rule for the project. */
+export type PermissionAnswer = "allow_once" | "allow_always" | "deny" | "deny_always";
+/**
+ * TS core permission modes (0.1.20, docs/security/permissions.md). The Rust Engine keeps
+ * `PermissionMode`; Studio maps when the core is off.
+ */
+export type CorePermissionMode = "ask" | "manual" | "accept_edits" | "auto" | "bypass";
+/** Display level on the permission card: none, yellow, red, refused outright. */
+export type RiskLevel = "safe" | "caution" | "danger" | "hard_block";
+export type RiskSegment = { text: string; level: RiskLevel; codes: string[] };
+export type RiskImpact = { network: boolean; outside_workspace: boolean; deletes: boolean; admin: boolean; undoable: boolean };
 /** `session.set_permission` — `yolo` is rejected. */
 export type SetPermissionParams = { session_id: string; permission: PermissionMode };
 
@@ -124,6 +137,17 @@ export type PermissionRisk = {
   hosts?: string[];
   /** Set when the card is an escalation (repeated blocks), not a normal permission. */
   escalation?: Escalation;
+  /** Below: TS core only (0.1.20). */
+  level?: RiskLevel;
+  codes?: string[];
+  segments?: RiskSegment[];
+  impact?: RiskImpact;
+  source?: "agent" | "subagent" | "verify" | "hook";
+  tainted?: boolean;
+  mode?: CorePermissionMode;
+  allow_rule?: string;
+  deny_rule?: string;
+  countdown_s?: number;
 };
 /** `stop_only`: the blocked action may never run, so the card only offers "Dừng". */
 export type Escalation = { count: number; stop_only: boolean; blocked: string[] };
