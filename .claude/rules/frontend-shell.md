@@ -7,7 +7,7 @@ paths:
 
 # Shell
 
-- Full-width titlebar (logo, File…Help, ← →, folder name, Toggle Panel, Chat, Evals, Settings, − □ ×). Chat icon sits right after the panel toggle. Evals icon (dev checkout only) opens the Evals page and shows a progress chip while a run is going. No left vertical activity bar.
+- Full-width titlebar (logo, File…Help, ← →, folder name, Toggle Panel, Chat, Evals, Metrics, Settings, − □ ×). Chat icon sits right after the panel toggle. Evals icon (dev checkout only) opens the Evals page and shows a progress chip while a run is going. Metrics icon (only while the TS core runs) opens the Metrics page. No left vertical activity bar.
 - PanelBottom toggles the bottom panel (Terminal, Output, Ports = agent background processes; other tabs stub). Shortcut Ctrl+J. It does not hide the composer.
 - Chat icon toggles the entire Chat Workspace. Hidden = empty main, titlebar remains.
 - Do not mount Explorer in Chat Workspace (no file-tree sidebar, no folder icon on the history panel).

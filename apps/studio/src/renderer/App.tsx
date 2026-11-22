@@ -47,6 +47,8 @@ import { blockedStep, effectivePermMode, loadBypassEnabled, loadPermMode, saveBy
 import type { PermAnswer } from "./types";
 import { PermModeMenu } from "./components/PermModeMenu";
 import { LessonDialog } from "./components/LessonDialog";
+import { MetricsPage } from "./components/MetricsPage";
+import { ExternalSessionView, type ExternalItem, type ExternalLine } from "./components/ExternalSessionView";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
 import { liveProgress, useEvalLive } from "./evalLive";
@@ -387,6 +389,11 @@ export function App() {
   const [bypassEnabled, setBypassEnabled] = useState<boolean>(() => loadBypassEnabled());
   /** The TS core runs chat sessions (`SILENCE_CORE=1`); Ask, Bypass and rules need it. */
   const [coreOn, setCoreOn] = useState(false);
+  /** Metrics page (roadmap 1.10, TitleBar icon when the core runs). */
+  const [showMetrics, setShowMetrics] = useState(false);
+  /** Claude desktop / terminal sessions for the history panel, and the one open read-only. */
+  const [externalItems, setExternalItems] = useState<ExternalItem[]>([]);
+  const [externalView, setExternalView] = useState<ExternalItem | null>(null);
   /** "Record a lesson" dialog for one turn (roadmap 1.9); null = closed. */
   const [lessonFor, setLessonFor] = useState<{ user: string; answer: string } | null>(null);
   /** What sessions actually get: an unavailable pick (Ask/Bypass without the core) runs as Auto. */
@@ -482,6 +489,22 @@ export function App() {
       live = false;
     };
   }, []);
+
+  // Outside Claude sessions for the history panel (core only); refreshed when the workspace changes.
+  useEffect(() => {
+    if (!coreOn) {
+      setExternalItems([]);
+      return;
+    }
+    let live = true;
+    window.silence
+      .rpc("session.external", { limit: 100 })
+      .then((r) => live && setExternalItems(((r as { sessions?: ExternalItem[] }).sessions ?? []) as ExternalItem[]))
+      .catch(() => live && setExternalItems([]));
+    return () => {
+      live = false;
+    };
+  }, [coreOn, workspace]);
 
   // Trạng thái sandbox: lúc mở app, khi đổi chế độ quyền và khi đóng Settings (có thể vừa cài xong).
   useEffect(() => {
@@ -1135,11 +1158,11 @@ export function App() {
     setCost(r);
   }
 
-  async function createLiveSession(dir: string) {
+  async function createLiveSession(dir: string, extra: Record<string, unknown> = {}) {
     // Cân bằng (mặc định): tầng 0–1 tự chạy có hiển thị, tầng 2 hỏi, tầng 3 chặn — docs/security/permissions.md.
     // Chọn mode trong Settings là B4. Engine cũ (protocol < 0.1.9) chưa biết `balanced` → lùi về `ask`.
     const create = (permission: string) =>
-      window.silence.rpc("session.create", { workspace: dir, model, mode, permission }) as Promise<{ session_id: string }>;
+      window.silence.rpc("session.create", { workspace: dir, model, mode, permission, ...extra }) as Promise<{ session_id: string }>;
     let created: { session_id: string };
     try {
       created = await create(permEff);
@@ -1841,6 +1864,29 @@ export function App() {
     else if (chip === "More") openSettings();
   }
 
+  const samePath = (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase();
+
+  /** Resume a Claude desktop / terminal session as a core session in a new chat (roadmap 1.10). */
+  async function continueExternal(item: ExternalItem, transcript: ExternalLine[]) {
+    if (!workspace || !samePath(item.workspace, workspace)) return;
+    const at = Date.parse(item.updated_at) || Date.now();
+    const initial: ChatLine[] = [];
+    for (const l of transcript) {
+      if (l.role === "user") initial.push({ kind: "user", text: l.text });
+      else {
+        initial.push({ kind: "token", text: l.text });
+        initial.push({ kind: "worked", ms: 0, at });
+      }
+    }
+    try {
+      const sid = await createLiveSession(workspace, { resume_backend_session: item.backend_session_id });
+      setExternalView(null);
+      beginThread(workspace, sid, initial, { title: item.title || undefined });
+    } catch (e) {
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${e instanceof Error ? e.message : String(e)}`]);
+    }
+  }
+
   /** Pick a permission mode (menu by the chat input or Settings); applies to the open session now. */
   function changePermMode(m: UiPermMode) {
     setPermMode(m);
@@ -2246,6 +2292,19 @@ export function App() {
               })()
             : undefined
         }
+        metrics={
+          coreOn
+            ? {
+                open: showMetrics && !chatHidden,
+                onToggle: () => {
+                  setShowEvals(false);
+                  setExternalView(null);
+                  setShellView("chat");
+                  setShowMetrics((v) => !(v && shellView === "chat"));
+                },
+              }
+            : undefined
+        }
         onOpenWorkspace={() => void openWorkspace()}
         onQuit={() => void window.silence?.window.close()}
       />
@@ -2264,7 +2323,16 @@ export function App() {
             />
           ) : null}
           <div className="work-body">
-            {chatHidden ? null : showEvals ? (
+            {chatHidden ? null : showMetrics ? (
+              <MetricsPage onClose={() => setShowMetrics(false)} />
+            ) : externalView ? (
+              <ExternalSessionView
+                item={externalView}
+                onClose={() => setExternalView(null)}
+                canContinue={Boolean(workspace) && samePath(externalView.workspace, workspace)}
+                onContinue={(item, lines) => void continueExternal(item, lines)}
+              />
+            ) : showEvals ? (
               <Suspense fallback={null}>
                 <EvalsPage
                   models={models}
@@ -2320,6 +2388,20 @@ export function App() {
         ) : null}
         {showHistory ? (
           <ChatHistoryPanel
+            external={
+              coreOn
+                ? {
+                    items: externalItems,
+                    openId: externalView?.backend_session_id,
+                    onOpen: (item) => {
+                      setShowMetrics(false);
+                      setShowEvals(false);
+                      setShellView("chat");
+                      setExternalView(item);
+                    },
+                  }
+                : undefined
+            }
             workspace={workspace}
             threads={threads}
             activeId={activeThreadId}

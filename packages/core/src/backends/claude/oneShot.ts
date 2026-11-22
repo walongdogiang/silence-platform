@@ -33,6 +33,8 @@ export async function claudeOneShot(system: string, prompt: string, o: OneShotOp
     settingSources: [],
     permissionMode: "default",
     maxTurns: 1,
+    // Do not leave a transcript in ~/.claude (it would show up as an outside session).
+    persistSession: false,
     // No tool should ever run here; refuse anything that slips through.
     canUseTool: async () => ({ behavior: "deny", message: "no tools in a one-shot call" }),
   } as unknown as Options;

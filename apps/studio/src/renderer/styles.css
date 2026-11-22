@@ -1466,6 +1466,34 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 /* Lý do từ Risk Engine (docs/security/permissions.md): tiêu đề đậm + giải thích. */
 .perm-reasons { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: var(--font-size-sm); color: var(--text-secondary); }
 .perm-reasons strong { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+/* Metrics page (roadmap 1.10): stat tiles + plain tables, text tokens only (no series colours). */
+.metrics-page, .external-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.metrics-head, .external-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border-subtle); }
+.metrics-head h2, .external-title h2 { margin: 0; font-size: var(--font-size-lg); }
+.metrics-head h2 { margin-right: auto; }
+.metrics-body, .external-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px 24px; }
+.metrics-h { margin: 18px 0 8px; font-size: var(--font-size-base); color: var(--text-primary); }
+.metrics-h:first-child { margin-top: 0; }
+.metric-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.metric-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-1); }
+.metric-label { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.metric-value { font-size: 22px; font-weight: var(--font-weight-semibold); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.metric-sub { font-size: var(--font-size-sm); color: var(--text-muted); }
+.metrics-quota { margin-top: 8px; }
+.metrics-table { width: 100%; max-width: 720px; border-collapse: collapse; font-size: var(--font-size-sm); }
+.metrics-table th, .metrics-table td { padding: 5px 8px; border-bottom: 1px solid var(--border-subtle); text-align: right; font-variant-numeric: tabular-nums; }
+.metrics-table th:first-child, .metrics-table td:first-child { text-align: left; }
+.metrics-table thead th { color: var(--text-secondary); font-weight: var(--font-weight-semibold); }
+.metrics-table tbody th { font-weight: 400; color: var(--text-primary); }
+/* Outside session (Claude desktop / terminal): read-only transcript. */
+.external-title { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.external-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.external-note { margin: 8px 16px 0; font-size: var(--font-size-sm); }
+.external-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; max-width: 820px; }
+.external-line.user { align-self: flex-end; max-width: 85%; }
+.external-user { padding: 8px 12px; border-radius: 14px; background: var(--surface-2); white-space: pre-wrap; }
+.history-external-item { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; }
+.history-ext-where { margin-left: auto; color: var(--text-muted); flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Record a lesson (roadmap 1.9): wider dialog, one diff per proposed edit. */
 .unsaved-dialog.lesson-dialog { width: min(760px, 100%); max-height: calc(100vh - 48px); overflow: auto; }
 .unsaved-dialog.lesson-dialog h3 { display: flex; align-items: center; gap: 8px; }

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, FlaskConical, MessageSquare, Minus, PanelBottom, Settings, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, FlaskConical, MessageSquare, Minus, PanelBottom, Settings, Square, X, BarChart3 } from "lucide-react";
 import { useEffect, useState } from "react";
 import logo from "../assets/logo.png";
 import { useT, type MsgKey } from "../i18n";
@@ -32,6 +32,8 @@ export function TitleBar(props: {
   onSettings: () => void;
   /** Evals page (dev checkout only: undefined hides the button and the menu item). */
   evals?: { open: boolean; running: boolean; progress: string; onToggle: () => void };
+  /** Metrics page (roadmap 1.10); absent when the TS core is not running. */
+  metrics?: { open: boolean; onToggle: () => void };
   onOpenWorkspace: () => void;
   onQuit: () => void;
 }) {
@@ -159,6 +161,17 @@ export function TitleBar(props: {
           >
             <FlaskConical size={15} />
             {props.evals.running ? <span className="chrome-evals-chip">{props.evals.progress}</span> : null}
+          </button>
+        ) : null}
+        {props.metrics ? (
+          <button
+            type="button"
+            className={`chrome-icon ${props.metrics.open ? "on" : ""}`}
+            aria-pressed={props.metrics.open}
+            title={t("metrics.title")}
+            onClick={props.metrics.onToggle}
+          >
+            <BarChart3 size={15} />
           </button>
         ) : null}
         <button type="button" className="chrome-icon" title={t("shell.settings")} onClick={props.onSettings}>

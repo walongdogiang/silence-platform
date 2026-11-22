@@ -60,7 +60,7 @@ Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc 
 | 1.7 | `feat/personal-profile` | Hồ sơ cá nhân: đọc lại `~/.silence` mỗi session; hồ sơ theo project `~/.silence/projects/<repo>/profile.md` (tên = thư mục checkout chính, worktree dùng chung); cảnh báo khi quá 60 dòng; có secret thì không nạp; plugin phải có `.claude-plugin/plugin.json`; RPC `profile.status`; mục **Hồ sơ** trong Settings của Studio (chỉ đọc) |
 | 1.8 | `feat/verify` | Kiểm chứng theo phạm vi file đổi, trả lỗi cho agent tối đa 2 lần; lệnh của repo duyệt theo nội dung (4d); thẻ "Kiểm chứng" trong chat |
 | 1.9 | `feat/lessons` | Nút "Ghi bài học" ở chân câu trả lời → một lần gọi Claude (không tool, mặc định Haiku) đề xuất sửa hồ sơ / hồ sơ project / verify.yaml / skill → duyệt từng diff → ghi + ghi chú bài học, commit và push `~/.silence` |
-| 1.10 | `feat/session-metrics` | Số liệu từ event log; xem session của Claude desktop/terminal |
+| 1.10 | `feat/session-metrics` | Số liệu từ event log (lượt, báo xong sai, vòng sửa, nhắc lại, token/chi phí, quota) so với session Claude desktop/terminal; trang Số liệu; session ngoài trong lịch sử, xem chỉ đọc và tiếp tục trong 5ilence |
 | 1.11 | `feat/parallel-sessions` | Nhiều session song song, mỗi session một git worktree |
 | 1.12 | `feat/browser-preview` | Pane xem dev server/URL (WebContentsView) |
 

@@ -21,3 +21,4 @@ export { loadVerify, planChecks, runCheck, splitSequence, fixPrompt, pathMatches
 export { changedSince } from "./git/snapshot.js";
 export { lessonTargets, lessonPrompt, parseProposal, applyLesson, targetKind, LESSON_SYSTEM, type LessonTarget, type LessonEdit, type LessonProposal, type LessonContext, type ApplyResult } from "./lessons/lessons.js";
 export { claudeOneShot, type OneShotResult, type OneShotOptions, type OneShotQueryFn } from "./backends/claude/oneShot.js";
+export { coreSessionMetrics, externalSessionMetrics, summarize, transcriptLines, emptyTotals, localDay, type Totals, type SessionMetrics, type MetricsSummary, type TranscriptMessage } from "./metrics/metrics.js";

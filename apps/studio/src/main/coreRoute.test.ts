@@ -49,6 +49,14 @@ describe("permission modes", () => {
   });
 });
 
+describe("metrics and outside sessions", () => {
+  it("go to the core; without it they answer unavailable", () => {
+    expect(routeRpc("metrics.summary", { days: 7 }, true, ids)).toEqual({ to: "core", method: "metrics.summary", params: { days: 7 } });
+    expect(routeRpc("session.external", {}, false, ids)).toEqual({ to: "local", result: { available: false } });
+    expect(routeRpc("session.create", { workspace: "D:/w", resume_backend_session: "abc" }, true, ids)).toMatchObject({ to: "core", params: { resume_backend_session: "abc" } });
+  });
+});
+
 describe("lessons", () => {
   it("go to the core, and fail clearly without it", () => {
     expect(routeRpc("lesson.propose", { text: "x" }, true, ids)).toEqual({ to: "core", method: "lesson.propose", params: { text: "x" } });

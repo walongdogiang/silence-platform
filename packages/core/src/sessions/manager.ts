@@ -9,6 +9,7 @@ import { RpcFailure, ErrorCodes, type CallContext } from "../api/jsonrpc.js";
 import type { Backend, BackendEvent, Decision, Effort, Mode, SessionHandle, ToolCall } from "../backends/types.js";
 import { changedSince, takeSnapshot } from "../git/snapshot.js";
 import { toToolCall } from "../backends/claude/toolMap.js";
+import { coreSessionMetrics, externalSessionMetrics, summarize, transcriptLines, type MetricsSummary, type SessionMetrics, type TranscriptMessage } from "../metrics/metrics.js";
 import { applyLesson, LESSON_SYSTEM, lessonPrompt, lessonTargets, parseProposal, type LessonContext, type LessonProposal } from "../lessons/lessons.js";
 import { claudeOneShot, type OneShotResult } from "../backends/claude/oneShot.js";
 import { fixPrompt, loadVerify, MAX_FIX_ROUNDS, planChecks, runCheck, type CheckResult, type VerifyApprovals } from "../verify/verify.js";
@@ -48,6 +49,7 @@ export interface ExternalSession {
   firstPrompt?: string;
   gitBranch?: string;
   cwd?: string;
+  createdAt?: number;
 }
 
 export interface SessionManagerOptions {
@@ -62,6 +64,8 @@ export interface SessionManagerOptions {
   approvals: RepoApprovals;
   /** Approved commands of a repo's own `.silence/verify.yaml` (roadmap 1.8). */
   verifyApprovals: VerifyApprovals;
+  /** Messages of an outside session (Claude: SDK `getSessionMessages`). */
+  externalMessages?: (sessionId: string, dir?: string) => Promise<TranscriptMessage[]>;
   /** One Claude call without tools (lesson proposals). Injected in tests; default `claudeOneShot`. */
   oneShot?: (system: string, prompt: string, o: { model?: string; cwd: string }) => Promise<OneShotResult>;
   /** Injected in tests; default `takeSnapshot`. */
@@ -133,6 +137,8 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   /** Log/audit writes started from events; `list` and `close` wait for them. */
   private readonly inflight = new Set<Promise<unknown>>();
+  /** Metrics of outside sessions by id + lastModified (transcripts are large; re-read only when changed). */
+  private readonly externalCache = new Map<string, { key: number; m: SessionMetrics }>();
   /** Lesson proposals waiting for review (roadmap 1.9), by id. */
   private readonly lessons = new Map<string, { lesson: string; ctx: LessonContext; proposal: LessonProposal; at: number }>();
 
@@ -449,6 +455,83 @@ export class SessionManager {
       }
     }
     return { sessions, external };
+  }
+
+  /**
+   * Sessions made outside 5ilence (Claude desktop / terminal), newest first. Leaves out the ones
+   * 5ilence started (known backend id) and the lesson calls run in ~/.silence.
+   */
+  async externalSessions(params: unknown): Promise<{ sessions: Array<{ backend_session_id: string; title: string; workspace: string; updated_at: string; created_at?: string; git_branch?: string }> }> {
+    const p = (typeof params === "object" && params !== null ? params : {}) as Record<string, unknown>;
+    if (!this.o.listExternal) return { sessions: [] };
+    await this.settle();
+    const known = new Set((await this.o.log.list()).map((r) => r.backendSessionId).filter(Boolean));
+    const home = path.resolve(this.o.home).toLowerCase();
+    const dir = str(p.workspace);
+    const limit = typeof p.limit === "number" ? Math.min(p.limit, 500) : 100;
+    let list: ExternalSession[] = [];
+    try {
+      list = await this.o.listExternal({ ...(dir ? { dir } : {}), limit });
+    } catch {
+      return { sessions: [] };
+    }
+    return {
+      sessions: list
+        .filter((x) => !known.has(x.sessionId) && !(x.cwd && path.resolve(x.cwd).toLowerCase() === home))
+        .sort((a, b) => b.lastModified - a.lastModified)
+        .map((x) => ({
+          backend_session_id: x.sessionId,
+          title: x.customTitle || x.summary || x.firstPrompt || "",
+          workspace: x.cwd ?? "",
+          updated_at: new Date(x.lastModified).toISOString(),
+          ...(x.createdAt ? { created_at: new Date(x.createdAt).toISOString() } : {}),
+          ...(x.gitBranch ? { git_branch: x.gitBranch } : {}),
+        })),
+    };
+  }
+
+  /** Read-only transcript of an outside session (user / assistant text only). */
+  async externalMessages(params: unknown): Promise<{ lines: Array<{ role: "user" | "assistant"; text: string }> }> {
+    const p = obj(params);
+    const id = str(p.backend_session_id);
+    if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) throw new RpcFailure(ErrorCodes.InvalidParams, "backend_session_id is required");
+    if (!this.o.externalMessages) return { lines: [] };
+    return { lines: transcriptLines(await this.o.externalMessages(id, str(p.workspace))) };
+  }
+
+  /** Roadmap 1.10: 5ilence sessions (event log) next to outside Claude sessions, last `days` days. */
+  async metricsSummary(params: unknown): Promise<MetricsSummary> {
+    const p = (typeof params === "object" && params !== null ? params : {}) as Record<string, unknown>;
+    const days = typeof p.days === "number" && p.days >= 1 ? Math.min(Math.floor(p.days), 365) : 30;
+    await this.settle();
+    const core: SessionMetrics[] = [];
+    for (const s of await this.o.log.list()) {
+      const m = coreSessionMetrics(s.id, await this.o.log.read(s.id));
+      if (m) core.push(m);
+    }
+    const external: SessionMetrics[] = [];
+    if (this.o.externalMessages) {
+      const cutoff = Date.now() - days * 86_400_000;
+      const { sessions } = await this.externalSessions({ limit: 500 });
+      for (const x of sessions) {
+        const modified = Date.parse(x.updated_at);
+        if (modified < cutoff) continue;
+        const hit = this.externalCache.get(x.backend_session_id);
+        if (hit && hit.key === modified) {
+          external.push(hit.m);
+          continue;
+        }
+        try {
+          const msgs = await this.o.externalMessages(x.backend_session_id, x.workspace || undefined);
+          const m = externalSessionMetrics(x.backend_session_id, x.workspace, Date.parse(x.created_at ?? x.updated_at), msgs);
+          this.externalCache.set(x.backend_session_id, { key: modified, m });
+          external.push(m);
+        } catch {
+          /* unreadable transcript: leave it out */
+        }
+      }
+    }
+    return summarize(core, external, days);
   }
 
   /** End every session (core shutting down): pending decisions become deny. */
