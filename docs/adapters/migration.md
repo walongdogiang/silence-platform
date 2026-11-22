@@ -61,7 +61,7 @@ Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc 
 | 1.8 | `feat/verify` | Kiểm chứng theo phạm vi file đổi, trả lỗi cho agent tối đa 2 lần; lệnh của repo duyệt theo nội dung (4d); thẻ "Kiểm chứng" trong chat |
 | 1.9 | `feat/lessons` | Nút "Ghi bài học" ở chân câu trả lời → một lần gọi Claude (không tool, mặc định Haiku) đề xuất sửa hồ sơ / hồ sơ project / verify.yaml / skill → duyệt từng diff → ghi + ghi chú bài học, commit và push `~/.silence` |
 | 1.10 | `feat/session-metrics` | Số liệu từ event log (lượt, báo xong sai, vòng sửa, nhắc lại, token/chi phí, quota) so với session Claude desktop/terminal; trang Số liệu; session ngoài trong lịch sử, xem chỉ đọc và tiếp tục trong 5ilence |
-| 1.11 | `feat/parallel-sessions` | Nhiều session song song, mỗi session một git worktree |
+| 1.11 | `feat/parallel-sessions` | Nhiều chat chạy song song (renderer theo dõi lượt chạy theo từng session); chat tự tách sang git worktree ngoài repo khi trùng thư mục với chat khác đang chạy hoặc để lại thay đổi chưa commit, kèm lý do + đường dẫn, nút ép bật/tắt mỗi chat; thẻ gộp (Gộp / Giữ nhánh / Bỏ); giới hạn lượt cùng lúc (mặc định 2, Settings 1–4) và hàng đợi |
 | 1.12 | `feat/browser-preview` | Pane xem dev server/URL (WebContentsView) |
 
 **Xong khi:** dùng Studio 2 tuần cho mọi việc trừ theo dõi PR và việc theo lịch; số liệu so với Claude trần không xấu hơn.
