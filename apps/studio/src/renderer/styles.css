@@ -1466,6 +1466,26 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 /* Lý do từ Risk Engine (docs/security/permissions.md): tiêu đề đậm + giải thích. */
 .perm-reasons { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: var(--font-size-sm); color: var(--text-secondary); }
 .perm-reasons strong { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+/* Checks after a turn (roadmap 1.8): one card at the end of the turn, failing output folded. */
+.verify-card { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-1); display: flex; flex-direction: column; gap: 6px; font-size: var(--font-size-sm); }
+.verify-card header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.verify-card header strong { color: var(--text-primary); }
+.verify-meta { color: var(--text-secondary); }
+.verify-ok header svg { color: var(--success); }
+.verify-fail { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.verify-fail header svg { color: var(--error); }
+.verify-fixing { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.verify-fixing header svg { color: var(--warning); }
+.verify-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.verify-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.verify-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.verify-checks li.ok svg { color: var(--success); }
+.verify-checks li.fail svg { color: var(--error); }
+.verify-checks li.skipped { color: var(--text-secondary); }
+.verify-time { flex: none; color: var(--text-secondary); }
+.verify-checks details summary, .verify-earlier summary { cursor: pointer; color: var(--text-secondary); }
+.verify-checks pre { margin: 4px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: var(--font-size-sm); }
+.verify-round-title { margin: 6px 0 2px; color: var(--text-secondary); }
 /* Permission modes (TS core): yellow = needs attention, red = dangerous / blocked (docs/security/permissions.md). */
 .perm-card.perm-level-caution { border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
 .perm-card.perm-level-danger,

@@ -34,6 +34,8 @@ export type PermissionRisk = {
   /** Bypass: seconds before the card refuses on its own. */
   countdown_s?: number;
 };
+/** One check of a `verify` event. `skipped` = not run (refused). */
+export type VerifyCheck = { command: string; ok: boolean; skipped?: string; exit_code?: number | null; ms: number; output: string };
 /** Display level on the core's permission card: none, yellow, red, refused outright. */
 export type RiskLevel = "safe" | "caution" | "danger" | "hard_block";
 /** Answer on the core's permission card (`session.permission.decision`). */
@@ -66,6 +68,8 @@ export type SessionEvent =
   /** Agent's headless browser: address, title, small JPEG frame, totals of console errors / failed requests. Empty `url` = closed. */
   | { type: "browser"; url: string; title: string; frame?: string; errors: number; failed: number }
   | { type: "done"; stop: string }
+  /** TS core: checks after a turn (protocol 0.1.21). `final` = no fix round follows. */
+  | { type: "verify"; ok: boolean; round: number; final: boolean; source: "user" | "repo"; changed: number; checks: VerifyCheck[] }
   | { type: "error"; message: string; error?: ErrorInfo };
 
 export type ErrorCode =

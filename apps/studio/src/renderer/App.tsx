@@ -859,6 +859,13 @@ export function App() {
           const last = lastPromptRef.current;
           setPrompt((p) => (p.trim() ? p : last));
         } else flagBg();
+      } else if (ev.type === "verify") {
+        // Checks after the turn (roadmap 1.8); a failing round is followed by the agent's fix.
+        setLines((xs) => [
+          ...xs,
+          { kind: "verify", ok: ev.ok, round: ev.round, final: ev.final, source: ev.source, changed: ev.changed, checks: ev.checks.map((c) => ({ command: c.command, ok: c.ok, ...(c.skipped ? { skipped: c.skipped } : {}), ms: c.ms, output: c.output })) },
+        ]);
+        if (ev.final && !ev.ok && !here) flagBg();
       } else if (ev.type === "done") {
         if (ev.stop === "budget" && here) {
           setBudgetHit(true);
