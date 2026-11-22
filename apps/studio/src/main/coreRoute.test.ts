@@ -49,6 +49,15 @@ describe("permission modes", () => {
   });
 });
 
+describe("parallel sessions", () => {
+  it("pass the worktree switch, route worktree.* of core sessions and the limit", () => {
+    expect(routeRpc("session.create", { workspace: "D:/w", worktree: "on" }, true, ids)).toMatchObject({ to: "core", params: { worktree: "on" } });
+    expect(routeRpc("worktree.merge", { session_id: "core-1" }, true, ids)).toEqual({ to: "core", method: "worktree.merge", params: { session_id: "core-1" } });
+    expect(routeRpc("core.set_limit", { max: 2 }, false, ids)).toEqual({ to: "local", result: {} });
+    expect(routeRpc("core.set_limit", { max: 2 }, true, ids)).toEqual({ to: "core", method: "core.set_limit", params: { max: 2 } });
+  });
+});
+
 describe("metrics and outside sessions", () => {
   it("go to the core; without it they answer unavailable", () => {
     expect(routeRpc("metrics.summary", { days: 7 }, true, ids)).toEqual({ to: "core", method: "metrics.summary", params: { days: 7 } });

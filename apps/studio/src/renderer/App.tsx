@@ -48,6 +48,7 @@ import type { PermAnswer } from "./types";
 import { PermModeMenu } from "./components/PermModeMenu";
 import { LessonDialog } from "./components/LessonDialog";
 import { MetricsPage } from "./components/MetricsPage";
+import { WorktreeBanner, WorktreeCard, WorktreeMenu, type MergeOutcome, type WorktreeFile, type WorktreeMode, type WorktreeView } from "./components/Worktree";
 import { ExternalSessionView, type ExternalItem, type ExternalLine } from "./components/ExternalSessionView";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { loadSettingsSection, type SettingsSection } from "./settingsIndex";
@@ -271,6 +272,9 @@ function sealThoughtMs(lines: ChatLine[], startedAt: number): ChatLine[] {
   return next;
 }
 
+/** Bookkeeping of one session's running turn (roadmap 1.11: one per session, several at once). */
+type TurnTrack = { startedAt: number; files: CheckpointFile[]; thoughtAt: number; prompt: string; mode: SessionMode };
+
 export function App() {
   const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
@@ -378,17 +382,37 @@ export function App() {
   const setLinesState = setLines;
   const [diff, setDiff] = useState<Diff | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
-  const [perm, setPerm] = useState<Perm | null>(null);
+  /** Pending permission card per session (several chats can run at once, roadmap 1.11). */
+  const [perms, setPerms] = useState<Record<string, Perm>>({});
+  const setPermFor = (sid: string, p: Perm | null) =>
+    setPerms((all) => {
+      if (!p) {
+        if (!(sid in all)) return all;
+        const { [sid]: _gone, ...rest } = all;
+        return rest;
+      }
+      return { ...all, [sid]: p };
+    });
   const [permBusy, setPermBusy] = useState(false);
   const [permError, setPermError] = useState(false);
   const [cost, setCost] = useState({ usd: 0, input_tokens: 0, output_tokens: 0, events: 0 });
-  const [busy, setBusy] = useState(false);
+  /** Run pulse per running session (roadmap 1.11: several turns can run at once; the core queues). */
+  const [runs, setRuns] = useState<Record<string, RunMeter>>({});
   /** Permission mode the user picked (Auto by default); sent with every turn. docs/security/permissions.md */
   const [permMode, setPermMode] = useState<UiPermMode>(() => loadPermMode());
   /** Settings → Permissions → "Allow Bypass permissions mode" (off by default). */
   const [bypassEnabled, setBypassEnabled] = useState<boolean>(() => loadBypassEnabled());
   /** The TS core runs chat sessions (`SILENCE_CORE=1`); Ask, Bypass and rules need it. */
   const [coreOn, setCoreOn] = useState(false);
+  /** Worktree of each core session that runs in one (roadmap 1.11), from `session.create`. */
+  const [worktrees, setWorktrees] = useState<Record<string, WorktreeView>>({});
+  /** Per-chat worktree switch (Auto / Always / Never), by thread; only matters before the first message. */
+  const [wtModes, setWtModes] = useState<Record<string, WorktreeMode>>({});
+  /** Merge card of the open chat: what its worktree changed; dismissed by "Keep branch" until it changes. */
+  const [wtStatus, setWtStatus] = useState<{ sid: string; files: WorktreeFile[]; commits: number } | null>(null);
+  const [wtKept, setWtKept] = useState<Record<string, string>>({});
+  const [wtBusy, setWtBusy] = useState(false);
+  const [wtOutcome, setWtOutcome] = useState<MergeOutcome | null>(null);
   /** Metrics page (roadmap 1.10, TitleBar icon when the core runs). */
   const [showMetrics, setShowMetrics] = useState(false);
   /** Claude desktop / terminal sessions for the history panel, and the one open read-only. */
@@ -401,7 +425,7 @@ export function App() {
   /** Sandbox lệnh (`sandbox.status`, Engine cache 30 s). `null` = chưa biết / Engine cũ. */
   const [sandbox, setSandbox] = useState<SandboxStatus | null>(null);
   /** Run pulse của lượt đang chạy: giờ bắt đầu, token/USD cộng từ `cost`, cờ Stop (`docs/frontend/status.md`). */
-  const [run, setRun] = useState<RunMeter | null>(null);
+
   const termRef = useRef<HTMLDivElement | null>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -412,23 +436,57 @@ export function App() {
     sessionIdRef.current = id;
     setSessionId(id);
   };
-  /** Session sở hữu lượt đang chạy (một lượt mỗi lúc). Đổi tab giữa lượt: sự kiện vẫn ghi vào thread của nó. */
-  const runSessionRef = useRef("");
-  const [runSessionId, setRunSessionId] = useState("");
-  const markRun = (id: string) => {
-    runSessionRef.current = id;
-    setRunSessionId(id);
+  /** Per-session turn bookkeeping (start time, files of the turn, thinking start, prompt, mode). */
+  const tracksRef = useRef(new Map<string, TurnTrack>());
+  const trackOf = (sid: string): TurnTrack => {
+    let tr = tracksRef.current.get(sid);
+    if (!tr) {
+      tr = { startedAt: 0, files: [], thoughtAt: 0, prompt: "", mode: "agent" };
+      tracksRef.current.set(sid, tr);
+    }
+    return tr;
+  };
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  /** The open chat is running a turn; `anyBusy` = some chat is. */
+  const busy = Boolean(runs[sessionId]);
+  const anyBusy = Object.keys(runs).length > 0;
+  const run: RunMeter | null = runs[sessionId] ?? null;
+  const perm: Perm | null = perms[sessionId] ?? null;
+  /** Start / update / end the run pulse of one session. */
+  const startRunFor = (sid: string, at: number) => setRuns((all) => ({ ...all, [sid]: startRun(at) }));
+  const updateRunFor = (sid: string, fn: (m: RunMeter | null) => RunMeter | null) =>
+    setRuns((all) => {
+      const next = fn(all[sid] ?? null);
+      if (!next) {
+        const { [sid]: _gone, ...rest } = all;
+        return rest;
+      }
+      return { ...all, [sid]: next };
+    });
+  const endRunFor = (sid: string) => {
+    tracksRef.current.delete(sid);
+    updateRunFor(sid, () => null);
+  };
+  /** A session id replaced mid-send (Engine restarted): keep its run and track under the new id. */
+  const rekeyRun = (oldId: string, newId: string) => {
+    const tr = tracksRef.current.get(oldId);
+    if (tr) {
+      tracksRef.current.delete(oldId);
+      tracksRef.current.set(newId, tr);
+    }
+    setRuns((all) => {
+      if (!(oldId in all)) return all;
+      const { [oldId]: m, ...rest } = all;
+      return { ...rest, [newId]: m! };
+    });
   };
   /** Plan nộp lúc thread không mở (hoặc đang mở rồi rời đi): giữ theo session, hiện lại khi mở thread. */
   const pendingPlanRef = useRef(new Map<string, string>());
-  const turnStartedAtRef = useRef(0);
-  const turnFilesRef = useRef<CheckpointFile[]>([]);
-  const thoughtStartedAtRef = useRef(0);
   const lastPromptRef = useRef("");
   /** Thread đã gửi `chat.title` trong phiên này — chống gọi trùng / gọi lại sau lỗi. */
   const titleRequestedRef = useRef(new Set<string>());
   /** Mode của lượt đang chạy (để ghi nhãn mode vào dòng route). */
-  const turnModeRef = useRef<SessionMode>("agent");
   const [termEl, setTermEl] = useState<HTMLDivElement | null>(null);
   const [showChangesSignal, setShowChangesSignal] = useState(0);
   /** Panel Changes/file chỉ mở khi user chủ động (bấm card diff, chip file…), không tự bật khi có diff. */
@@ -489,6 +547,28 @@ export function App() {
       live = false;
     };
   }, []);
+
+  // Turns at once (Settings → General) for the core's queue.
+  useEffect(() => {
+    if (coreOn) void window.silence?.rpc("core.set_limit", { max: prefs.maxConcurrent }).catch(() => undefined);
+  }, [coreOn, prefs.maxConcurrent]);
+
+  // Merge card: refresh what the open chat's worktree changed when it opens and after each turn.
+  useEffect(() => {
+    if (!sessionId || !worktrees[sessionId] || busy) return;
+    let live = true;
+    window.silence
+      .rpc("worktree.status", { session_id: sessionId })
+      .then((r) => {
+        const x = r as { files?: WorktreeFile[]; commits?: number };
+        if (live) setWtStatus({ sid: sessionId, files: x.files ?? [], commits: x.commits ?? 0 });
+      })
+      .catch(() => live && setWtStatus(null));
+    return () => {
+      live = false;
+    };
+  }, [sessionId, busy, worktrees]);
+  useEffect(() => setWtOutcome(null), [sessionId]);
 
   // Outside Claude sessions for the history panel (core only); refreshed when the workspace changes.
   useEffect(() => {
@@ -707,12 +787,14 @@ export function App() {
       const p = payload as { session_id?: string; event?: SessionEvent };
       const ev = p.event;
       if (!ev) return;
-      // Lỗi cấp Engine/Sidecar không có session_id: gán cho lượt đang chạy, không phải tab nào đang mở.
-      const sid = p.session_id || runSessionRef.current || "";
-      // `here`: thread đang mở. `bg`: lượt đang chạy ở thread user vừa rời đi — vẫn ghi vào thread đó.
+      // Lỗi cấp Engine/Sidecar không có session_id: gán cho lượt đang chạy duy nhất, không thì tab đang mở.
+      const running = Object.keys(runsRef.current);
+      const sid = p.session_id || (running.length === 1 ? running[0]! : "") || sessionIdRef.current || "";
+      // `here`: thread đang mở. `bg`: thread khác (đang chạy song song, hoặc vừa rời đi) — vẫn ghi vào thread đó.
       const here = !sid || sid === sessionIdRef.current;
-      const bg = !here && sid === runSessionRef.current;
+      const bg = !here && threadsRef.current.some((x) => x.sessionId === sid);
       if (!here && !bg) return;
+      const tr = trackOf(sid);
       const bgThread = bg ? threadsRef.current.find((x) => x.sessionId === sid) : undefined;
       const setLines = (fn: (xs: ChatLine[]) => ChatLine[]) => {
         if (here) setLinesState(fn);
@@ -732,25 +814,25 @@ export function App() {
       if (ev.type === "token") {
         setLines((xs) => {
           let base = xs;
-          if (thoughtStartedAtRef.current) {
-            base = sealThoughtMs(xs, thoughtStartedAtRef.current);
-            thoughtStartedAtRef.current = 0;
+          if (tr.thoughtAt) {
+            base = sealThoughtMs(xs, tr.thoughtAt);
+            tr.thoughtAt = 0;
           }
           const last = base[base.length - 1];
           if (last?.kind === "token") return [...base.slice(0, -1), { kind: "token", text: last.text + ev.text }];
           return [...base, { kind: "token", text: ev.text }];
         });
       } else if (ev.type === "thinking") {
-        if (!thoughtStartedAtRef.current) thoughtStartedAtRef.current = Date.now();
-        const started = thoughtStartedAtRef.current;
+        if (!tr.thoughtAt) tr.thoughtAt = Date.now();
+        const started = tr.thoughtAt;
         setLines((xs) => appendThinkingText(xs, ev.text, started));
       } else if (ev.type === "tool_start") {
         const step = narrateToolLive(ev.name, ev.input);
         setLines((xs) => {
           let next = xs;
-          if (thoughtStartedAtRef.current) {
-            next = sealThoughtMs(xs, thoughtStartedAtRef.current);
-            thoughtStartedAtRef.current = 0;
+          if (tr.thoughtAt) {
+            next = sealThoughtMs(xs, tr.thoughtAt);
+            tr.thoughtAt = 0;
           } else {
             next = [...xs];
           }
@@ -785,7 +867,7 @@ export function App() {
           ...xs,
           {
             kind: "route",
-            text: routeText(turnModeRef.current, ev.task_class, ev.model_id),
+            text: routeText(tr.mode, ev.task_class, ev.model_id),
             model: label,
             slot: ev.slot || undefined,
             escalated: ev.escalated || undefined,
@@ -794,7 +876,7 @@ export function App() {
           },
         ]);
       } else if (ev.type === "mode_suggestion") {
-        const prompt = lastPromptRef.current;
+        const prompt = tr.prompt;
         setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode, reason: ev.reason, prompt }]);
       } else if (ev.type === "plan") {
         if (here) setPlan(ev.markdown);
@@ -804,13 +886,12 @@ export function App() {
         }
       } else if (ev.type === "diff") {
         const fileDiff = { path: ev.path, before: ev.before, after: ev.after, applied: ev.applied === true };
-        const prev = turnFilesRef.current.filter((f) => f.path !== ev.path);
-        turnFilesRef.current = [...prev, fileDiff];
-        // Thread nền: file vẫn vào checkpoint của lượt (turnFilesRef); không bật diff lên thread đang xem.
+        tr.files = [...tr.files.filter((f) => f.path !== ev.path), fileDiff];
+        // Thread nền: file vẫn vào checkpoint của lượt (track của session đó); không bật diff lên thread đang xem.
         if (here) setDiff(fileDiff);
       } else if (ev.type === "permission") {
-        setPermError(false);
-        setPerm({
+        if (here) setPermError(false);
+        setPermFor(sid || sessionIdRef.current, {
           session_id: sid || sessionIdRef.current,
           request_id: ev.request_id,
           name: ev.name,
@@ -836,6 +917,10 @@ export function App() {
           next[i] = { ...last, sandboxed: true };
           return next;
         });
+      } else if (ev.type === "trace" && ev.event === "queued") {
+        // More turns than the limit (Settings → General): this one waits for a free slot.
+        const d = (ev.detail ?? {}) as { position?: number; limit?: number };
+        setLines((xs) => [...xs, { kind: "sys", text: t("queue.waiting", { n: d.position ?? 1, limit: d.limit ?? 1 }) }]);
       } else if (ev.type === "trace" && ev.event === "policy.blocked") {
         // Risk Engine chặn lệnh (tầng 3): biến bước "Running …" đang chạy thành "Blocked <lý do>".
         const step = blockedStep(ev.detail);
@@ -862,12 +947,7 @@ export function App() {
       } else if (ev.type === "terminal") {
         term.current?.write(ev.data.replace(/\n/g, "\r\n"));
       } else if (ev.type === "error") {
-        const files = turnFilesRef.current;
-        turnFilesRef.current = [];
-        const thoughtStart = thoughtStartedAtRef.current;
-        thoughtStartedAtRef.current = 0;
-        const turnStart = turnStartedAtRef.current;
-        turnStartedAtRef.current = 0;
+        const { files, thoughtAt: thoughtStart, startedAt: turnStart, prompt: last } = tr;
         setLines((xs) => {
           const sealed = thoughtStart ? sealThoughtMs(xs, thoughtStart) : xs;
           const withMeta = appendTurnMeta(sealed, turnStart, files);
@@ -877,12 +957,9 @@ export function App() {
           ? `[error] ${ev.error.code}${ev.error.status ? ` (HTTP ${ev.error.status})` : ""}: ${ev.error.detail}`
           : `[error] ${ev.message}`;
         setOutputLog((xs) => [...xs.slice(-199), logLine]);
-        setBusy(false);
-        setRun(null);
-        markRun("");
+        endRunFor(sid);
         if (here) {
           // Giữ prompt: trả lại câu vừa gửi nếu composer đang trống. Không auto-retry.
-          const last = lastPromptRef.current;
           setPrompt((p) => (p.trim() ? p : last));
         } else flagBg();
       } else if (ev.type === "verify") {
@@ -896,22 +973,16 @@ export function App() {
         if (ev.stop === "budget" && here) {
           setBudgetHit(true);
           // The Engine dropped the unanswered prompt: give it back to the composer.
-          const last = lastPromptRef.current;
+          const last = tr.prompt;
           setPrompt((p) => (p.trim() ? p : last));
         }
-        const files = turnFilesRef.current;
-        turnFilesRef.current = [];
-        const thoughtStart = thoughtStartedAtRef.current;
-        thoughtStartedAtRef.current = 0;
-        const turnStart = turnStartedAtRef.current;
-        turnStartedAtRef.current = 0;
+        const { files, thoughtAt: thoughtStart, startedAt: turnStart } = tr;
         setLines((xs) => {
           const sealed = thoughtStart ? sealThoughtMs(xs, thoughtStart) : xs;
           return appendTurnMeta(sealed, turnStart, files);
         });
-        setBusy(false);
-        setRun(null);
-        markRun("");
+        endRunFor(sid);
+        setPermFor(sid, null);
         if (!here) flagBg();
         void refreshCost();
         // Chỉ gửi tên chat, không gửi nội dung trả lời (thông báo hiện cả trên màn hình khoá).
@@ -922,7 +993,7 @@ export function App() {
             .catch(() => undefined);
         }
       } else if (ev.type === "cost") {
-        setRun((m) => addCost(m, ev));
+        updateRunFor(sid, (m) => (m ? addCost(m, ev) : m));
         const tid = here ? activeThreadRef.current : bgThread?.id;
         if (tid) setSpendByThread((all) => ({ ...all, [tid]: addSpend(all[tid] ?? EMPTY_SPEND, ev) }));
         setCost((c) => ({
@@ -1114,8 +1185,8 @@ export function App() {
 
   // Giữ máy thức khi agent đang chạy (nếu bật). Main giữ một blocker duy nhất.
   useEffect(() => {
-    void window.silence?.keepAwake?.(busy && prefs.keepAwake).catch(() => undefined);
-  }, [busy, prefs.keepAwake]);
+    void window.silence?.keepAwake?.(anyBusy && prefs.keepAwake).catch(() => undefined);
+  }, [anyBusy, prefs.keepAwake]);
 
   useEffect(() => {
     if (panelOpen && panelTab === "terminal") fit.current?.fit();
@@ -1162,8 +1233,8 @@ export function App() {
     // Cân bằng (mặc định): tầng 0–1 tự chạy có hiển thị, tầng 2 hỏi, tầng 3 chặn — docs/security/permissions.md.
     // Chọn mode trong Settings là B4. Engine cũ (protocol < 0.1.9) chưa biết `balanced` → lùi về `ask`.
     const create = (permission: string) =>
-      window.silence.rpc("session.create", { workspace: dir, model, mode, permission, ...extra }) as Promise<{ session_id: string }>;
-    let created: { session_id: string };
+      window.silence.rpc("session.create", { workspace: dir, model, mode, permission, ...extra }) as Promise<{ session_id: string; worktree?: WorktreeView | null }>;
+    let created: { session_id: string; worktree?: WorktreeView | null };
     try {
       created = await create(permEff);
     } catch (e) {
@@ -1171,7 +1242,12 @@ export function App() {
       setOutputLog((xs) => [...xs.slice(-199), `[warn] ${t("app.oldEngineBalanced")}`]);
       created = await create("ask");
     }
-    await window.silence.rpc("terminal.start", { session_id: created.session_id, cols: 100, rows: 16 });
+    if (created.worktree) {
+      const w = created.worktree;
+      setWorktrees((all) => ({ ...all, [created.session_id]: w }));
+      setOutputLog((xs) => [...xs.slice(-199), `[info] ${t("wt.log", { branch: w.branch, path: w.path })}`]);
+    }
+    await window.silence.rpc("terminal.start", { session_id: created.session_id, cols: 100, rows: 16 }).catch(() => undefined);
     return created.session_id;
   }
 
@@ -1206,11 +1282,7 @@ export function App() {
     setDiff(null);
     setPrompt("");
     setImages([]);
-    // Lượt ở thread khác vẫn chạy nền: không tắt busy của nó (chỉ dọn trạng thái kẹt khi không có lượt nào).
-    if (!runSessionRef.current) {
-      setBusy(false);
-      setRun(null);
-    }
+    // Lượt ở thread khác vẫn chạy song song: trạng thái chạy theo từng session nên không có gì phải dọn.
     setShowEvals(false);
     setShellView("chat");
     setOpenTabIds((ids) => [id, ...ids.filter((x) => x !== id)]);
@@ -1333,9 +1405,8 @@ export function App() {
     setLines(lines.slice(0, userLine));
     setPlan(null);
     setDiff(null);
-    setPerm(null);
-    turnFilesRef.current = [];
-    turnStartedAtRef.current = 0;
+    setPermFor(sessionId, null);
+    tracksRef.current.delete(sessionId);
     if (retry) {
       // Retry gửi lại cả ảnh của tin gốc (nếu còn trong bộ nhớ).
       void send(target.text, undefined, target.images);
@@ -1622,24 +1693,20 @@ export function App() {
     if (!sessionId || (!text && turnImages.length === 0) || busy) return;
     // `mode` là state nên không kịp cập nhật khi vừa setMode: dùng giá trị ghi đè cho lượt này.
     const turnMode = modeOverride ?? mode;
-    turnModeRef.current = turnMode;
     lastPromptRef.current = text;
     if (retryText === undefined) {
       setPrompt("");
       setImages([]);
     }
-    turnStartedAtRef.current = Date.now();
-    turnFilesRef.current = [];
-    thoughtStartedAtRef.current = Date.now();
+    const startedAt = Date.now();
+    tracksRef.current.set(sessionId, { startedAt, files: [], thoughtAt: startedAt, prompt: text, mode: turnMode });
     const plan = planningStep();
     setLines((xs) => [
       ...xs,
       turnImages.length ? { kind: "user", text, images: turnImages, at: Date.now() } : { kind: "user", text, at: Date.now() },
       { kind: "narrate", verb: plan.verb, detail: plan.detail },
     ]);
-    setBusy(true);
-    setRun(startRun(turnStartedAtRef.current));
-    markRun(sessionId);
+    startRunFor(sessionId, startedAt);
     let sid = sessionId;
     if (turnImages.length) {
       // Lưu ảnh vào IndexedDB để mở lại thread vẫn thấy; dòng user được nhận ra qua mảng ảnh.
@@ -1659,7 +1726,7 @@ export function App() {
         // User có thể đã đổi tab trong lúc chờ: gắn session mới vào đúng thread đã gửi, không kéo khung chat theo.
         if (sessionIdRef.current === old) switchSession(sid);
         else setThreads((xs) => xs.map((x) => (x.sessionId === old ? { ...x, sessionId: sid } : x)));
-        markRun(sid);
+        rekeyRun(old, sid);
         await window.silence.rpc("session.set_model", { session_id: sid, model, source });
       }
       // Mode/model chỉ được gửi lúc session.create, nên đồng bộ lại trước mỗi lượt.
@@ -1702,14 +1769,10 @@ export function App() {
     } catch (e) {
       // RPC bị từ chối (vd. Engine chưa sẵn sàng): tắt busy, trả prompt, hiện thẻ lỗi chung.
       const message = e instanceof Error ? e.message : String(e);
-      turnStartedAtRef.current = 0;
-      thoughtStartedAtRef.current = 0;
       const stillHere = sid === sessionIdRef.current;
       linesFor(sid, (xs) => [...xs, { kind: "error", message }]);
       setOutputLog((xs) => [...xs.slice(-199), `[error] ${message}`]);
-      setBusy(false);
-      setRun(null);
-      markRun("");
+      endRunFor(sid);
       // Chỉ trả prompt/ảnh về composer khi user còn ở thread đã gửi (không đổ sang chat khác).
       if (stillHere) {
         setPrompt((p) => (p.trim() ? p : text));
@@ -1720,11 +1783,11 @@ export function App() {
 
   /** Yêu cầu Engine dừng lượt: cờ abort được kiểm ở đầu mỗi vòng; `done` (stop=abort) sẽ tắt busy. */
   async function stop() {
-    const target = runSessionRef.current || sessionId;
+    const target = sessionId;
     if (!target || !busy) return;
-    setRun(markStopping);
+    updateRunFor(target, (m) => (m ? markStopping(m) : m));
     // Engine từ chối quyền đang chờ khi abort; gỡ card ngay để không còn nút duyệt "mồ côi".
-    setPerm(null);
+    setPermFor(target, null);
     try {
       await window.silence.rpc("session.abort", { session_id: target });
     } catch (e) {
@@ -1745,11 +1808,8 @@ export function App() {
         path: diff.path,
         after: diff.after,
       });
-      const prev = turnFilesRef.current.filter((f) => f.path !== diff.path);
-      turnFilesRef.current = [
-        ...prev,
-        { path: diff.path, before: diff.before, after: diff.after },
-      ];
+      const tr = trackOf(sessionId);
+      tr.files = [...tr.files.filter((f) => f.path !== diff.path), { path: diff.path, before: diff.before, after: diff.after }];
       setDiff(null);
       if (file === diff.path) setFileText(diff.after);
     } catch {
@@ -1766,7 +1826,7 @@ export function App() {
       // Balanced: file đã được ghi. "Hoàn tác" = ghi lại nội dung trước khi sửa (cùng đường với Restore).
       try {
         await window.silence.rpc("diff.apply", { session_id: sessionId, path: diff.path, after: diff.before });
-        turnFilesRef.current = turnFilesRef.current.filter((f) => f.path !== diff.path);
+        trackOf(sessionId).files = trackOf(sessionId).files.filter((f) => f.path !== diff.path);
         setDiff(null);
         if (file === diff.path) setFileText(diff.before);
       } catch {
@@ -1830,15 +1890,9 @@ export function App() {
     }
     setDiff(null);
     setPlan(null);
-    setPerm((p) => (p?.session_id === sessionId ? null : p));
-    // Lượt đang chạy ở thread khác thì để yên.
-    if (!runSessionRef.current || runSessionRef.current === sessionId) {
-      turnFilesRef.current = [];
-      turnStartedAtRef.current = 0;
-      setBusy(false);
-      setRun(null);
-      markRun("");
-    }
+    setPermFor(sessionId, null);
+    // Chỉ lượt của thread này; lượt ở thread khác chạy song song thì để yên.
+    endRunFor(sessionId);
   }
 
   function onChip(chip: string) {
@@ -1865,6 +1919,52 @@ export function App() {
   }
 
   const samePath = (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase();
+
+  /** Worktree switch of the open chat: recreate its (still empty) session with the new choice. */
+  async function changeWorktreeMode(next: WorktreeMode) {
+    if (!workspace || !activeThreadId || lines.length > 0 || busy) return;
+    setWtModes((all) => ({ ...all, [activeThreadId]: next }));
+    const old = sessionId;
+    try {
+      const sid = await createLiveSession(workspace, { worktree: next });
+      setThreads((xs) => xs.map((x) => (x.id === activeThreadId ? { ...x, sessionId: sid } : x)));
+      switchSession(sid);
+      if (old) void window.silence.rpc("session.delete", { session_ids: [old] }).catch(() => undefined);
+    } catch (e) {
+      setOutputLog((xs) => [...xs.slice(-199), `[error] ${e instanceof Error ? e.message : String(e)}`]);
+    }
+  }
+
+  async function mergeWorktreeHere() {
+    const w = worktrees[sessionId];
+    if (!w || busy) return;
+    setWtBusy(true);
+    try {
+      const r = (await window.silence.rpc("worktree.merge", { session_id: sessionId, title: threadTitleRef.current })) as MergeOutcome;
+      setWtOutcome(r);
+      if (r.ok) setWtStatus((st) => (st && st.sid === sessionId ? { ...st, files: [], commits: 0 } : st));
+    } catch (e) {
+      setWtOutcome({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setWtBusy(false);
+    }
+  }
+
+  async function discardWorktreeHere() {
+    const sid = sessionId;
+    if (!worktrees[sid] || busy) return;
+    setWtBusy(true);
+    try {
+      await window.silence.rpc("worktree.discard", { session_id: sid });
+      setWorktrees(({ [sid]: _gone, ...rest }) => rest);
+      setWtStatus(null);
+      setLines((xs) => [...xs, { kind: "sys", text: t("wt.discarded") }]);
+    } catch (e) {
+      setWtOutcome({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setWtBusy(false);
+    }
+  }
 
   /** Resume a Claude desktop / terminal session as a core session in a new chat (roadmap 1.10). */
   async function continueExternal(item: ExternalItem, transcript: ExternalLine[]) {
@@ -1917,7 +2017,7 @@ export function App() {
         allow: a === "allow_once" || a === "allow_always",
         scope: "once",
       });
-      setPerm(null);
+      setPermFor(perm.session_id, null);
     } catch {
       setPermError(true);
     } finally {
@@ -1939,7 +2039,7 @@ export function App() {
         scope: s,
         remember: s === "workspace",
       });
-      setPerm(null);
+      setPermFor(perm.session_id, null);
     } catch {
       // Keep the banner mounted so the user can retry.
       setPermError(true);
@@ -1953,29 +2053,22 @@ export function App() {
     // Engine lưu plan vào .silence/plans/, chuyển sang Agent và tự chạy lượt implement.
     setPlan(null);
     setMode("agent");
-    turnStartedAtRef.current = Date.now();
-    turnFilesRef.current = [];
-    thoughtStartedAtRef.current = Date.now();
+    const startedAt = Date.now();
+    tracksRef.current.set(sessionId, { startedAt, files: [], thoughtAt: startedAt, prompt: t("app.approvePlanMsg"), mode: "agent" });
     const step = planningStep();
     setLines((xs) => [
       ...xs,
       { kind: "user", text: t("app.approvePlanMsg"), at: Date.now() },
       { kind: "narrate", verb: step.verb, detail: step.detail },
     ]);
-    setBusy(true);
-    setRun(startRun(turnStartedAtRef.current));
-    markRun(sessionId);
+    startRunFor(sessionId, startedAt);
     const planSid = sessionId;
     try {
       await window.silence.rpc("session.approve_plan", { session_id: planSid });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      turnStartedAtRef.current = 0;
-      thoughtStartedAtRef.current = 0;
       linesFor(planSid, (xs) => [...xs, { kind: "error", message }]);
-      setBusy(false);
-      setRun(null);
-      markRun("");
+      endRunFor(planSid);
     }
   }
 
@@ -2038,21 +2131,37 @@ export function App() {
   const locked = lockedModels(models, modelPrefs);
   const pickerModels = locked.length ? [...allModels, ...locked] : allModels;
   /** Lượt đang chạy thuộc thread đang mở? Thread khác chỉ thấy composer khoá, không thấy pulse/Stop. */
-  const busyHere = busy && (!runSessionId || runSessionId === sessionId);
-  const busyElsewhere = busy && !busyHere;
-  const permHere = perm && perm.session_id === sessionId ? perm : null;
-  const runThreadId = runSessionId ? threads.find((x) => x.sessionId === runSessionId)?.id : undefined;
+  const busyHere = busy;
+  /** Other chats may run at the same time (roadmap 1.11); the core queues beyond its limit. */
+  const busyElsewhere = false;
+  const permHere = perm;
+  /** History dots: every running chat, waiting when its permission card is up. */
+  const runStates: Record<string, "running" | "waiting"> = {};
+  for (const x of threads) {
+    const m = runs[x.sessionId];
+    if (m) runStates[x.id] = perms[x.sessionId] && !m.stopping ? "waiting" : "running";
+  }
 
   const composerEl = (
     <Composer
       permMenu={
-        <PermModeMenu
-          mode={permEff}
-          onMode={changePermMode}
-          coreOn={coreOn}
-          bypassEnabled={bypassEnabled}
-          onOpenSettings={() => openSettings("permissions")}
-        />
+        <>
+          <PermModeMenu
+            mode={permEff}
+            onMode={changePermMode}
+            coreOn={coreOn}
+            bypassEnabled={bypassEnabled}
+            onOpenSettings={() => openSettings("permissions")}
+          />
+          {coreOn && workspace ? (
+            <WorktreeMenu
+              mode={wtModes[activeThreadId] ?? "auto"}
+              onMode={(m) => void changeWorktreeMode(m)}
+              locked={lines.length > 0 || busy}
+              active={Boolean(worktrees[sessionId])}
+            />
+          ) : null}
+        </>
       }
       prompt={prompt}
       onPrompt={setPrompt}
@@ -2139,6 +2248,7 @@ export function App() {
   const chatMain = (
     <div className={showReview ? "chat-split" : "chat-col-fill"}>
       <div className="chat-col">
+        {worktrees[sessionId] ? <WorktreeBanner w={worktrees[sessionId]!} /> : null}
         <ChatPane
           transcript={prefs.transcript}
           lines={lines}
@@ -2205,6 +2315,18 @@ export function App() {
           onAttachEdited={attachEdited}
         />
         {activeThreadId ? budgetBanner : null}
+        {worktrees[sessionId] && wtStatus?.sid === sessionId && (wtStatus.files.length > 0 || wtOutcome) && wtKept[sessionId] !== wtStatus.files.map((f) => f.path).join("|") ? (
+          <WorktreeCard
+            w={worktrees[sessionId]!}
+            files={wtStatus.files}
+            commits={wtStatus.commits}
+            busy={wtBusy || busy}
+            outcome={wtOutcome}
+            onMerge={() => void mergeWorktreeHere()}
+            onKeep={() => setWtKept((all) => ({ ...all, [sessionId]: wtStatus.files.map((f) => f.path).join("|") }))}
+            onDiscard={() => void discardWorktreeHere()}
+          />
+        ) : null}
         {activeThreadId ? composerEl : null}
       </div>
       {showReview ? (
@@ -2405,8 +2527,7 @@ export function App() {
             workspace={workspace}
             threads={threads}
             activeId={activeThreadId}
-            runState={busy ? (perm && !run?.stopping ? "waiting" : "running") : undefined}
-            runId={runThreadId}
+            runStates={runStates}
             onNewChat={() => void newChat()}
             onSelect={selectThread}
             onDelete={deleteThread}

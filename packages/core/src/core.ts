@@ -50,6 +50,8 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
     ...(opts.sessions?.snapshot ? { snapshot: opts.sessions.snapshot } : {}),
     ...(opts.sessions?.newId ? { newId: opts.sessions.newId } : {}),
     ...(opts.sessions?.oneShot ? { oneShot: opts.sessions.oneShot } : {}),
+    ...(opts.sessions?.worktreeBase ? { worktreeBase: opts.sessions.worktreeBase } : {}),
+    ...(opts.sessions?.maxConcurrent ? { maxConcurrent: opts.sessions.maxConcurrent } : {}),
   });
   server.register("core.ping", () => "pong");
   server.register("core.info", () => ({
@@ -78,6 +80,10 @@ export function createCoreWithSessions(opts: CoreOptions): Core {
   server.register("permissions.rules", (p) => sessions.listRules(p));
   server.register("lesson.propose", (p) => sessions.lessonPropose(p));
   server.register("metrics.summary", (p) => sessions.metricsSummary(p));
+  server.register("worktree.status", (p) => sessions.worktreeStatus(p));
+  server.register("worktree.merge", (p) => sessions.worktreeMerge(p));
+  server.register("worktree.discard", (p) => sessions.worktreeDiscard(p));
+  server.register("core.set_limit", (p) => sessions.setLimit(p));
   server.register("session.external", (p) => sessions.externalSessions(p));
   server.register("session.external_messages", (p) => sessions.externalMessages(p));
   server.register("lesson.apply", (p) => sessions.lessonApply(p));

@@ -19,7 +19,7 @@ const NOOP_ON_CORE = new Set([
   "session.approve_plan",
 ]);
 
-const FORWARD = new Set(["session.prompt", "session.abort", "session.permission", "session.set_mode", "session.set_permission"]);
+const FORWARD = new Set(["session.prompt", "session.abort", "session.permission", "session.set_mode", "session.set_permission", "worktree.status", "worktree.merge", "worktree.discard"]);
 
 /**
  * Studio model id → Claude Code model. Catalog ids (`claude-opus`, `claude-opus@cli`, `claude-opus@api`)
@@ -68,6 +68,8 @@ function toEngine(method: string, params: unknown): Route {
 /** Where one renderer RPC goes. `coreSessions` = ids the core created in this run. */
 export function routeRpc(method: string, params: unknown, coreOn: boolean, coreSessions: ReadonlySet<string>): Route {
   if (method === "core.status") return { to: "local", result: { running: coreOn } };
+  // Turns at once (roadmap 1.11, Settings); the Rust Engine runs one turn per session anyway.
+  if (method === "core.set_limit") return coreOn ? { to: "core", method, params: record(params) } : { to: "local", result: {} };
   // Personal layer (~/.silence) and permission rules live in the core only: without it, say so.
   if (method === "profile.status" || method === "permissions.rules" || method === "metrics.summary" || method === "session.external" || method === "session.external_messages") {
     return coreOn ? { to: "core", method, params: record(params) } : { to: "local", result: { available: false } };
@@ -89,6 +91,8 @@ export function routeRpc(method: string, params: unknown, coreOn: boolean, coreS
         ...(model ? { model } : {}),
         ...(p.effort ? { effort: p.effort } : {}),
         ...(p.permission ? { permission: p.permission } : {}),
+        // Worktree for this chat: auto (default), on, off (roadmap 1.11).
+        ...(p.worktree === "on" || p.worktree === "off" || p.worktree === "auto" ? { worktree: p.worktree } : {}),
         // Continue a Claude desktop / terminal session in 5ilence (roadmap 1.10).
         ...(typeof p.resume_backend_session === "string" ? { resume_backend_session: p.resume_backend_session } : {}),
       },

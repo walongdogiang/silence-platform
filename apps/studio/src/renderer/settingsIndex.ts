@@ -68,6 +68,7 @@ export type SettingEntry = {
 export const SETTINGS_INDEX: SettingEntry[] = [
   { id: "lang", section: "general", label: "appear.language", desc: "set.lang.desc", keywords: "language ngôn ngữ tiếng việt english" },
   { id: "default-source", section: "general", label: "src.default", desc: "set.defaultSource.desc", keywords: "source nguồn provider" },
+  { id: "max-concurrent", section: "general", label: "gen.concurrent", desc: "gen.concurrent.desc", keywords: "parallel concurrent queue song song cùng lúc hàng đợi worktree" },
   { id: "restore-tabs", section: "general", label: "gen.restore", desc: "gen.restore.desc", keywords: "startup restore tabs khởi động mở lại tab" },
   { id: "theme", section: "appearance", label: "appear.theme", desc: "appear.theme.desc", keywords: "dark light tối sáng" },
   { id: "palette", section: "appearance", label: "appear.palette", desc: "appear.palette.desc", keywords: "color màu palette" },

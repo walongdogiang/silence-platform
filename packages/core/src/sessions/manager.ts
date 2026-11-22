@@ -8,6 +8,7 @@ import path from "node:path";
 import { RpcFailure, ErrorCodes, type CallContext } from "../api/jsonrpc.js";
 import type { Backend, BackendEvent, Decision, Effort, Mode, SessionHandle, ToolCall } from "../backends/types.js";
 import { changedSince, takeSnapshot } from "../git/snapshot.js";
+import { createWorktree, discardWorktree, isDirty, mergeWorktree, repoRoot, worktreeChanges, type WorktreeInfo, type WorktreeReason } from "../worktrees/worktrees.js";
 import { toToolCall } from "../backends/claude/toolMap.js";
 import { coreSessionMetrics, externalSessionMetrics, summarize, transcriptLines, type MetricsSummary, type SessionMetrics, type TranscriptMessage } from "../metrics/metrics.js";
 import { applyLesson, LESSON_SYSTEM, lessonPrompt, lessonTargets, parseProposal, type LessonContext, type LessonProposal } from "../lessons/lessons.js";
@@ -64,6 +65,10 @@ export interface SessionManagerOptions {
   approvals: RepoApprovals;
   /** Approved commands of a repo's own `.silence/verify.yaml` (roadmap 1.8). */
   verifyApprovals: VerifyApprovals;
+  /** Where worktrees go (tests); default `worktreeBase()`. */
+  worktreeBase?: string;
+  /** Turns running at once across sessions (roadmap 1.11, default 2); more are queued. */
+  maxConcurrent?: number;
   /** Messages of an outside session (Claude: SDK `getSessionMessages`). */
   externalMessages?: (sessionId: string, dir?: string) => Promise<TranscriptMessage[]>;
   /** One Claude call without tools (lesson proposals). Injected in tests; default `claudeOneShot`. */
@@ -107,6 +112,12 @@ interface Session {
   project: string;
   /** Turn whose git snapshot exists (an edit can be undone). */
   snapshotTurn: number;
+  /** Main checkout of the session's repo (null outside git). */
+  root: string | null;
+  /** Set when the chat runs in its own worktree (roadmap 1.11). */
+  worktree?: WorktreeInfo;
+  /** The turn waits for a free slot (`maxConcurrent`). */
+  queued: boolean;
   /** Fix rounds already sent for this turn's failed checks (0..MAX_FIX_ROUNDS). */
   verifyRound: number;
   /** Paths written or edited this turn (fallback for "changed files" outside git). */
@@ -139,14 +150,19 @@ export class SessionManager {
   private readonly inflight = new Set<Promise<unknown>>();
   /** Metrics of outside sessions by id + lastModified (transcripts are large; re-read only when changed). */
   private readonly externalCache = new Map<string, { key: number; m: SessionMetrics }>();
+  /** Turns waiting for a free slot, oldest first (roadmap 1.11). */
+  private readonly queue: Array<{ s: Session; start: () => Promise<void> }> = [];
+  private maxConcurrent: number;
   /** Lesson proposals waiting for review (roadmap 1.9), by id. */
   private readonly lessons = new Map<string, { lesson: string; ctx: LessonContext; proposal: LessonProposal; at: number }>();
 
-  constructor(private readonly o: SessionManagerOptions) {}
+  constructor(private readonly o: SessionManagerOptions) {
+    this.maxConcurrent = clampLimit(o.maxConcurrent ?? 2);
+  }
 
   // ---- RPC ---------------------------------------------------------------------------------
 
-  async create(params: unknown, ctx?: CallContext): Promise<{ session_id: string; personal: PersonalSummary }> {
+  async create(params: unknown, ctx?: CallContext): Promise<{ session_id: string; personal: PersonalSummary; worktree: PublicWorktree | null }> {
     const p = obj(params);
     const cwd = str(p.workspace);
     if (!cwd) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
@@ -171,9 +187,27 @@ export class SessionManager {
       projectConfig = false; // nobody to ask: run without the repo's hooks, MCP servers and CLAUDE.md
     }
 
+    // Parallel chats (roadmap 1.11): split off into a worktree when another chat already works in this
+    // checkout and is running or left uncommitted changes, or when the chat asks for it.
+    const want = p.worktree === "on" || p.worktree === "off" ? p.worktree : "auto";
+    const root = await repoRoot(cwd);
+    let worktree: WorktreeInfo | undefined;
+    if (root && want !== "off") {
+      let reason: WorktreeReason | null = want === "on" ? "forced" : null;
+      if (!reason) {
+        const sharing = [...this.sessions.values()].filter((x) => x.root && !x.worktree && samePath(x.root, root));
+        if (sharing.length) reason = sharing.some((x) => x.running) ? "other_running" : (await isDirty(root)) ? "dirty" : null;
+      }
+      if (reason) worktree = await createWorktree(root, personal.projectName ?? path.basename(root), reason, this.o.worktreeBase);
+    }
+    const workCwd = worktree && root ? path.join(worktree.path, path.relative(root, path.resolve(cwd))) : path.resolve(cwd);
+
     const s = {
       id,
-      cwd: path.resolve(cwd),
+      cwd: workCwd,
+      root,
+      ...(worktree ? { worktree } : {}),
+      queued: false,
       backend: backendId,
       mode,
       ...(model ? { model } : {}),
@@ -221,7 +255,8 @@ export class SessionManager {
       throw e;
     }
     this.track(this.o.audit.append({ session: id, kind: "personal", detail: { ...personalSummary(personal) } }));
-    return { session_id: id, personal: personalSummary(personal) };
+    if (worktree) this.track(this.o.audit.append({ session: id, kind: "worktree.create", path: worktree.path, detail: { branch: worktree.branch, base: worktree.base, reason: worktree.reason } }));
+    return { session_id: id, personal: personalSummary(personal), worktree: worktree ? publicWorktree(worktree) : null };
   }
 
   /** What `~/.silence` gives a session in `workspace` (profile, project profile, plugin, warnings). */
@@ -230,7 +265,7 @@ export class SessionManager {
     return personalSummary(await loadPersonal(this.o.home, str(p.workspace)));
   }
 
-  async prompt(params: unknown, ctx?: CallContext): Promise<{ ok: true; turn: number }> {
+  async prompt(params: unknown, ctx?: CallContext): Promise<{ ok: true; turn: number; queued?: boolean }> {
     const p = obj(params);
     const s = this.get(p.session_id);
     if (ctx) s.clients.add(ctx);
@@ -248,8 +283,48 @@ export class SessionManager {
       }
     }
     s.rules = await loadRules(this.o.home, s.project, s.cwd);
-    s.turn += 1;
+    // Count before marking this session as running, or it would take its own slot.
+    const full = this.activeCount() >= this.maxConcurrent;
     s.running = true;
+    if (full) {
+      // No free slot: wait in line; the turn starts when another one finishes.
+      s.queued = true;
+      this.queue.push({ s, start: () => this.startTurn(s, text, context, images) });
+      this.emit(s, { type: "trace", event: "queued", detail: { position: this.queue.length, limit: this.maxConcurrent } });
+      return { ok: true, turn: s.turn + 1, queued: true };
+    }
+    await this.startTurn(s, text, context, images);
+    return { ok: true, turn: s.turn };
+  }
+
+  /** Turns running now (queued ones excluded). */
+  private activeCount(): number {
+    return [...this.sessions.values()].filter((x) => x.running && !x.queued).length;
+  }
+
+  /** Start queued turns while there are free slots. */
+  private pump(): void {
+    while (this.queue.length && this.activeCount() < this.maxConcurrent) {
+      const next = this.queue.shift()!;
+      next.s.queued = false;
+      this.emit(next.s, { type: "trace", event: "dequeued", detail: {} });
+      void next.start().catch((e) => {
+        this.emit(next.s, { type: "error", message: e instanceof Error ? e.message : String(e) });
+        this.emit(next.s, this.finishTurn(next.s, "error"));
+      });
+    }
+  }
+
+  /** `core.set_limit {max}`: turns at once (1..4, from Settings). */
+  setLimit(params: unknown): { max: number } {
+    this.maxConcurrent = clampLimit(Number(obj(params).max));
+    this.pump();
+    return { max: this.maxConcurrent };
+  }
+
+  private async startTurn(s: Session, text: string, context: string | undefined, images: Array<{ mediaType: string; data: string }>): Promise<void> {
+    s.queued = false;
+    s.turn += 1;
     s.verifyRound = 0;
     s.editedPaths.clear();
     if (s.turn === 1 && s.personalWarnings.length) this.emit(s, { type: "trace", event: "profile", detail: { warnings: s.personalWarnings } });
@@ -268,13 +343,20 @@ export class SessionManager {
       await s.handle.send({ text: context ? `${text}\n\n${context}` : text, ...(images.length ? { images } : {}) });
     } catch (e) {
       s.running = false;
+      this.pump();
       throw e;
     }
-    return { ok: true, turn: s.turn };
   }
 
   async abort(params: unknown): Promise<{ ok: true }> {
     const s = this.get(obj(params).session_id);
+    if (s.queued) {
+      const i = this.queue.findIndex((q) => q.s === s);
+      if (i >= 0) this.queue.splice(i, 1);
+      s.queued = false;
+      this.emit(s, this.finishTurn(s, "interrupted"));
+      return { ok: true };
+    }
     this.denyPending(s);
     if (s.running) await s.handle.interrupt();
     return { ok: true };
@@ -397,6 +479,36 @@ export class SessionManager {
     this.lessons.delete(id);
     await this.o.audit.append({ session: "", kind: "lesson.apply", detail: { written: res.written, lessonFile: res.lessonFile, commit: res.commit, pushed: res.pushed, note: res.note } });
     return res;
+  }
+
+  /** The chat's worktree and what it changed so far (merge card). */
+  async worktreeStatus(params: unknown): Promise<{ worktree: PublicWorktree | null; files: Awaited<ReturnType<typeof worktreeChanges>>["files"]; commits: number }> {
+    const s = this.get(obj(params).session_id);
+    if (!s.worktree) return { worktree: null, files: [], commits: 0 };
+    const ch = await worktreeChanges(s.worktree);
+    return { worktree: publicWorktree(s.worktree), ...ch };
+  }
+
+  /** Merge the chat's worktree into its base branch (conflict → aborted, files listed). */
+  async worktreeMerge(params: unknown): Promise<Awaited<ReturnType<typeof mergeWorktree>>> {
+    const p = obj(params);
+    const s = this.get(p.session_id);
+    if (!s.worktree) throw new RpcFailure(ErrorCodes.InvalidRequest, "this chat has no worktree");
+    if (s.running) throw new RpcFailure(ErrorCodes.InvalidRequest, "wait for the turn to finish before merging");
+    const res = await mergeWorktree(s.worktree, str(p.title) ?? "chat changes");
+    await this.o.audit.append({ session: s.id, kind: "worktree.merge", path: s.worktree.path, detail: { branch: s.worktree.branch, base: s.worktree.base, ...res } });
+    return res;
+  }
+
+  /** Delete the chat's worktree and branch, and end the session (the next message starts a new one). */
+  async worktreeDiscard(params: unknown): Promise<{ ok: true }> {
+    const s = this.get(obj(params).session_id);
+    if (!s.worktree) throw new RpcFailure(ErrorCodes.InvalidRequest, "this chat has no worktree");
+    const w = s.worktree;
+    await this.closeSession(s, "worktree discarded");
+    await discardWorktree(w);
+    await this.o.audit.append({ session: s.id, kind: "worktree.discard", path: w.path, detail: { branch: w.branch } });
+    return { ok: true };
   }
 
   /** Answer a `permission` event. */
@@ -654,6 +766,7 @@ export class SessionManager {
     s.running = false;
     s.verifyRound = 0;
     this.denyPending(s);
+    queueMicrotask(() => this.pump());
     return { type: "done", stop };
   }
 
@@ -858,6 +971,8 @@ export class SessionManager {
   }
 
   private async closeSession(s: Session, reason: string): Promise<void> {
+    const qi = this.queue.findIndex((q) => q.s === s);
+    if (qi >= 0) this.queue.splice(qi, 1);
     this.denyPending(s);
     this.sessions.delete(s.id);
     try {
@@ -877,6 +992,22 @@ function personalSummary(p: Personal): PersonalSummary {
 }
 
 type DecisionBy = "policy" | "user" | "remembered" | "unattended";
+
+/** What clients see of a worktree (no internal sha / root needed for display). */
+export type PublicWorktree = { path: string; branch: string; base: string; reason: WorktreeReason };
+
+function publicWorktree(w: WorktreeInfo): PublicWorktree {
+  return { path: w.path, branch: w.branch, base: w.base, reason: w.reason };
+}
+
+function clampLimit(n: number): number {
+  return Number.isFinite(n) ? Math.min(4, Math.max(1, Math.floor(n))) : 2;
+}
+
+function samePath(a: string, b: string): boolean {
+  const n = (x: string) => path.resolve(x).toLowerCase();
+  return n(a) === n(b);
+}
 
 /** `session.permission` params -> answer. Legacy `{allow, scope|remember}` still works. */
 function toAnswer(p: Record<string, unknown>): PermAnswer {

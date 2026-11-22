@@ -1466,6 +1466,20 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 /* Lý do từ Risk Engine (docs/security/permissions.md): tiêu đề đậm + giải thích. */
 .perm-reasons { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: var(--font-size-sm); color: var(--text-secondary); }
 .perm-reasons strong { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+/* Parallel chats (roadmap 1.11): why a chat runs in a worktree, and the merge card. */
+.wt-banner { display: flex; align-items: flex-start; gap: 6px; margin: 6px 12px 0; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-1); font-size: var(--font-size-sm); color: var(--text-secondary); }
+.wt-banner svg { flex: none; margin-top: 2px; color: var(--accent); }
+.wt-banner code { word-break: break-all; }
+.wt-card { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-md); background: var(--surface-1); display: flex; flex-direction: column; gap: 6px; font-size: var(--font-size-sm); }
+.wt-card header { display: flex; align-items: center; gap: 6px; }
+.wt-card header strong { margin-right: auto; color: var(--text-primary); }
+.wt-files { margin: 0; padding: 0; list-style: none; max-height: 140px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.wt-files li { display: flex; align-items: center; gap: 8px; }
+.wt-files code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-merged { margin: 0; display: flex; align-items: center; gap: 4px; color: var(--success); }
+.wt-actions { flex-wrap: wrap; }
+.mode-trigger.wt-trigger.wt-on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.mode-trigger.perm-trigger:disabled { opacity: 0.7; cursor: default; }
 /* Metrics page (roadmap 1.10): stat tiles + plain tables, text tokens only (no series colours). */
 .metrics-page, .external-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .metrics-head, .external-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border-subtle); }

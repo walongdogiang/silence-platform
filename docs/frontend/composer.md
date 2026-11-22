@@ -32,6 +32,8 @@ Thứ tự menu: **Plan → Agent → Debug → MultiTask → Review**. Icon: Li
 
 **Chế độ quyền** (`components/PermModeMenu.tsx`), ngay sau menu mode, trước model: **Ask · Manual · Accept edits · Auto (mặc định) · Bypass permissions**, mô tả ở tooltip. Ask và Bypass mờ khi lõi TS chưa chạy (`core.status`); Bypass còn cần công tắc trong Settings → Quyền (bấm mục mờ mở Settings). Đang ở Bypass thì nút trigger **đỏ** thường trực. Chọn ở đây hay ở Settings là cùng một giá trị (`silence.permission.mode`), áp ngay cho phiên đang mở (`session.set_permission`) và gửi lại trước mỗi lượt. Chi tiết: `docs/security/permissions.md`.
 
+**Worktree** (`WorktreeMenu` trong `components/Worktree.tsx`, chỉ khi lõi TS chạy và có workspace), sau menu chế độ quyền: **Worktree: tự động** (mặc định; tách khi chat khác đang chạy hoặc để lại thay đổi chưa commit) · **luôn tách** · **không tách**. Chọn trước tin nhắn đầu tiên (đổi thì Studio tạo lại session còn trống); sau đó nút khoá (🔒) và ghi **Trong worktree** nếu chat đang chạy trong worktree.
+
 Nút trigger: pill 22px, `border-radius: 999px`, nền `--accent`, chữ/icon `--on-accent` (đen trên copper). Auto **sát phải** mode, **không viền**.
 
 Mỗi mode gửi đúng `mode` cho Engine (hồ sơ ở `profile()` trong `crates/runtime/src/agent/modes.rs`). Hover mục menu hiện mô tả.

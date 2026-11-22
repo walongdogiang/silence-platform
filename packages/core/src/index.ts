@@ -12,7 +12,7 @@ export { ClaudeBackend, CLAUDE_CAPABILITIES, type ClaudeBackendOptions, type Que
 export { claudeEnv, AUTH_VARS } from "./backends/claude/env.js";
 export { toToolCall, CLAUDE_TOOLS } from "./backends/claude/toolMap.js";
 export { createCoreWithSessions, type Core } from "./core.js";
-export { SessionManager, REPO_CONFIG_REVIEW, type PersonalSummary, type PermAnswer, applyEdit, parseImages, type ClientEvent, type ExternalSession, type SessionManagerOptions } from "./sessions/manager.js";
+export { SessionManager, REPO_CONFIG_REVIEW, type PersonalSummary, type PermAnswer, type PublicWorktree, applyEdit, parseImages, type ClientEvent, type ExternalSession, type SessionManagerOptions } from "./sessions/manager.js";
 export { loadPersonal, silenceHome, coreDataDir, projectName, looksLikeSecret, PROFILE_MAX_LINES, type Personal, type ProfileFile, type PluginInfo } from "./sessions/personal.js";
 export { scanRepoConfig, hashItems, RepoApprovals, type RepoItem, type RepoItemKind, type RepoReview } from "./repoConfig/review.js";
 export { normalizeMode, levelOf, modeAction, askModeAllows, impactOf, PERM_MODES, DEFAULT_MODE, BYPASS_COUNTDOWN_SEC, ASK_MODE_REASON, type PermMode, type Level, type ModeAction, type Impact } from "./permissions/modes.js";
@@ -22,3 +22,4 @@ export { changedSince } from "./git/snapshot.js";
 export { lessonTargets, lessonPrompt, parseProposal, applyLesson, targetKind, LESSON_SYSTEM, type LessonTarget, type LessonEdit, type LessonProposal, type LessonContext, type ApplyResult } from "./lessons/lessons.js";
 export { claudeOneShot, type OneShotResult, type OneShotOptions, type OneShotQueryFn } from "./backends/claude/oneShot.js";
 export { coreSessionMetrics, externalSessionMetrics, summarize, transcriptLines, emptyTotals, localDay, type Totals, type SessionMetrics, type MetricsSummary, type TranscriptMessage } from "./metrics/metrics.js";
+export { createWorktree, worktreeChanges, mergeWorktree, discardWorktree, repoRoot, isDirty, worktreeBase, worktreeName, type WorktreeInfo, type WorktreeReason, type FileChange, type MergeResult } from "./worktrees/worktrees.js";
