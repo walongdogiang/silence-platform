@@ -67,13 +67,29 @@ describe("worktrees", () => {
     expect(sh(root, "log", "-2", "--format=%s").split("\n")).toEqual(["Merge silence/n2 (5ilence chat)", "5ilence: Add a line"]);
   });
 
+  it("after a merge the card counts only what changed since, and a second merge brings that in", async () => {
+    const root = repo();
+    const w = await createWorktree(root, "shop", "forced", tmp("wt-base-"), "n5");
+    writeFileSync(path.join(w.path, "a.txt"), "ONE\n");
+    expect((await mergeWorktree(w, "first")).ok).toBe(true);
+    expect(await worktreeChanges(w)).toEqual({ files: [], commits: 0 });
+    writeFileSync(path.join(w.path, "a.txt"), "ONE\ntwo\n");
+    // Only the new line, not the already-merged rewrite of line 1 (+2 −1 before the fix).
+    expect((await worktreeChanges(w)).files).toEqual([{ path: "a.txt", added: 1, removed: 0 }]);
+    expect((await mergeWorktree(w, "second")).ok).toBe(true);
+    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("ONE\ntwo\n");
+    expect((await worktreeChanges(w)).files).toEqual([]);
+  }, 30_000); // ~20 git calls; slow on Windows
+
   it("a conflict aborts the merge, lists the files and leaves the main checkout as it was", async () => {
     const root = repo();
     const w = await createWorktree(root, "shop", "forced", tmp("wt-base-"), "n3");
+    const before = w.baseSha;
     writeFileSync(path.join(w.path, "a.txt"), "chat version\n");
     writeFileSync(path.join(root, "a.txt"), "main version\n");
     sh(root, "commit", "-q", "-am", "main edit");
     const res = await mergeWorktree(w, "x");
+    expect(w.baseSha).toBe(before); // nothing went in: the card still shows the whole change
     expect(res).toMatchObject({ ok: false, conflicts: ["a.txt"] });
     expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("main version\n");
     expect(sh(root, "status", "--porcelain")).toBe("");

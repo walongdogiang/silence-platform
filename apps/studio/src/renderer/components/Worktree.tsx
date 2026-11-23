@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, GitBranch, GitMerge, Lock } from "lucide-react";
+import { Check, ChevronDown, Copy, GitBranch, GitMerge, Lock } from "lucide-react";
 import { useT, type T } from "../i18n";
 import { DiffStat } from "./DiffCard";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -14,22 +14,45 @@ export function reasonText(w: WorktreeView, t: T): string {
   return t(w.reason === "forced" ? "wt.reason.forced" : w.reason === "dirty" ? "wt.reason.dirty" : "wt.reason.running");
 }
 
-/** Line at the top of a chat that runs in its own worktree: why, where, which branch. */
+/**
+ * One line at the top of a chat that runs in its own worktree: branch ← base, and why.
+ * The folder is in the tooltip and behind a copy button, not in the text.
+ */
 export function WorktreeBanner(props: { w: WorktreeView }) {
   const t = useT();
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="wt-banner" role="note">
+    <div className="wt-banner" role="note" title={props.w.path}>
       <GitBranch size={14} aria-hidden="true" />
-      <span>
-        {t("wt.banner", { reason: reasonText(props.w, t), branch: props.w.branch, base: props.w.base })} <code title={props.w.path}>{props.w.path}</code>
+      <span className="wt-banner-text">
+        {t("wt.bannerLead")} · <code>{props.w.branch}</code> ← {props.w.base}
+        <span className="muted"> · {t("wt.bannerWhy", { reason: reasonText(props.w, t) })}</span>
       </span>
+      <button
+        type="button"
+        className="icon-btn wt-banner-copy"
+        title={t("wt.copyPath")}
+        aria-label={t("wt.copyPath")}
+        onClick={() => {
+          void navigator.clipboard?.writeText(props.w.path).then(() => setCopied(true), () => undefined);
+        }}
+        onMouseLeave={() => setCopied(false)}
+      >
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+      </button>
     </div>
   );
 }
 
+/** "1 file" / "2 files": the count of a worktree card's files. */
+function filesText(n: number, t: T): string {
+  return t(n === 1 ? "wt.files1" : "wt.files", { n });
+}
+
 /**
  * Merge card under a worktree chat (roadmap 1.11): what changed since the worktree was made, and
- * Merge into <base> / Keep the branch / Discard (asks first; the work is lost).
+ * Merge into <base> / Keep the branch / Discard (asks first; the work is lost). Once merged it
+ * shows what went into <base> (`merged`, kept from before the merge) and only a Close button.
  */
 export function WorktreeCard(props: {
   w: WorktreeView;
@@ -37,29 +60,37 @@ export function WorktreeCard(props: {
   commits: number;
   busy?: boolean;
   outcome?: MergeOutcome | null;
+  /** Files as they were when the merge ran; the branch shows none after it. */
+  merged?: WorktreeFile[];
   onMerge: () => void;
   onKeep: () => void;
   onDiscard: () => void;
+  onClose?: () => void;
 }) {
   const t = useT();
   const [confirm, setConfirm] = useState(false);
-  const added = props.files.reduce((n, f) => n + f.added, 0);
-  const removed = props.files.reduce((n, f) => n + f.removed, 0);
+  const done = Boolean(props.outcome?.ok);
+  const files = done ? (props.merged ?? []) : props.files;
+  const added = files.reduce((n, f) => n + f.added, 0);
+  const removed = files.reduce((n, f) => n + f.removed, 0);
+  const title = done
+    ? t("wt.mergedTitle", { files: filesText(files.length, t), base: props.w.base, commit: props.outcome?.commit ?? "" })
+    : t("wt.cardTitle", { files: filesText(files.length, t), branch: props.w.branch });
   return (
-    <section className="wt-card" aria-label={t("wt.cardLabel")}>
+    <section className={done ? "wt-card done" : "wt-card"} aria-label={t("wt.cardLabel")}>
       <header>
-        <GitMerge size={15} aria-hidden="true" />
-        <strong>{t("wt.cardTitle", { n: props.files.length, branch: props.w.branch })}</strong>
+        {done ? <Check size={15} aria-hidden="true" /> : <GitMerge size={15} aria-hidden="true" />}
+        <strong role={done ? "status" : undefined}>{title}</strong>
         <DiffStat added={added} removed={removed} />
       </header>
       <ul className="wt-files">
-        {props.files.slice(0, 30).map((f) => (
+        {files.slice(0, 30).map((f) => (
           <li key={f.path}>
             <code>{f.path}</code>
             {f.isNew ? <span className="lesson-new">{t("lesson.newFile")}</span> : <DiffStat added={f.added} removed={f.removed} />}
           </li>
         ))}
-        {props.files.length > 30 ? <li className="muted">{t("wt.more", { n: props.files.length - 30 })}</li> : null}
+        {files.length > 30 ? <li className="muted">{t("wt.more", { n: files.length - 30 })}</li> : null}
       </ul>
       {props.outcome && !props.outcome.ok ? (
         <div className="perm-error" role="alert">
@@ -79,22 +110,28 @@ export function WorktreeCard(props: {
           )}
         </div>
       ) : null}
-      {props.outcome?.ok ? (
-        <p role="status" className="wt-merged">
-          <Check size={13} aria-hidden="true" /> {t("wt.merged", { base: props.w.base, commit: props.outcome.commit ?? "" })}
-        </p>
-      ) : null}
-      <div className="row wt-actions">
-        <button type="button" className="primary" disabled={props.busy || !props.files.length} onClick={props.onMerge}>
-          {t("wt.merge", { base: props.w.base })}
-        </button>
-        <button type="button" className="ghost" disabled={props.busy} onClick={props.onKeep}>
-          {t("wt.keep")}
-        </button>
-        <button type="button" className="ghost" disabled={props.busy} onClick={() => setConfirm(true)}>
-          {t("wt.discard")}
-        </button>
-      </div>
+      {done ? (
+        <div className="row wt-actions">
+          <p className="muted wt-done-note">{t("wt.mergedNote")}</p>
+          {props.onClose ? (
+            <button type="button" className="ghost" onClick={props.onClose}>
+              {t("common.close")}
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="row wt-actions">
+          <button type="button" className="primary" disabled={props.busy || !props.files.length} onClick={props.onMerge}>
+            {t("wt.merge", { base: props.w.base })}
+          </button>
+          <button type="button" className="ghost" disabled={props.busy} onClick={props.onKeep}>
+            {t("wt.keep")}
+          </button>
+          <button type="button" className="ghost" disabled={props.busy} onClick={() => setConfirm(true)}>
+            {t("wt.discard")}
+          </button>
+        </div>
+      )}
       {confirm ? (
         <ConfirmDialog
           title={t("wt.discardTitle")}

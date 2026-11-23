@@ -189,11 +189,11 @@ Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 
 ## Thẻ Diff
 
 - Card phẳng (`DiffCard.tsx`), viền `--border-ui`, bo `--radius-md`; không dùng `.banner`.
-- Header: icon file, đường dẫn mono (thư mục muted, tên đậm), `+N −M`, icon mở panel Changes. Bấm tên file cũng mở panel.
+- Header: icon file, đường dẫn mono (thư mục muted, tên đậm), `+N −M`, icon mở panel Changes. Bấm tên file cũng mở panel. Đường dẫn hiện **tương đối** với worktree của chat (nếu có) rồi tới workspace (`shownPath`); đường dẫn đầy đủ nằm trong tooltip.
 - Body: `DiffTable` dùng chung (xem mục dưới), 3 dòng ngữ cảnh mỗi bên. Hiện tối đa 14 hàng, có "Hiện thêm N dòng".
 - File `.svg`: header có toggle **Xem trước / Mã**, mặc định Xem trước — hình vẽ từ nội dung đề xuất (`after`, data URL trong `<img>`, nền ô caro), bấm để phóng to. Chưa Apply vẫn xem được.
 - Footer căn phải: **Reject** (ghost) rồi **Apply** (primary). Không ghi file nếu chưa Apply. Áp dụng cho mode Thận trọng (`ask`), nơi Engine stage file.
-- Mode Cân bằng: Engine đã ghi file (event `diff{applied:true}`, tầng 1). Footer hiện "✓ Đã áp dụng" bên trái và **Hoàn tác** (ghost) bên phải; Hoàn tác ghi lại `before` qua `diff.apply` (như Restore checkpoint). Xem `docs/security/permissions.md`.
+- Mode Cân bằng: Engine đã ghi file (event `diff{applied:true}`, tầng 1). Footer hiện "✓ Đã áp dụng" bên trái và **Hoàn tác** (ghost) bên phải; Hoàn tác ghi lại `before` qua `diff.apply` (như Restore checkpoint). Xem `docs/security/permissions.md`. Chat trong worktree đã **Gộp vào <base>** sau sửa đổi này thì không còn Hoàn tác (nó chỉ ghi trong worktree, không tới <base>); thay bằng dòng mờ "Đã gộp vào <base>; muốn hoàn tác thì dùng git ở đó". Diff mới sau khi gộp có lại Hoàn tác.
 
 ## Ghi bài học
 

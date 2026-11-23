@@ -12,6 +12,10 @@ export interface WorktreeInfo {
   branch: string;
   /** Branch of the main checkout when the worktree was made (where "merge" goes). */
   base: string;
+  /**
+   * What the merge card compares against: the base's HEAD when the worktree was made, then the
+   * branch tip of the last successful merge (that work is in `base` already, so it is not shown again).
+   */
   baseSha: string;
   /** Main checkout (repo root). */
   root: string;
@@ -124,8 +128,13 @@ export async function mergeWorktree(w: WorktreeInfo, title: string): Promise<Mer
   }
   const cur = await git(w.root, ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (cur.ok && cur.out !== w.base) return { ok: false, message: `the main checkout is on ${cur.out}, not ${w.base}; switch back to ${w.base} to merge` };
+  const tip = await git(w.path, ["rev-parse", "HEAD"]);
   const merge = await git(w.root, ["merge", "--no-ff", "--no-edit", "-m", `Merge ${w.branch} (5ilence chat)`, w.branch]);
-  if (merge.ok) return { ok: true, commit: (await git(w.root, ["rev-parse", "--short", "HEAD"])).out };
+  if (merge.ok) {
+    // Everything up to the merged tip is in the base now: the card counts only what comes after.
+    if (tip.ok && tip.out) w.baseSha = tip.out;
+    return { ok: true, commit: (await git(w.root, ["rev-parse", "--short", "HEAD"])).out };
+  }
   const unmerged = await git(w.root, ["diff", "--name-only", "--diff-filter=U"]);
   const conflicts = unmerged.ok ? unmerged.out.split("\n").filter(Boolean) : [];
   if (conflicts.length) {

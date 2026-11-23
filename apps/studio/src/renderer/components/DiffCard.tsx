@@ -28,6 +28,20 @@ export function splitPath(p: string) {
   return { dir: i >= 0 ? norm.slice(0, i + 1) : "", name: i >= 0 ? norm.slice(i + 1) : norm };
 }
 
+/**
+ * Path as shown on the card: relative to the first root it sits under (the chat's worktree or
+ * workspace), else unchanged. Case-insensitive for Windows drive paths.
+ */
+export function shownPath(p: string, roots: (string | undefined)[]): string {
+  const norm = p.split("\\").join("/");
+  for (const r of roots) {
+    if (!r) continue;
+    const root = r.split("\\").join("/").replace(/\/+$/, "") + "/";
+    if (norm.toLowerCase().startsWith(root.toLowerCase())) return norm.slice(root.length);
+  }
+  return norm;
+}
+
 export function DiffStat(props: { added: number; removed: number }) {
   return (
     <span className="diff-stat">
@@ -44,6 +58,10 @@ export function DiffCard(props: {
   onShow: () => void;
   /** Bấm ảnh xem trước (SVG) → lightbox. */
   onOpenImage?: (images: string[], index: number) => void;
+  /** Folders the path is shown relative to (worktree first, then workspace); full path in the tooltip. */
+  roots?: (string | undefined)[];
+  /** The edit is already merged into this branch: Undo here would not reach it, so it is hidden. */
+  mergedInto?: string;
 }) {
   const t = useT();
   const { diff } = props;
@@ -54,7 +72,7 @@ export function DiffCard(props: {
   const sum = useMemo(() => summarizeDiff(diff.before, diff.after), [diff]);
   const hunks = useMemo(() => diffHunks(diff.before, diff.after), [diff]);
   const total = hunks.reduce((n, h) => n + h.rows.length, 0);
-  const { dir, name } = splitPath(diff.path);
+  const { dir, name } = splitPath(shownPath(diff.path, props.roots ?? []));
 
   // Cắt theo tổng số hàng hiển thị, giữ nguyên thứ tự hunk.
   let budget = expanded ? Infinity : PREVIEW_ROWS;
@@ -75,7 +93,7 @@ export function DiffCard(props: {
   return (
     <section className="diff-card" aria-label={t("diff.proposedFor", { path: diff.path })}>
       <header className="diff-card-head">
-        <button type="button" className="diff-card-file" onClick={props.onShow} title={t("diff.openInPanel")}>
+        <button type="button" className="diff-card-file" onClick={props.onShow} title={`${diff.path}\n${t("diff.openInPanel")}`}>
           <FileCode2 size={15} aria-hidden />
           <span className="diff-path">
             {dir && <span className="dir">{dir}</span>}
@@ -135,9 +153,13 @@ export function DiffCard(props: {
             <Check size={14} aria-hidden />
             {t("diff.applied")}
           </span>
-          <button type="button" className="ghost sm" onClick={props.onReject} title={t("diff.undoTip")}>
-            {t("diff.undo")}
-          </button>
+          {props.mergedInto ? (
+            <span className="muted diff-card-merged">{t("diff.undoMerged", { base: props.mergedInto })}</span>
+          ) : (
+            <button type="button" className="ghost sm" onClick={props.onReject} title={t("diff.undoTip")}>
+              {t("diff.undo")}
+            </button>
+          )}
         </footer>
       ) : (
         <footer className="diff-card-foot">
