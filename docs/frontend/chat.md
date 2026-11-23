@@ -122,7 +122,7 @@ Chuột phải vào bubble user hoặc câu trả lời AI → `MessageMenu` (c�
 ## Thought (hiển thị suy nghĩ)
 
 - Event runtime `thinking` (protocol 0.1.1) — stream `reasoning_content` / `reasoning` / `thinking` từ gateway.
-- Live: nhãn **Thinking** + shimmer; body cập nhật dần (full text).
+- Live: nhãn **Thinking** có icon chạy + shimmer ([status.md](status.md) → Run indicator); body cập nhật dần (full text).
 - Xong: **Thought Ns** nếu có `ms`, không thì **Thought briefly**; body giữ nguyên, thu/mở được.
 - Brief một dòng = dòng đầu của body (không thay full thinking).
 - Không invent Thought nếu lượt không có body/`ms` đáng kể và không có hoạt động.
@@ -168,7 +168,7 @@ Gửi → Planning + bắt đầu đo thought. `thinking` → Thinking + body. `
 
 Các bước Read liên tiếp cùng file được gộp thành một dòng có khoảng dòng (`Read App.tsx (1–40, 615–629)`), xem `mergeReadSteps` trong [status.md](status.md).
 
-Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 5.9K tokens` (hoặc `Waiting for approval` / `Stopping…`), xem [status.md](status.md). Xong lượt thì quay về `Worked for …`.
+Trong lúc lượt còn live, dòng summary là run pulse `Working · 1m 12s · 5.9K tokens` (hoặc `Waiting for approval` / `Stopping…`), xem [status.md](status.md). Đầu dòng có icon chạy, bước đang chạy cũng có icon + shimmer (status.md → Run indicator). Xong lượt thì quay về `Worked for …`.
 
 ## Lỗi trong lượt
 

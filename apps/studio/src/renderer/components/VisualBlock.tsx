@@ -1,4 +1,4 @@
-import { Code2, FileCode2, Image as ImageIcon } from "lucide-react";
+import { Code2, FileCode2 } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { svgDataUrl } from "./DiffCard";
 import { CodeBlock } from "./CodeView";
@@ -6,6 +6,7 @@ import { svgViewBox } from "../pastedImages";
 import type { EditTarget } from "../imageActions";
 import { ImageFrame, type ImageMoreItem } from "./ImageFrame";
 import { useT } from "../i18n";
+import { RunIndicator } from "./RunIndicator";
 
 /** Chiều cao tối đa của hình trong chat (px); xem đầy đủ thì phóng to. Khớp `.visual-*` trong CSS. */
 export const VISUAL_MAX_H = 400;
@@ -101,8 +102,8 @@ export function VisualBlock(props: {
         <div className="visual visual-pending" role="status" aria-live="polite">
           <div className="visual-placeholder" style={box}>
             <span className="visual-label">
-              <ImageIcon size={14} aria-hidden />
-              {t("visual.drawing")}
+              <RunIndicator />
+              <span className="run-shimmer">{t("visual.drawing")}</span>
             </span>
             <span className="visual-size">{formatSize(text.length)}</span>
           </div>

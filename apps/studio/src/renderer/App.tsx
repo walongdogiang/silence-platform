@@ -827,7 +827,7 @@ export function App() {
         const started = tr.thoughtAt;
         setLines((xs) => appendThinkingText(xs, ev.text, started));
       } else if (ev.type === "tool_start") {
-        const step = narrateToolLive(ev.name, ev.input);
+        const step = { ...narrateToolLive(ev.name, ev.input), at: Date.now() };
         setLines((xs) => {
           let next = xs;
           if (tr.thoughtAt) {

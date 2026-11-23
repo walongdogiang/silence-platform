@@ -1094,9 +1094,64 @@ body.soft-scroll-dragging {
   color: var(--text-secondary);
 }
 /* Run pulse: số đếm không nhảy bề ngang; chờ duyệt dùng accent copper (docs/frontend/status.md). */
-.msg-pulse { font-variant-numeric: tabular-nums; }
+.msg-pulse { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 .msg-pulse.awaiting_permission { color: var(--accent); }
 .msg-pulse.stopping { color: var(--text-muted); }
+
+/* ── Run indicator (RunIndicator.tsx, docs/frontend/status.md → Run indicator) ──
+ * Một ngôn ngữ chuyển động cho mọi thứ đang chạy: sao 4 tia màu info xoay đều ở đầu dòng,
+ * và một dải sáng chạy ngang chữ (.run-shimmer) — chỉ ở dòng cụ thể nhất đang làm.
+ * Chỉ transform / opacity / mask-position: không layout, không timer JS. */
+.run-ind {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--info);
+}
+/* --info chỉ có một giá trị; trên nền sáng làm đậm lại cho đủ tương phản. */
+[data-theme="light"] .run-ind { color: color-mix(in srgb, var(--info) 72%, #000); }
+.run-ind.sm { width: 10px; height: 10px; }
+.run-ind-star {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  animation: run-ind-spin 1.5s linear infinite;
+}
+.run-ind.sm .run-ind-star { stroke-width: 2.4; }
+.run-ind.stopping { color: var(--text-muted); }
+.run-ind.stopping .run-ind-star { animation-duration: 4s; opacity: 0.6; }
+.run-ind-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--accent);
+}
+.run-ind.sm .run-ind-dot { width: 6px; height: 6px; }
+/* Sao đối xứng 4 tia: nửa vòng là về đúng hình ban đầu, nên lặp liền mạch. */
+@keyframes run-ind-spin {
+  to { transform: rotate(180deg); }
+}
+.run-shimmer {
+  -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.62) 0 38%, #000 50%, rgb(0 0 0 / 0.62) 62% 100%);
+  mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.62) 0 38%, #000 50%, rgb(0 0 0 / 0.62) 62% 100%);
+  -webkit-mask-size: 300% 100%;
+  mask-size: 300% 100%;
+  animation: run-shimmer 2.2s linear infinite;
+}
+@keyframes run-shimmer {
+  from { -webkit-mask-position: 100% 0; mask-position: 100% 0; }
+  to { -webkit-mask-position: 0 0; mask-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-ind-star { animation: none; }
+  .run-shimmer { animation: none; -webkit-mask-image: none; mask-image: none; }
+}
 .msg-status-brief {
   margin: 0;
   max-width: 56ch;
@@ -1123,8 +1178,10 @@ body.soft-scroll-dragging {
 .msg-thought-block > summary::-webkit-details-marker { display: none; }
 .msg-thought-block[open] > summary .msg-agent-meta-chev { transform: rotate(180deg); }
 .msg-thought-label.active {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text-primary);
-  animation: msg-step-shimmer 1.35s ease-in-out infinite;
 }
 .msg-thought-body {
   margin: 6px 0 0;
@@ -1160,20 +1217,31 @@ body.soft-scroll-dragging {
 .msg-explored[open] > summary .msg-agent-meta-chev { transform: rotate(180deg); }
 .msg-step-list {
   margin: 4px 0 0;
-  padding: 0 0 0 12px;
+  padding: 0 0 0 20px;
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 .msg-step {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: baseline;
+  position: relative;
   font-size: var(--font-size-sm);
   line-height: 1.4;
   color: var(--text-muted);
+}
+/* Icon nằm ở lề trái (ngoài khối chữ) nên bước đang chạy và bước xong thẳng hàng; mask shimmer không cắt icon. */
+.msg-step > .run-ind { position: absolute; left: -18px; top: calc((1.4em - 12px) / 2); width: 12px; height: 12px; }
+/* inline-flex: khối rộng bằng chữ, để dải sáng shimmer quét đúng phần chữ chứ không chạy qua khoảng trống. */
+.msg-step-body {
+  display: inline-flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.msg-step-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .msg-step-verb {
   color: color-mix(in srgb, var(--text-secondary) 88%, transparent);
@@ -1185,15 +1253,12 @@ body.soft-scroll-dragging {
 }
 .msg-step.active .msg-step-verb {
   color: var(--text-primary);
-  animation: msg-step-shimmer 1.35s ease-in-out infinite;
 }
 .msg-step.active .msg-step-detail {
   color: var(--text-secondary);
 }
-@keyframes msg-step-shimmer {
-  0%, 100% { opacity: 0.72; }
-  50% { opacity: 1; }
-}
+.msg-step.active:has(> .run-ind.stopping) .msg-step-verb,
+.msg-step.active:has(> .run-ind.stopping) .msg-step-detail { color: var(--text-muted); }
 .msg-checkpoint {
   display: flex;
   align-items: center;
@@ -1781,9 +1846,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   background: var(--surface-1, var(--surface-2)) repeating-linear-gradient(135deg, rgba(127, 127, 127, 0.06) 0 12px, transparent 12px 24px);
 }
 .visual-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-sm); }
-.visual-pending .visual-label { animation: msg-step-shimmer 1.35s ease-in-out infinite; }
 .visual-size { color: var(--text-muted); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { .visual-pending .visual-label { animation: none; } }
 /* Ảnh workspace trong câu trả lời: `![](path)` tại chỗ + dải ảnh agent nhắc tới. */
 .md-img { display: inline-block; width: auto; height: auto; margin: 4px 0; }
 .md-img img { display: block; max-width: min(100%, 480px); max-height: 320px; border-radius: var(--radius-sm); border: 1px solid var(--border-ui); }
@@ -2418,7 +2481,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .history-item:hover { background: var(--surface-hover); }
 .history-open {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -2440,15 +2503,9 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   background: var(--text-primary);
   opacity: 0.7;
 }
-.history-dot.on.running { animation: history-dot-pulse 1.2s ease-in-out infinite; }
+/* Đang chạy: chấm nhường chỗ cho RunIndicator (cùng sao như trong chat); chờ duyệt: chấm copper đứng yên. */
+.history-dot.on.running { width: 10px; height: 10px; background: none; opacity: 1; display: inline-flex; }
 .history-dot.on.waiting { background: var(--accent); opacity: 1; }
-@keyframes history-dot-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .history-dot.on.running { animation: none; opacity: 1; }
-}
 .history-open strong {
   color: var(--text-primary);
   font-size: var(--font-size-base);
@@ -2498,6 +2555,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 /* Chưa đọc: tiêu đề đậm + chấm copper. */
 .history-item.unread .history-open strong { font-weight: var(--font-weight-semibold); }
 .history-dot.unread { background: var(--accent); opacity: 1; }
+.history-dot.on.running.unread { background: none; }
 .history-item.archived .history-open strong { color: var(--text-secondary); }
 .history-group-toggle {
   display: flex;

@@ -65,6 +65,7 @@ import { canReadAloud, pauseSpeech, resumeSpeech, speak, stopSpeech, useSpeechSt
 import type { EditTarget } from "../imageActions";
 import { ImageRefStrip } from "./WorkspaceImage";
 import { SoftScroll } from "./SoftScroll";
+import { RunIndicator } from "./RunIndicator";
 import { transcriptOpen, type TranscriptView } from "../prefs";
 import { stripMarkdown } from "../messageMenu";
 import { MessageMenu, type MenuAt, type MessageMenuItem } from "./MessageMenu";
@@ -281,6 +282,16 @@ function planSteps(markdown: string): string[] {
 }
 
 /** Đồng hồ 1s chỉ chạy khi lượt đang live; xong lượt thì dừng tick. */
+/** Bước chạy từ 3s trở lên mới hiện thời gian: Read/Search nhanh không nháy "0s 1s 2s"; lệnh chậm lộ ra ngay. */
+const STEP_ELAPSED_MIN_MS = 3000;
+
+function StepElapsed(props: { at?: number; now: number }) {
+  if (typeof props.at !== "number") return null;
+  const ms = props.now - props.at;
+  if (ms < STEP_ELAPSED_MIN_MS) return null;
+  return <span className="msg-step-time">{formatDuration(ms)}</span>;
+}
+
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -535,6 +546,7 @@ function AgentMeta(props: {
           title={props.turn.live ? pulseTip(run, t) || undefined : undefined}
           aria-live={props.turn.live ? "off" : undefined}
         >
+          {props.turn.live ? <RunIndicator phase={phase} /> : null}
           {summaryLabel(props.turn, run, now, awaiting, t)}
         </span>
         {chip ? (
@@ -554,7 +566,10 @@ function AgentMeta(props: {
               open={opened.thought || undefined}
             >
               <summary>
-                <span className={`msg-thought-label${thinkingLive ? " active" : ""}`}>{tLabel}</span>
+                <span className={`msg-thought-label${thinkingLive ? " active" : ""}`}>
+                  {thinkingLive ? <RunIndicator phase={phase} /> : null}
+                  <span className={thinkingLive && phase === "working" ? "run-shimmer" : undefined}>{tLabel}</span>
+                </span>
                 {thoughtBody || thinkingLive ? (
                   <ChevronDown size={13} className="msg-agent-meta-chev" />
                 ) : null}
@@ -576,13 +591,17 @@ function AgentMeta(props: {
                 <ul className="msg-step-list">
                   {steps.map(({ step, active }, j) => (
                     <li key={j} className={`msg-step${active ? " active" : ""}`}>
-                      <span className="msg-step-verb">{verbText(step.verb, t)}</span>
-                      {step.detail ? <span className="msg-step-detail">{detailText(step.detail, t)}</span> : null}
-                      {step.sandboxed ? (
-                        <span className="msg-step-sbx" title={t("sandbox.badgeTip")}>
-                          {t("sandbox.badge")}
-                        </span>
-                      ) : null}
+                      {active ? <RunIndicator phase={phase} /> : null}
+                      <span className={`msg-step-body${active && phase === "working" ? " run-shimmer" : ""}`}>
+                        <span className="msg-step-verb">{verbText(step.verb, t)}</span>
+                        {step.detail ? <span className="msg-step-detail">{detailText(step.detail, t)}</span> : null}
+                        {step.sandboxed ? (
+                          <span className="msg-step-sbx" title={t("sandbox.badgeTip")}>
+                            {t("sandbox.badge")}
+                          </span>
+                        ) : null}
+                        {active ? <StepElapsed at={step.at} now={now} /> : null}
+                      </span>
                     </li>
                   ))}
                 </ul>

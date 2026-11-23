@@ -31,6 +31,7 @@ import type { ExternalItem } from "./ExternalSessionView";
 import type { ChatLine, ChatThread } from "../models";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { SoftScroll } from "./SoftScroll";
+import { RunIndicator } from "./RunIndicator";
 
 export const HISTORY_KEY = "silence.chat.history";
 
@@ -607,7 +608,9 @@ export function ChatHistoryPanel(props: {
             onClick={() => props.onSelect(t.id)}
             onDoubleClick={() => startRename(t)}
           >
-            <span className={`${dotClass(t.id)}${t.unread ? " unread" : ""}`} title={dotTitle(t.id)} />
+            <span className={`${dotClass(t.id)}${t.unread ? " unread" : ""}`} title={dotTitle(t.id)}>
+              {stateOf(t.id) === "running" ? <RunIndicator size="sm" /> : null}
+            </span>
             <strong>{shownTitle(t.title, tr)}</strong>
             <em>{copiedId === t.id ? tr("common.copied") : relativeTime(t.updatedAt, now)}</em>
           </button>

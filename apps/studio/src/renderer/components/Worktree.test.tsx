@@ -52,6 +52,7 @@ describe("parallel chats", () => {
     );
     expect((out.match(/history-dot on running/g) ?? []).length).toBe(1);
     expect((out.match(/history-dot on waiting/g) ?? []).length).toBe(1);
+    expect((out.match(/run-ind sm working/g) ?? []).length).toBe(1);
   });
 
   it("turns at once default to 2 and stay within 1..4", () => {
