@@ -162,6 +162,50 @@ describe("verify after a turn", () => {
     expect(t.events.filter((e) => e.type === "done")).toHaveLength(1);
   }, 60_000);
 
+  it("a fix that puts the file back as it was is still checked again (git snapshot sees no change)", async () => {
+    const home = tmp("v-home-");
+    const ws = tmp("v-ws-git-");
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    write(ws, "a.txt", "ok\n");
+    write(home, `projects/${path.basename(ws)}/verify.yaml`, `rules:\n  - when: ['*.txt']\n    run: ${JSON.stringify(node("process.exit(require('fs').readFileSync('a.txt','utf8').includes('bad')?1:0)"))}\n`);
+    const sent: UserMessage[] = [];
+    let hooks: BackendHooks | undefined;
+    const fake: Backend = {
+      info: { id: "fake", version: "0", capabilities: {} as never },
+      start: async (_o, h) => {
+        hooks = h;
+        return {
+          send: async (m) => {
+            sent.push(m);
+            setTimeout(() => {
+              // Turn: break a.txt. Fix round: put it back exactly as it was at the turn's start.
+              write(ws, "a.txt", sent.length === 1 ? "bad\n" : "ok\n");
+              hooks!.emit({ type: "tool.start", callId: `t${sent.length}`, name: "edit", args: { path: "a.txt" } });
+              hooks!.emit({ type: "turn.end", stop: "completed", durationMs: 1 });
+            }, 5);
+          },
+          interrupt: async () => {},
+          close: async () => {},
+        };
+      },
+    };
+    const core = createCoreWithSessions({ host: "test", dataDir: tmp("v-data-"), home, sessions: { backends: { claude: fake }, listExternal: async () => [] } });
+    const [a, b] = memoryPair();
+    core.server.attach(a);
+    const client = new RpcClient(b);
+    const events: Array<Record<string, unknown>> = [];
+    client.onNotification((m, p) => m === "session.event" && events.push((p as { event: Record<string, unknown> }).event));
+    const { session_id } = await client.call<{ session_id: string }>("session.create", { workspace: ws, permission: "auto" });
+    await client.call("session.prompt", { session_id, text: "go" });
+    for (let i = 0; i < 400 && !events.some((e) => e.type === "done"); i++) await new Promise((r) => setTimeout(r, 25));
+    const v = events.filter((e) => e.type === "verify");
+    expect(v.map((e) => [e.ok, e.round, e.final])).toEqual([
+      [false, 0, false],
+      [true, 1, true],
+    ]);
+    expect(sent).toHaveLength(2);
+  }, 60_000);
+
   it("a repo's verify command asks first; Always allow approves it for next time", async () => {
     const cmd = node("console.log('repo')");
     const t = await setup({ repoVerify: `rules:\n  - when: ['*.txt']\n    run: ${JSON.stringify(cmd)}\n` });

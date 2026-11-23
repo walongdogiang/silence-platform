@@ -6,6 +6,7 @@ import {
   permKeyAction,
   permLayout,
   permTarget,
+  scopeHint,
   effectivePermMode,
   hostsText,
   normalizePermMode,
@@ -87,6 +88,13 @@ describe("permission card helpers", () => {
     expect(permLayout({ ...base, preview: { path: "a.py", before: "", after: "x" } })).toBe("full");
     expect(permLayout({ ...base, input: { path: "a" } })).toBe("full");
     expect(permLayout({ ...base, risk: { tier: "ask", reasons: [] } })).toBe("full"); // Rust Engine card
+  });
+
+  it("scope hint: a repo verify command is approved as that command, not saved as a rule", () => {
+    const en = translator("en");
+    expect(scopeHint({ source: "agent", allow_rule: "Bash(npm test:*)" }, en)).toBe("Saves the rule Bash(npm test:*) in this project's permissions.yaml");
+    expect(scopeHint({ source: "verify", allow_rule: "python -m compileall -q ." }, en)).toBe("Approves exactly this command for this repo's checks; no permission rule is saved");
+    expect(scopeHint({ source: "verify", allow_rule: "x" }, translator("vi"))).not.toContain("permissions.yaml");
   });
 
   it("names the target for the receipt line", () => {

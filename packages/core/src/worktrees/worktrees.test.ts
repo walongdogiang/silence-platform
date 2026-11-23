@@ -7,7 +7,7 @@ import { RpcClient } from "../api/jsonrpc.js";
 import { memoryPair } from "../api/transport.js";
 import type { Backend, BackendHooks, StartOptions, UserMessage } from "../backends/types.js";
 import { createCoreWithSessions } from "../core.js";
-import { createWorktree, discardWorktree, isDirty, mergeWorktree, repoRoot, worktreeChanges, worktreeName } from "./worktrees.js";
+import { createWorktree, discardWorktree, isDirty, mergeWorktree, newFileLines, repoRoot, worktreeChanges, worktreeName } from "./worktrees.js";
 
 const tmp = (p: string) => mkdtempSync(path.join(os.tmpdir(), p));
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -26,6 +26,19 @@ function repo(): string {
 }
 
 describe("worktrees", () => {
+  it("counts the lines of a new file like git diff: none for empty or binary", async () => {
+    const d = tmp("wt-lines-");
+    writeFileSync(path.join(d, "a.txt"), "one\ntwo\n");
+    writeFileSync(path.join(d, "b.txt"), "no newline at end");
+    writeFileSync(path.join(d, "e.txt"), "");
+    writeFileSync(path.join(d, "bin.dat"), Buffer.from([1, 0, 2, 10]));
+    expect(await newFileLines(path.join(d, "a.txt"))).toBe(2);
+    expect(await newFileLines(path.join(d, "b.txt"))).toBe(1);
+    expect(await newFileLines(path.join(d, "e.txt"))).toBe(0);
+    expect(await newFileLines(path.join(d, "bin.dat"))).toBe(0);
+    expect(await newFileLines(path.join(d, "missing.txt"))).toBe(0);
+  });
+
   it("are created outside the repo on a silence/ branch and list what changed", async () => {
     const root = repo();
     const base = tmp("wt-base-");
@@ -34,11 +47,11 @@ describe("worktrees", () => {
     expect(w).toMatchObject({ path: path.join(base, "shop", "n1"), branch: "silence/n1", base: "main", reason: "forced" });
     expect(path.relative(root, w.path).startsWith("..")).toBe(true);
     writeFileSync(path.join(w.path, "a.txt"), "one\ntwo\n");
-    writeFileSync(path.join(w.path, "new.txt"), "x\n");
+    writeFileSync(path.join(w.path, "new.txt"), "x\ny\nz");
     const ch = await worktreeChanges(w);
     expect(ch.files).toEqual([
       { path: "a.txt", added: 1, removed: 0 },
-      { path: "new.txt", added: 0, removed: 0, isNew: true },
+      { path: "new.txt", added: 3, removed: 0, isNew: true }, // a new file counts its lines (it was 0)
     ]);
     expect(await isDirty(root)).toBe(false);
     expect(worktreeName(new Date(2026, 10, 22, 9, 5), "ab12")).toBe("20261122-0905-ab12");

@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, FileCode2, FilePen, FilePlus2, Globe, Info, Mes
 import { diffHunks, summarizeDiff } from "../diffSummary";
 import { useRiskText, useT, type T } from "../i18n";
 import type { Perm } from "../models";
-import { alwaysAllowText, permEscalation, permHosts, permKeyAction, permLayout, scopeLabels, tierBadge, type PermScope } from "../permissionUi";
+import { alwaysAllowText, permEscalation, permHosts, permKeyAction, permLayout, type PermScope, scopeHint, scopeLabels, tierBadge } from "../permissionUi";
 import { languageFor, useTokens } from "../syntax";
 import type { FilePreview, PermAnswer, RiskLevel } from "../types";
 import { DiffTable, TokenLine } from "./CodeView";
@@ -290,7 +290,7 @@ function CoreCard(props: {
             {alwaysAllowText(risk.allow_rule, t)}
             <kbd>2</kbd>
           </button>
-          <p className="perm-scope-hint">{t("perm.saveHint", { rule: risk.allow_rule })}</p>
+          <p className="perm-scope-hint">{scopeHint(risk, t)}</p>
         </div>
       ) : null}
     </div>

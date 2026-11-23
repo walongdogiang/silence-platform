@@ -2,7 +2,7 @@
 // running chat gets its own worktree on branch `silence/<name>`, outside the repo
 // (`%LOCALAPPDATA%/silence/worktrees/<project>/<name>`). The merge card brings the work back.
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -74,6 +74,18 @@ export async function createWorktree(root: string, project: string, reason: Work
   return { path: dir, branch: branchName, base: cur.ok ? cur.out : "HEAD", baseSha: head.out, root, reason };
 }
 
+/** Lines of a new (untracked) file, as `git diff` would count them; 0 for binary or unreadable files. */
+export async function newFileLines(file: string): Promise<number> {
+  try {
+    const buf = await readFile(file);
+    if (buf.length === 0 || buf.includes(0)) return 0;
+    const text = buf.toString("utf8");
+    return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+  } catch {
+    return 0;
+  }
+}
+
 /** What the worktree changed since it was made: committed and uncommitted, new files included. */
 export async function worktreeChanges(w: WorktreeInfo): Promise<{ files: FileChange[]; commits: number }> {
   const files: FileChange[] = [];
@@ -83,7 +95,9 @@ export async function worktreeChanges(w: WorktreeInfo): Promise<{ files: FileCha
     if (m) files.push({ path: m[3]!, added: m[1] === "-" ? 0 : Number(m[1]), removed: m[2] === "-" ? 0 : Number(m[2]) });
   }
   const untracked = await git(w.path, ["ls-files", "--others", "--exclude-standard"]);
-  for (const f of untracked.ok ? untracked.out.split("\n").filter(Boolean) : []) files.push({ path: f, added: 0, removed: 0, isNew: true });
+  for (const f of untracked.ok ? untracked.out.split("\n").filter(Boolean) : []) {
+    files.push({ path: f, added: await newFileLines(path.join(w.path, f)), removed: 0, isNew: true });
+  }
   const ahead = await git(w.path, ["rev-list", "--count", `${w.baseSha}..HEAD`]);
   return { files, commits: ahead.ok ? Number(ahead.out) || 0 : 0 };
 }

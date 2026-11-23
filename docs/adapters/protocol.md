@@ -112,7 +112,7 @@ start ──ready──► idle ──send──► running ──turn.end──
 
 ## Sau mỗi lượt: kiểm chứng
 
-Sau `turn.end{completed}` có file đổi, lõi chạy lệnh trong `verify.yaml` (ưu tiên `~/.silence/projects/<repo>/verify.yaml`, sau đó `.silence/verify.yaml` trong repo) khớp phạm vi file đổi. Fail thì gửi lỗi đã cắt gọn bằng `send`, tối đa 2 lần, rồi báo người dùng. Adapter không cần biết bước này. "Báo xong sai" (agent nói xong, kiểm chứng fail) được ghi làm số liệu.
+Sau `turn.end{completed}` có file đổi, lõi chạy lệnh trong `verify.yaml` (ưu tiên `~/.silence/projects/<repo>/verify.yaml`, sau đó `.silence/verify.yaml` trong repo) khớp phạm vi file đổi. Fail thì gửi lỗi đã cắt gọn bằng `send`, tối đa 2 lần, rồi báo người dùng. Vòng sửa luôn kiểm lại các file của vòng lỗi trước (`verifyFiles`), kể cả khi bản sửa đưa file về đúng như đầu lượt (snapshot git khi đó không thấy file đổi); trước đây lượt kết thúc im lặng và thẻ treo ở "đang sửa". Adapter không cần biết bước này. "Báo xong sai" (agent nói xong, kiểm chứng fail) được ghi làm số liệu.
 
 Đã làm ở 1.8 (`packages/core/src/verify/verify.ts`, `sessions/manager.ts::afterTurn`):
 

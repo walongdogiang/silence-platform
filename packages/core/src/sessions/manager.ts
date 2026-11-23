@@ -122,6 +122,9 @@ interface Session {
   verifyRound: number;
   /** Paths written or edited this turn (fallback for "changed files" outside git). */
   editedPaths: Set<string>;
+  /** Files the last failed check covered: a fix round checks them again even when the fix put
+   *  them back as they were at the turn's start (the git snapshot then reports no change). */
+  verifyFiles: string[];
   /** The backend loads the repo's own config (approved, or nothing to review). */
   projectConfig: boolean;
   /** Hash of the repo config the session started with (empty when none). */
@@ -241,6 +244,7 @@ export class SessionManager {
       snapshotTurn: 0,
       verifyRound: 0,
       editedPaths: new Set<string>(),
+      verifyFiles: [],
     } as Omit<Session, "handle"> as Session;
     s.rules = await loadRules(this.o.home, s.project, s.cwd);
     this.sessions.set(id, s);
@@ -341,6 +345,7 @@ export class SessionManager {
     s.turn += 1;
     s.verifyRound = 0;
     s.editedPaths.clear();
+    s.verifyFiles = [];
     if (s.turn === 1 && s.personalWarnings.length) this.emit(s, { type: "trace", event: "profile", detail: { warnings: s.personalWarnings } });
     s.tainted = false;
     await this.o.log.append(s.id, { type: "user", text });
@@ -785,6 +790,7 @@ export class SessionManager {
   private finishTurn(s: Session, stop: string): ClientEvent {
     s.running = false;
     s.verifyRound = 0;
+    s.verifyFiles = [];
     this.denyPending(s);
     queueMicrotask(() => this.pump());
     return { type: "done", stop };
@@ -802,7 +808,9 @@ export class SessionManager {
   /** Run the checks for this turn's changes; on failure send the errors back (at most MAX_FIX_ROUNDS). */
   private async afterTurn(s: Session, stop: string): Promise<void> {
     try {
-      const changed = await this.changedFiles(s);
+      const now = await this.changedFiles(s);
+      // A fix round re-checks what failed, even if the fix reverted it to the turn's start.
+      const changed = s.verifyRound > 0 ? [...new Set([...now, ...s.verifyFiles])] : now;
       const cfg = changed.length ? await loadVerify(this.o.home, s.project, s.cwd) : null;
       const plan = cfg ? planChecks(cfg, changed) : null;
       if (!cfg || !plan || (!plan.commands.length && !plan.pairErrors.length)) {
@@ -827,6 +835,7 @@ export class SessionManager {
       this.emit(s, { type: "verify", ok, round, final: !retry, source: cfg.source, changed: changed.length, checks });
       if (retry) {
         s.verifyRound = round + 1;
+        s.verifyFiles = changed;
         await s.handle.send({ text: fixPrompt(failed, s.verifyRound) });
         return; // the fix turn ends in another turn.end, which checks again
       }

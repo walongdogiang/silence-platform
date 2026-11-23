@@ -127,6 +127,14 @@ export function permKeyAction(
   return null;
 }
 
+/**
+ * Where "Always allow" lands, under the scope menu. A repo's verify command is approved as that exact
+ * command (core `verify-approvals.jsonl`), not saved as a rule in the project's permissions.yaml.
+ */
+export function scopeHint(risk: { source?: string; allow_rule?: string }, t: T): string {
+  return risk.source === "verify" ? t("perm.saveHintVerify") : t("perm.saveHint", { rule: risk.allow_rule ?? "" });
+}
+
 /** Short name of what a card asked for, for the receipt line: first command line, the file, or the tool. */
 export function permTarget(perm: Perm): string {
   const c = (perm.input as { command?: unknown } | null | undefined)?.command;
