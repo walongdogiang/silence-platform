@@ -117,7 +117,7 @@ Chuột phải vào bubble user hoặc câu trả lời AI → `MessageMenu` (c�
 - **Fork from here:** chat mới chứa phần **trước** tin này (UI và lịch sử model qua `session.fork`), tin này nằm sẵn trong composer của chat mới để sửa / gửi model khác. Chat cũ giữ nguyên.
 - **Ghép số tin:** UI đếm bubble user, Engine đếm tin `user` thật (bỏ tin `[view_image]`). Hai bên lệch khi một lượt lỗi ngay call đầu (Engine rollback), nên UI gửi kèm `text`: Engine tìm tin khớp gần vị trí đó (cùng vị trí, hoặc lùi về trước); tin chưa từng vào lịch sử thì không cắt gì; không thấy mà còn tin sau → từ chối thay vì cắt nhầm (`agent/history.rs` → `cut_index`).
 
-**Sửa đã chốt:** `Worked for` luôn có `ms` khi `done` (không `—`); không trùng dòng Thought; Explored không hiện rỗng; route không hộp xám. Lượt chỉ có dòng `worked` (không user/trả lời/bước/lỗi) không được vẽ.
+**Sửa đã chốt:** `Worked for` luôn có `ms` khi `done` (không `—`); không trùng dòng Thought; Explored không hiện rỗng; route không hộp xám. Lượt chỉ có dòng `worked` (không user/trả lời/bước/lỗi) không được vẽ. Lượt đã dừng mà không có dòng `worked` (đóng app giữa chừng, lịch sử cũ) hiện nhãn `Worked` / `Đã làm` không kèm thời gian (`meta.workedNoTime`), không bao giờ `Worked for —`.
 
 ## Thought (hiển thị suy nghĩ)
 

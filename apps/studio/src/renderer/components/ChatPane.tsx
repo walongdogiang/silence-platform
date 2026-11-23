@@ -193,7 +193,8 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
 }
 
 function formatWorked(ms: number | undefined, t: T): string {
-  if (ms == null) return t("meta.worked", { time: "—" });
+  // A turn that stopped without a `done` (app closed, crash, old history) has no duration: say so, no "—".
+  if (ms == null || !Number.isFinite(ms)) return t("meta.workedNoTime");
   return t("meta.worked", { time: formatDuration(Math.max(1000, ms + 500)) });
 }
 
