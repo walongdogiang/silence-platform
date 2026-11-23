@@ -62,6 +62,39 @@ describe("RunIndicator", () => {
     expect(html).toContain('<span class="msg-step-time">18s</span>');
   });
 
+  it("mới gửi, chỉ có Planning: Planning là bước đang chạy (sao + shimmer), không còn dòng chữ tĩnh", () => {
+    const html = render([
+      { kind: "user", text: "fix it" },
+      { kind: "narrate", verb: "Planning next moves" },
+    ]);
+    expect(html).not.toContain("msg-status-brief");
+    expect(html).not.toContain("msg-explored");
+    expect(html).toMatch(/<li class="msg-step active"><span class="run-ind md working"/);
+    expect(html).toMatch(/msg-step-body run-shimmer"><span class="msg-step-verb">Planning next moves/);
+  });
+
+  it("có bước thật thì Planning biến mất, không đứng lại trong danh sách", () => {
+    const html = render([
+      { kind: "user", text: "fix it" },
+      { kind: "narrate", verb: "Planning next moves" },
+      { kind: "narrate", verb: "Read", detail: "a.ts" },
+      { kind: "narrate", verb: "Reading", detail: "b.ts" },
+    ]);
+    expect(html).not.toContain("Planning next moves");
+    expect(count(html, /msg-step active/g)).toBe(1);
+    expect(html).toMatch(/msg-step-verb">Reading/);
+  });
+
+  it("đang Thinking: không bước nào đang chạy; sao nằm ở nhãn Thinking", () => {
+    const html = render([
+      { kind: "user", text: "fix it" },
+      { kind: "narrate", verb: "Read", detail: "a.ts" },
+      { kind: "narrate", verb: "Thinking" },
+    ]);
+    expect(html).not.toContain("msg-step active");
+    expect(html).toMatch(/msg-thought-label active"><span class="run-ind md working"/);
+  });
+
   it("bước mới chạy dưới 3s không hiện thời gian", () => {
     const html = render([
       { kind: "user", text: "fix it" },

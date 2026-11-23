@@ -1152,14 +1152,6 @@ body.soft-scroll-dragging {
   .run-ind-star { animation: none; }
   .run-shimmer { animation: none; -webkit-mask-image: none; mask-image: none; }
 }
-.msg-status-brief {
-  margin: 0;
-  max-width: 56ch;
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  line-height: 1.45;
-  font-weight: var(--font-weight-normal);
-}
 .msg-thought-block {
   margin: 0;
   color: var(--text-muted);
