@@ -41,5 +41,19 @@
       "Read(./.env)",
       "Read(./.env.*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/todo-brief.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

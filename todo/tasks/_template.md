@@ -16,6 +16,8 @@ Link tới docs/ADR/backlog liên quan; không chép lại nội dung của chú
 
 ## Tiêu chí xong
 
+<!-- Chốt với user trước khi code. Mỗi dòng kiểm được; tick kèm chứng cứ, vd: - [x] vitest xanh (npm test, 214 pass). Hơn ~7 dòng thì tách việc. -->
+
 - [ ] Code + test theo phạm vi (AGENTS.md → Test theo phạm vi)
 - [ ] Docs/spec/rule cập nhật nếu đổi hành vi
 - [ ] PR đã merge
