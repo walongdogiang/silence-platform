@@ -1,5 +1,5 @@
 import type { SessionMode } from "./modes";
-import type { ErrorInfo, PermissionRisk } from "./types";
+import type { ErrorInfo, FilePreview, PermissionRisk } from "./types";
 export type CheckpointFile = { path: string; before: string; after: string };
 
 export type ChatLine =
@@ -78,7 +78,7 @@ export type ChatThread = {
 export type Diff = { path: string; before: string; after: string; applied?: boolean };
 /** `risk`: tier + reasons from the Risk Engine (docs/security/permissions.md). */
 /** `session_id`: session đang chờ duyệt — card chỉ hiện ở thread của session đó, không mất khi đổi tab. */
-export type Perm = { session_id: string; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk };
+export type Perm = { session_id: string; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk; preview?: FilePreview };
 
 export type ShellView = "chat" | "hidden";
 

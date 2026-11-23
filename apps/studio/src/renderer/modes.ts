@@ -1,18 +1,16 @@
-export type SessionMode = "agent" | "plan" | "ask" | "debug" | "review" | "multitask";
+/** Work modes. Debug and Review are listed in the composer as "coming soon" and have no mode yet. */
+export type SessionMode = "agent" | "plan" | "ask";
 
 /** Nhãn hiển thị (khớp menu Composer). */
 export const MODE_LABEL: Record<SessionMode, string> = {
   agent: "Agent",
   plan: "Plan",
   ask: "Ask",
-  debug: "Debug",
-  review: "Review",
-  multitask: "MultiTask",
 };
 
 /** Mode chỉ đọc ở phía UI (Engine mới là nơi thực thi: `SessionMode::read_only`). */
 export function isReadOnlyMode(mode: SessionMode): boolean {
-  return mode === "ask" || mode === "review" || mode === "plan";
+  return mode === "ask" || mode === "plan";
 }
 
 // Động từ chỉ việc sửa/tạo/xoá (VI + EN). `\p{L}` thay `\b` vì `\b` không hiểu chữ có dấu.

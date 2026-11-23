@@ -1520,6 +1520,110 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .perm-tier.logged, .perm-tier.auto { background: var(--surface-2); color: var(--text-secondary); }
 .perm-tier.block { background: color-mix(in srgb, var(--error) 16%, transparent); color: var(--error); }
 .perm-actions { flex-wrap: wrap; }
+/* TS core permission card (docs/frontend/chat.md "Card xin quyền"): docked above the composer,
+   full card (B) or one line (C). Primary = inverted text colour (white on dark, near-black on light). */
+.perm-dock { flex: none; max-width: 760px; width: calc(100% - 24px); margin: 8px auto 0; }
+.perm-card {
+  position: relative;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-1);
+  outline: none;
+}
+.perm-card.perm-level-caution { border-color: color-mix(in srgb, var(--warning) 40%, var(--border-subtle)); }
+.perm-card.perm-level-danger,
+.perm-card.perm-level-hard_block { border-color: color-mix(in srgb, var(--error) 50%, var(--border-subtle)); }
+.perm-card:focus-visible { box-shadow: 0 0 0 1px var(--text-muted); }
+.perm-icon { flex: none; color: var(--text-secondary); }
+.perm-level-caution .perm-icon { color: var(--warning); }
+.perm-level-danger .perm-icon, .perm-level-hard_block .perm-icon { color: var(--error); }
+.perm-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border-subtle); border-radius: 12px 12px 0 0; }
+.perm-card .perm-head h4 { margin: 0; flex: 1; min-width: 0; font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perm-risk { flex: none; font-size: var(--font-size-sm); color: var(--text-muted); white-space: nowrap; }
+.perm-risk::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--success); }
+.perm-risk-caution { color: var(--warning); }
+.perm-risk-caution::before { background: var(--warning); }
+.perm-risk-danger, .perm-risk-hard_block { color: var(--error); }
+.perm-risk-danger::before, .perm-risk-hard_block::before { background: var(--error); }
+.perm-tool { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--text-muted); }
+.perm-main { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 4px; }
+.perm-card .perm-countdown { margin: 0; }
+.perm-body { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--workspace); overflow: hidden; }
+.perm-body .perm-cmd,
+.perm-body .perm-input { margin: 0; padding: 9px 12px; max-height: 320px; overflow: auto; font-size: 12.5px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
+.perm-body .perm-cmd.clamped { max-height: calc(1.6em * 6 + 18px); overflow: hidden; }
+.perm-prompt { color: var(--text-muted); user-select: none; }
+.perm-more-lines { display: block; width: 100%; height: 26px; border: 0; border-top: 1px solid var(--border-subtle); background: transparent; color: var(--text-muted); font-size: var(--font-size-sm); cursor: pointer; }
+.perm-more-lines:hover { color: var(--text-primary); }
+.perm-kv { margin: 0; padding: 8px 12px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; font-size: 12.5px; }
+.perm-kv dt { font: 12px var(--mono); color: var(--text-muted); }
+.perm-kv dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.perm-preview-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); font-size: var(--font-size-sm); }
+.perm-preview-head .diff-card-file { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-primary); }
+.perm-preview .diff-card-body { max-height: 320px; overflow: auto; }
+.perm-new { padding: 1px 8px; border-radius: 99px; font-size: var(--font-size-sm); background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+.perm-why { display: flex; gap: 8px; align-items: flex-start; font-size: var(--font-size-base); color: var(--text-secondary); }
+.perm-why > svg { margin-top: 3px; color: var(--text-muted); }
+.perm-more { padding: 0; border: 0; background: none; color: var(--text-muted); font-size: var(--font-size-sm); text-decoration: underline dotted; cursor: pointer; }
+.perm-more:hover { color: var(--text-primary); }
+.perm-main > .perm-reasons { margin: 0; padding-left: 22px; }
+.perm-safer { color: var(--text-secondary); list-style: "→ "; }
+.perm-main > .perm-error, .perm-main > .perm-tainted { margin: 0; }
+.perm-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px 12px; }
+.perm-spacer { flex: 1; }
+.perm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 0;
+  background: color-mix(in srgb, var(--text-primary) 12%, var(--surface-1));
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.perm-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--text-primary) 18%, var(--surface-1)); }
+.perm-btn:focus-visible { outline: 2px solid var(--text-muted); outline-offset: 2px; }
+.perm-btn:disabled { opacity: 0.45; cursor: default; }
+.perm-btn.perm-ghost { background: transparent; color: var(--text-secondary); }
+.perm-btn.perm-ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text-primary); }
+.perm-btn.perm-allow { background: var(--text-primary); color: var(--surface-1); font-weight: var(--font-weight-semibold); }
+.perm-btn.perm-allow:hover:not(:disabled) { background: color-mix(in srgb, var(--text-primary) 88%, var(--surface-1)); }
+.perm-btn kbd { font: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 4px; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); opacity: 0.8; }
+.perm-split { position: relative; display: inline-flex; }
+.perm-split > .perm-allow:not(:only-of-type):first-child { border-radius: 8px 0 0 8px; }
+.perm-split > .perm-caret { border-radius: 0 8px 8px 0; padding: 0 7px; margin-left: 1px; }
+.perm-scope-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  min-width: 320px;
+  padding: 4px;
+  border: 1px solid var(--border-ui);
+  border-radius: 10px;
+  background: var(--surface-3);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 40%, transparent);
+}
+.perm-scope-menu button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-primary); font-size: var(--font-size-base); text-align: left; cursor: pointer; }
+.perm-scope-menu button:hover { background: var(--surface-hover); }
+.perm-scope-menu kbd { font: inherit; font-size: 11px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-ui); color: var(--text-muted); }
+.perm-scope-hint { margin: 2px 10px 4px; font-size: var(--font-size-sm); color: var(--text-muted); }
+.perm-compact { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 12px; border-radius: 10px; }
+.perm-cmd1 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12.5px var(--mono); color: var(--text-primary); }
+.perm-why1 { flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); color: var(--text-muted); }
+.perm-icon-btn { padding: 0 8px; }
+@container (max-width: 520px) { .perm-why1 { display: none; } .perm-scope-menu { min-width: 240px; } }
+/* Composer while answering a card with a note ("Deny with a note"). */
+.composer.composer-note { border-color: var(--warning); }
+.composer-note-bar { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); }
+.composer-note-chip { padding: 1px 7px; border-radius: 4px; background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+.composer-note-bar button { height: 22px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
+.composer-note-bar button:hover { background: var(--surface-3); color: var(--text-primary); }
 /* Lý do từ Risk Engine (docs/security/permissions.md): tiêu đề đậm + giải thích. */
 .perm-reasons { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: var(--font-size-sm); color: var(--text-secondary); }
 .perm-reasons strong { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
@@ -1563,7 +1667,9 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .external-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; max-width: 820px; }
 .external-line.user { align-self: flex-end; max-width: 85%; }
 .external-user { padding: 8px 12px; border-radius: 14px; background: var(--surface-2); white-space: pre-wrap; }
-.history-external-item { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; }
+/* `.history-item` (grid, defined later) would otherwise win and squeeze the title into its 22px column. */
+.history-item.history-external-item { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 6px 8px; text-align: left; color: var(--text-secondary); cursor: pointer; }
+.history-external-item .history-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-ext-where { margin-left: auto; color: var(--text-muted); flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Record a lesson (roadmap 1.9): wider dialog, one diff per proposed edit. */
 .unsaved-dialog.lesson-dialog { width: min(760px, 100%); max-height: calc(100vh - 48px); overflow: auto; }
@@ -1598,34 +1704,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .verify-checks pre { margin: 4px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: var(--font-size-sm); }
 .verify-round-title { margin: 6px 0 2px; color: var(--text-secondary); }
 /* Permission modes (TS core): yellow = needs attention, red = dangerous / blocked (docs/security/permissions.md). */
-.perm-card.perm-level-caution { border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
-.perm-card.perm-level-danger,
-.perm-card.perm-level-hard_block { border-color: color-mix(in srgb, var(--error) 55%, transparent); }
-.perm-level-caution > h4 .perm-tier { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
 .perm-countdown { margin: 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--error); }
-.perm-details-toggle {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px;
-  border: 0;
-  background: none;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-.perm-details-toggle:hover { color: var(--text-primary); }
-.perm-details { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: var(--font-size-sm); }
-.perm-details dt { color: var(--text-secondary); }
-.perm-details dd { margin: 0; color: var(--text-primary); }
-.perm-segments { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
-.perm-seg { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding-left: 8px; border-left: 3px solid var(--border-subtle); }
-.perm-seg.perm-level-caution { border-left-color: var(--warning); }
-.perm-seg.perm-level-danger, .perm-seg.perm-level-hard_block { border-left-color: var(--error); }
-.perm-seg span { color: var(--text-secondary); }
-.perm-impact { display: flex; flex-wrap: wrap; gap: 4px; }
-.perm-impact span { padding: 1px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-secondary); }
 .perm-tainted { margin: 4px 0 0; color: var(--warning); }
 /* Mode menu next to the chat input; Bypass stays red while it is on. */
 .mode-trigger.perm-trigger { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
@@ -1695,6 +1774,10 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   overflow: visible;
 }
 .composer-ctx {
+  /* Own stacking layer above the textarea and the mode row, so the Files menu (opening downward)
+     covers them instead of being painted under them. */
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1868,16 +1951,24 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .composer-files-dd .composer-files { width: 100%; }
 .composer-files:hover,
 .composer-files[aria-expanded="true"] { color: var(--text-primary); background: var(--surface-hover); }
-.files-menu {
-  top: calc(100% + 6px);
-  bottom: auto;
+/* `.mode-menu.` raises specificity over `.mode-menu` (later in this file): a `top` here plus its `bottom`
+   once squeezed the list to ~0px (items overflowed it, drawn as if under the composer). Opens upward:
+   the composer sits at the bottom of the window, a downward list would be cut off. */
+.mode-menu.files-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
   left: 0;
   min-width: 240px;
   width: max-content;
   max-width: min(360px, 70vw);
+  max-height: min(380px, 55vh);
+  overflow: auto;
   z-index: 40;
+  /* Not the composer's own surface: the list must read as a layer on top of it. */
+  background: var(--surface-3);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 45%, transparent);
 }
-.files-menu-up {
+.mode-menu.files-menu-up {
   top: auto;
   bottom: calc(100% + 6px);
   right: 0;
@@ -1924,18 +2015,6 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   background: var(--accent);
   border-radius: 99px;
 }
-.composer-review {
-  flex: none;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
-.composer-review:hover { color: var(--text-primary); background: var(--surface-hover); }
 .composer textarea {
   width: 100%;
   min-height: 22px;
@@ -1977,6 +2056,8 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   bottom: calc(100% + 6px);
   z-index: 30;
   min-width: 148px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
   padding: 4px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-ui);
@@ -2003,7 +2084,9 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   text-align: left;
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-normal);
+  white-space: nowrap;
 }
+.mode-item > span { overflow: hidden; text-overflow: ellipsis; }
 .mode-item:hover { background: var(--surface-hover); color: var(--text-primary); }
 .mode-item.active {
   background: var(--surface-hover);

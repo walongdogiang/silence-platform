@@ -47,14 +47,17 @@ export type SandboxStatus =
   | { state: "degraded"; reason: string };
 export type NetworkList = { defaults: string[]; allow: string[] };
 
+/** File change a write/edit would make (TS core permission card). */
+export type FilePreview = { path: string; before: string; after: string };
+
 export type SessionEvent =
   | { type: "token"; text: string }
   | { type: "thinking"; text: string }
   | { type: "tool_start"; call_id: string; name: string; input: unknown }
   | { type: "tool_end"; call_id: string; name: string; ok: boolean; output: string }
-  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk }
+  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk; preview?: FilePreview }
   | { type: "plan"; markdown: string }
-  | { type: "mode_suggestion"; mode: "agent" | "plan" | "ask" | "debug" | "review" | "multitask"; reason: string }
+  | { type: "mode_suggestion"; mode: string; reason: string }
   /** `applied`: already written (Balanced) — UI offers Undo instead of Apply/Reject. */
   | { type: "diff"; path: string; before: string; after: string; applied?: boolean }
   | { type: "trace"; event: string; detail: unknown }

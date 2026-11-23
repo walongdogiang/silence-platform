@@ -1,5 +1,5 @@
 ---
-description: Spec quyền — lõi TS 5 chế độ (Ask/Manual/Accept edits/Auto/Bypass), mức vàng/đỏ/chặn cứng, luật allow/ask/deny, thẻ hỏi; Engine Rust (đóng băng) 4 tầng, Risk Engine, taint.
+description: Spec quyền — lõi TS 4 chế độ quyền (Auto/Manual/Accept edits/Bypass) và work mode Ask chỉ đọc, mức vàng/đỏ/chặn cứng, luật allow/ask/deny, thẻ hỏi; Engine Rust (đóng băng) 4 tầng, Risk Engine, taint.
 type: spec
 code:
   - packages/core/src/permissions/modes.ts
@@ -13,7 +13,7 @@ code:
 ---
 # Quyền của agent (permissions)
 
-## Lõi TS: 5 chế độ quyền (2026-11)
+## Lõi TS: 4 chế độ quyền (2026-11)
 
 Áp dụng cho session của lõi TS (`packages/core`, `SILENCE_CORE=1`). Phần từ mục "Nguyên tắc" trở xuống mô tả Engine Rust (đóng băng); Risk Engine và bảng mã vẫn dùng chung ý tưởng.
 
@@ -30,13 +30,12 @@ Chế độ quyết định theo mức (`modeAction`):
 
 | Chế độ | Đọc / shell chỉ đọc | Sửa file trong workspace | Còn lại xanh | Vàng | Đỏ | Chặn cứng |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ask` | chạy | **không có** | không có (chỉ `READ_CMD`, `GIT_READ`, `VERSION`) | không có | không có | không có |
+| `auto` (mặc định) | chạy | chạy | chạy | hỏi | hỏi | từ chối |
 | `manual` | chạy | hỏi | hỏi | hỏi | hỏi | từ chối |
 | `accept_edits` | chạy | chạy | hỏi | hỏi | hỏi | từ chối |
-| `auto` (mặc định) | chạy | chạy | chạy | hỏi | hỏi | từ chối |
 | `bypass` | chạy | chạy | chạy | chạy | chạy | `FS_DELETE_SYSTEM`, `DISK_DESTROY`: hỏi, đếm ngược 30 giây rồi tự từ chối; `SECRET_EXFIL`: hỏi; `POLICY_TAMPER`: chạy |
 
-Ask mode từ chối mọi tool khác (sửa file, MCP, mạng) kèm lời nhắc chuyển sang Manual/Auto (`ASK_MODE_REASON`). Giá trị đã lưu: `balanced`/`autonomous` → `auto`, `allowlist` → `manual`, `ask` cũ → Ask mới. `yolo` bị từ chối qua RPC.
+**Ask là work mode, không phải chế độ quyền** (session `mode: "ask"`, menu cách làm việc trong Composer). Ở Ask chỉ có đọc, tìm kiếm, shell chỉ đọc (`READ_CMD`, `GIT_READ`, `VERSION`) và tool nội bộ (`askModeAllows`); mọi tool khác (sửa file, MCP, mạng) bị từ chối kèm lời nhắc chuyển sang Agent (`ASK_MODE_REASON`), ở **mọi** chế độ quyền, kể cả Bypass, và allow rule cũng không mở rộng được. Lượt Ask không chạy kiểm chứng. Giá trị đã lưu: `balanced`/`autonomous` → `auto`, `allowlist` → `manual`, `ask` (chế độ quyền chỉ đọc cũ) → `auto` + work mode Ask (lõi: `session.create`/`session.set_permission`; Studio: `takeLegacyAskMode`). `yolo` bị từ chối qua RPC.
 
 ### Luật allow / ask / deny
 
@@ -48,11 +47,11 @@ Cú pháp Claude Code: `Bash(npm test:*)` (tiền tố), `Bash(git status)` (đ�
 | project | `~/.silence/projects/<repo>/permissions.yaml` (thẻ hỏi lưu vào đây) | allow, ask, deny |
 | repo | `.claude/settings.json` → `permissions` | **chỉ ask, deny** (repo chỉ được thắt chặt) |
 
-Thứ tự: luật deny → (Ask mode chặn tool không phải đọc) → chặn cứng / ngoại lệ Bypass → luật ask → luật allow (không áp cho đỏ) → chế độ. Deny thắng tất cả, kể cả Bypass. Với lệnh shell ghép, allow cần **mọi** đoạn khớp; ask/deny chỉ cần một đoạn. Không người trông: cái gì cần hỏi thì từ chối. Luật được đọc lại mỗi lượt. File luật là mục tiêu `POLICY_TAMPER`.
+Thứ tự: luật deny → (work mode Ask chặn tool không phải đọc) → chặn cứng / ngoại lệ Bypass → luật ask → luật allow (không áp cho đỏ) → chế độ. Deny thắng tất cả, kể cả Bypass. Với lệnh shell ghép, allow cần **mọi** đoạn khớp; ask/deny chỉ cần một đoạn. Không người trông: cái gì cần hỏi thì từ chối. Luật được đọc lại mỗi lượt. File luật là mục tiêu `POLICY_TAMPER`.
 
 ### Thẻ hỏi
 
-`session.event` `permission` mang `risk` (protocol 0.1.20): `level`, `codes`, `segments` (từng đoạn của lệnh ghép), `impact` (`network`, `outside_workspace`, `deletes`, `admin`, `undoable`), `source`, `tainted`, `mode`, `allow_rule` (không có với lệnh đỏ), `deny_rule`, `countdown_s`. Trả lời bằng `session.permission { decision: allow_once | allow_always | deny | deny_always }` (vẫn gửi `allow`/`scope` cho Engine Rust). `*_always` thêm luật vào file project. UI dịch mã sang lời giải thích theo ngôn ngữ giao diện.
+`session.event` `permission` mang `risk` (protocol 0.1.20): `level`, `codes`, `segments` (từng đoạn của lệnh ghép), `impact` (`network`, `outside_workspace`, `deletes`, `admin`, `undoable`), `source`, `tainted`, `mode`, `allow_rule` (không có với lệnh đỏ), `deny_rule`, `countdown_s`; ghi/sửa file còn có `preview { path, before, after }` (ngoài `risk`) để thẻ hiện diff thay input thô. Trả lời bằng `session.permission { decision: allow_once | allow_always | deny | deny_always }` (vẫn gửi `allow`/`scope` cho Engine Rust). `*_always` thêm luật vào file project. Studio chỉ đưa nút `allow_always` (lời thường, luật ở tooltip); `deny_always` vẫn được lõi nhận nhưng không còn nút. UI dịch mã sang lời giải thích theo ngôn ngữ giao diện.
 
 Bypass: bật bằng công tắc trong Settings, có cảnh báo lần đầu và nhãn đỏ thường trực cạnh ô chat; cấu hình repo không bật được. Mọi bước vẫn hiện trong chat và ghi audit ở mọi chế độ.
 

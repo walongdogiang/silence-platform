@@ -118,7 +118,14 @@ export type PermissionAnswer = "allow_once" | "allow_always" | "deny" | "deny_al
  * TS core permission modes (0.1.20, docs/security/permissions.md). The Rust Engine keeps
  * `PermissionMode`; Studio maps when the core is off.
  */
-export type CorePermissionMode = "ask" | "manual" | "accept_edits" | "auto" | "bypass";
+/** File change a write/edit would make, shown on the permission card (TS core). */
+export interface FilePreview {
+  path: string;
+  before: string;
+  after: string;
+}
+
+export type CorePermissionMode = "auto" | "manual" | "accept_edits" | "bypass";
 /** One check of a `verify` event (0.1.21). `skipped` = not run (refused). */
 export type VerifyCheck = { command: string; ok: boolean; skipped?: string; exit_code?: number | null; ms: number; output: string };
 /** Display level on the permission card: none, yellow, red, refused outright. */
@@ -173,7 +180,7 @@ export type SessionEvent =
   | { type: "thinking"; text: string }
   | { type: "tool_start"; call_id: string; name: string; input: unknown }
   | { type: "tool_end"; call_id: string; name: string; ok: boolean; output: string }
-  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk }
+  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string; risk?: PermissionRisk; preview?: FilePreview }
   | { type: "plan"; markdown: string }
   | { type: "mode_suggestion"; mode: SessionMode; reason: string }
   /** `applied`: already written (Balanced/Autonomous) — UI offers Undo instead of Apply/Reject. */

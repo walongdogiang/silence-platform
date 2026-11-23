@@ -19,7 +19,7 @@ import {
   Sparkles,
   Square,
   TriangleAlert,
-  Users,
+  MessageCircle,
   X,
 } from "lucide-react";
 import {
@@ -53,12 +53,13 @@ import {
 
 export type { SessionMode };
 
+/** Work modes. Debug and Review are shown but disabled until they are built (`mode: null`). */
 const MODES = [
-  { id: "Plan", title: "Plan", mode: "plan", desc: "mode.planDesc", Icon: List },
+  { id: "Ask", title: "Ask", mode: "ask", desc: "mode.askDesc", Icon: MessageCircle },
   { id: "Agent", title: "Agent", mode: "agent", desc: "mode.agentDesc", Icon: InfinityIcon },
-  { id: "Debug", title: "Debug", mode: "debug", desc: "mode.debugDesc", Icon: Bug },
-  { id: "MultiTask", title: "MultiTask", mode: "multitask", desc: "mode.multitaskDesc", Icon: Users },
-  { id: "Review", title: "Review", mode: "review", desc: "mode.reviewDesc", Icon: GitCompare },
+  { id: "Plan", title: "Plan", mode: "plan", desc: "mode.planDesc", Icon: List },
+  { id: "Debug", title: "Debug", mode: null, desc: "mode.soon", Icon: Bug },
+  { id: "Review", title: "Review", mode: null, desc: "mode.soon", Icon: GitCompare },
 ] as const;
 
 /** "Claude Opus 5.5" → "Opus 5.5" for the compact trigger; other names unchanged. */
@@ -112,6 +113,8 @@ export function Composer(props: {
   images?: string[];
   onImages?: (next: string[]) => void;
   onSend: () => void;
+  /** Answering a permission card with a note: warning border, chip and Cancel; Enter denies and sends. */
+  note?: { onCancel: () => void };
   /** Gửi tin hiện tại bằng mode khác (gợi ý khi đang ở mode chỉ đọc mà gõ yêu cầu sửa). */
   onSendAs?: (mode: SessionMode) => void;
   onChip: (chip: string) => void;
@@ -455,7 +458,7 @@ export function Composer(props: {
         </div>
       ) : null}
     <form
-      className={`composer${dragging ? " dragging" : ""}`}
+      className={`composer${dragging ? " dragging" : ""}${props.note ? " composer-note" : ""}`}
       onDragOver={onDragOver}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
@@ -475,17 +478,17 @@ export function Composer(props: {
             </button>
             {files.length > 0 ? filesMenu : null}
           </div>
-          <button
-            type="button"
-            className="composer-review"
-            title={t("composer.reviewTip")}
-            onClick={() => props.onChip("ReviewChanges")}
-          >
-            Review
+        </div>
+      ) : null}
+      {props.note ? (
+        <div className="composer-note-bar" role="status">
+          <span className="composer-note-chip">{t("perm.note.chip")}</span>
+          <button type="button" onClick={props.note.onCancel}>
+            {t("perm.note.cancel")}
           </button>
         </div>
       ) : null}
-      {props.onSendAs && (props.mode === "ask" || props.mode === "review") && !props.busy && !props.disabled && looksLikeEditRequest(props.prompt) ? (
+      {props.onSendAs && props.mode === "ask" && !props.busy && !props.disabled && looksLikeEditRequest(props.prompt) ? (
         <div className="composer-hint" role="status">
           <span>{t("composer.readOnlyHint", { mode: MODE_LABEL[props.mode] })}</span>
           <button type="button" onClick={() => props.onSendAs?.("agent")}>
@@ -546,9 +549,12 @@ export function Composer(props: {
         value={props.prompt}
         onChange={(e) => props.onPrompt(e.target.value)}
         onPaste={onPaste}
-        placeholder={t("composer.placeholder")}
+        placeholder={props.note ? t("perm.note.placeholder") : t("composer.placeholder")}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key === "Escape" && props.note) {
+            e.preventDefault();
+            props.note.onCancel();
+          } else if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             if (!noVision) props.onSend();
           }
@@ -577,9 +583,10 @@ export function Composer(props: {
                   key={m.id}
                   type="button"
                   role="menuitem"
-                  className={`mode-item${picked === m.id ? " active" : ""}`}
+                  className={`mode-item${picked === m.id ? " active" : ""}${m.mode ? "" : " disabled"}`}
+                  aria-disabled={!m.mode}
                   title={t(m.desc)}
-                  onClick={() => pick(m.id)}
+                  onClick={() => m.mode && pick(m.id)}
                 >
                   <m.Icon size={14} />
                   <span>{m.title}</span>

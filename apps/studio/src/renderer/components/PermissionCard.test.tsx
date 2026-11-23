@@ -9,11 +9,11 @@ import { PermissionCard } from "./PermissionCard";
 import { PermModeMenu } from "./PermModeMenu";
 
 const noop = () => {};
-const card = (risk: PermissionRisk, lang: "en" | "vi" = "en") => {
-  const perm: Perm = { session_id: "s", request_id: "r", name: "Bash", input: { command: "npm test && git push origin main" }, reason: "", risk };
+const card = (risk: PermissionRisk, lang: "en" | "vi" = "en", extra: Partial<Perm> = {}, detailsOpen = false, note = false) => {
+  const perm: Perm = { session_id: "s", request_id: "r", name: "Bash", input: { command: "npm test && git push origin main" }, reason: "", risk, ...extra };
   return renderToStaticMarkup(
     <LangContext.Provider value={lang}>
-      <PermissionCard perm={perm} busy={false} error={false} onAnswer={noop} onAllow={noop} onDeny={noop} />
+      <PermissionCard perm={perm} busy={false} error={false} onAnswer={noop} onAllow={noop} onDeny={noop} onDenyNote={note ? noop : undefined} detailsOpen={detailsOpen} />
     </LangContext.Provider>,
   );
 };
@@ -34,29 +34,69 @@ const red: PermissionRisk = {
 };
 
 describe("PermissionCard (TS core)", () => {
-  it("shows the level, the real command and the buttons; a red card has no Always allow", () => {
+  it("red card: title from the reason, level, the real command; Deny + Allow without Enter, no scope menu", () => {
     const out = card(red);
     expect(out).toContain("perm-level-danger");
-    expect(out).toContain("Dangerous");
-    expect(out).toContain("Push straight to the main branch");
-    expect(out).toContain("npm test &amp;&amp; git push origin main");
-    expect(out).toContain("Allow once");
+    expect(out).toContain("<h4>Push straight to the main branch</h4>");
+    expect(out).toContain('class="perm-risk perm-risk-danger">Dangerous</span>');
+    expect(out).toContain('<span class="perm-prompt">$ </span>');
+    expect(out).toContain("git push origin main");
+    expect(out).toContain("Deny<kbd>Esc</kbd></button>");
+    expect(out).toContain(">Allow</button>"); // no Enter on red cards
+    expect(out).not.toContain("perm-caret");
     expect(out).not.toContain("Always allow");
-    expect(out).toContain("Deny, add rule Bash(git push:*)");
+    expect(out).not.toContain("perm-compact");
   });
 
-  it("keeps details folded by default", () => {
-    const out = card(red);
-    expect(out).toContain('aria-expanded="false"');
-    expect(out).not.toContain("What it does");
-    expect(out).not.toContain("Uses the network");
+  it("keeps the other reasons folded behind +N", () => {
+    const out = card({ ...red, codes: ["GIT_PUSH_DEFAULT", "NET_ACCESS"], reasons: [] });
+    expect(out).toContain('aria-expanded="false">+1 more</button>');
+    expect(out).not.toContain('class="perm-reasons"');
+    expect(card({ ...red, codes: ["GIT_PUSH_DEFAULT", "NET_ACCESS"], reasons: [] }, "en", {}, true)).toContain('class="perm-reasons"');
   });
 
-  it("offers Always allow on a yellow card and shows a Bypass countdown", () => {
+  it("Bypass countdown card stays full, with the scope menu trigger and the countdown", () => {
     const out = card({ tier: "ask", reasons: [], level: "caution", codes: ["PKG_INSTALL"], allow_rule: "Bash(npm install:*)", countdown_s: 30 }, "vi");
+    expect(out).not.toContain("perm-compact");
     expect(out).toContain("Cần chú ý");
-    expect(out).toContain("Luôn cho phép Bash(npm install:*)");
+    expect(out).toContain('aria-label="Chọn phạm vi cho phép"');
+    expect(out).toContain("Cho phép<kbd>Enter</kbd></button>");
+    expect(out).toContain("Từ chối<kbd>Esc</kbd></button>");
     expect(out).toContain("Tự từ chối sau 30 giây");
+  });
+
+  it("one line (C) for a short low-risk command with a rule; ⌃ opens the full card", () => {
+    const out = card({ tier: "ask", reasons: [], level: "caution", codes: ["PKG_INSTALL"], allow_rule: "Bash(npm install:*)" }, "vi", { input: { command: "npm install zod@3.23.8" } });
+    expect(out).toContain("perm-card perm-compact perm-level-caution");
+    expect(out).toContain('<code class="perm-cmd1" title="npm install zod@3.23.8">npm install zod@3.23.8</code>');
+    expect(out).toContain('<span class="perm-why1">Cài package</span>');
+    expect(out).toContain('aria-label="Mở thẻ đầy đủ"');
+    expect(out).not.toContain("<h4>");
+  });
+
+  it("a write card shows the file and its diff, and offers Deny with a note", () => {
+    const safe: PermissionRisk = { tier: "auto", reasons: [], level: "safe", codes: ["FS_WRITE_WS"], allow_rule: "Edit(**)" };
+    const out = card(safe, "vi", {
+      name: "Write",
+      input: { file_path: "D:\\w\\hello.py", content: 'print("xin chào")\n' },
+      preview: { path: "hello.py", before: "", after: 'print("xin chào")\n' },
+    }, false, true);
+    expect(out).toContain("<h4>Cho phép tạo hello.py?</h4>");
+    expect(out).toContain("File mới");
+    expect(out).toContain("diff-row add");
+    expect(out).not.toContain("file_path");
+    expect(out).toContain("Từ chối kèm lời dặn");
+    expect(out).not.toContain("perm-compact");
+  });
+
+  it("MCP tools show a key/value table with a JSON switch", () => {
+    const out = card({ tier: "ask", reasons: [], level: "caution", codes: ["MCP_CALL"] }, "en", {
+      name: "mcp__github__create_issue",
+      input: { repo: "5ilence", title: "Fix tooltip flicker", labels: ["bug"] },
+    });
+    expect(out).toContain('<dl class="perm-kv"><dt>repo</dt><dd title="5ilence">5ilence</dd>');
+    expect(out).toContain('<dd title="[&quot;bug&quot;]">[&quot;bug&quot;]</dd>');
+    expect(out).toContain(">JSON</button>");
   });
 
   it("keeps the Rust Engine card for cards without a level", () => {
@@ -86,7 +126,8 @@ describe("PermModeMenu", () => {
           <PermModeMenu mode={mode} onMode={noop} coreOn bypassEnabled />
         </LangContext.Provider>,
       );
-    expect(html("auto")).toContain("Auto (default)");
+    expect(html("auto")).toContain("<span>Auto</span>");
+    expect(html("auto")).not.toContain("default");
     expect(html("bypass")).toContain("perm-trigger-bypass");
     expect(html("bypass")).toContain("Bypass permissions");
   });

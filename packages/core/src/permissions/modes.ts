@@ -1,17 +1,19 @@
-// Permission modes (docs/security/permissions.md): Ask · Manual · Accept edits · Auto (default) ·
-// Bypass permissions. The Risk Engine labels a call (level + reason codes); the mode turns that label
-// into allow / ask / deny. User rules (permissions/rules.ts) are applied before the mode by the caller.
+// Permission modes (docs/security/permissions.md): Auto (default) · Manual · Accept edits · Bypass
+// permissions. The Risk Engine labels a call (level + reason codes); the mode turns that label into
+// allow / ask / deny. User rules (permissions/rules.ts) are applied before the mode by the caller.
+// Read-only "Ask" is a work mode (session `mode: "ask"`), enforced with `askModeAllows`.
 import type { ToolCall } from "../backends/types.js";
 import type { Verdict } from "../risk/classify.js";
 import { policy, TIER_ORDER } from "../risk/policy.js";
 
-export type PermMode = "ask" | "manual" | "accept_edits" | "auto" | "bypass";
-export const PERM_MODES: PermMode[] = ["ask", "manual", "accept_edits", "auto", "bypass"];
+export type PermMode = "auto" | "manual" | "accept_edits" | "bypass";
+export const PERM_MODES: PermMode[] = ["auto", "manual", "accept_edits", "bypass"];
 export const DEFAULT_MODE: PermMode = "auto";
 
 /**
  * Read a stored or requested mode. Legacy values: `balanced` → `auto`, `allowlist` → `manual`,
- * `autonomous` → `auto`, and a stored `ask` is the NEW Ask (read-only). `yolo` is never accepted.
+ * `autonomous` → `auto`, and `ask` (the old read-only permission mode) → `auto` — the session manager
+ * turns it into the Ask work mode. `yolo` is never accepted.
  */
 export function normalizeMode(raw: unknown): PermMode | null {
   if (raw === "yolo") return null;
@@ -39,7 +41,7 @@ export type ModeAction =
 export const BYPASS_COUNTDOWN_SEC = 30;
 
 export const ASK_MODE_REASON =
-  "Ask mode is read-only: only reading, searching and read-only shell commands are available. Do not retry; answer from what you can read, and tell the user to switch to Manual or Auto if a change is needed.";
+  "Ask mode is read-only: only reading, searching and read-only shell commands are available. Do not retry; answer from what you can read, and tell the user to switch to Agent if a change is needed.";
 
 /** In Ask mode: reading, searching, read-only shell, and the agent's own bookkeeping. */
 export function askModeAllows(call: ToolCall, v: Verdict): boolean {
@@ -60,7 +62,6 @@ export function askModeAllows(call: ToolCall, v: Verdict): boolean {
 /** What `mode` does with a call the Risk Engine labelled `v` (no user rule matched). */
 export function modeAction(mode: PermMode, call: ToolCall, v: Verdict): ModeAction {
   const level = levelOf(v);
-  if (mode === "ask") return askModeAllows(call, v) ? { kind: "allow" } : { kind: "deny", reason: ASK_MODE_REASON, by: "mode" };
   if (mode === "bypass") {
     if (v.codes.some((c) => policy().bypass_countdown.includes(c))) return { kind: "ask", countdownSec: BYPASS_COUNTDOWN_SEC };
     if (v.codes.some((c) => policy().bypass_ask.includes(c))) return { kind: "ask" };

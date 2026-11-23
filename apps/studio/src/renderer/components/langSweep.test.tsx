@@ -137,7 +137,7 @@ describe("UI language sweep", () => {
     expect(inLang("en", pane)).toContain("Explored 1 file");
     expect(inLang("en", history)).toContain("New chat");
     expect(inLang("vi", pane)).toContain("Đã khảo sát");
-    expect(inLang("vi", pane)).toContain("Cho phép một lần");
+    expect(inLang("vi", pane)).toContain("Cho phép");
     expect(inLang("vi", composer)).toContain("Lập kế hoạch, xây dựng");
     expect(inLang("en", composer)).toContain("Plan, Build, / for skills, @ for context");
   });

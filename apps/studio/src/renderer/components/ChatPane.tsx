@@ -11,7 +11,6 @@ import {
   Code2,
   Copy,
   FolderOpen,
-  GitCompare,
   Info,
   ListChecks,
   Pause,
@@ -73,7 +72,6 @@ import { MessageMenu, type MenuAt, type MessageMenuItem } from "./MessageMenu";
 const MODES = [
   { id: "Plan", title: "Plan", desc: "hub.planDesc", Icon: ListChecks },
   { id: "Code", title: "Code", desc: "hub.codeDesc", Icon: Code2 },
-  { id: "Review", title: "Review", desc: "hub.reviewDesc", Icon: GitCompare },
 ] as const;
 
 const PROMPTS: MsgKey[] = ["hub.prompt1", "hub.prompt2", "hub.prompt3"];
@@ -683,6 +681,8 @@ export function ChatPane(props: {
   onDeny: () => void;
   /** TS core card (`risk.level`): allow once / always, deny, deny + rule. */
   onAnswer?: (a: PermAnswer) => void;
+  /** TS core card: deny and send a note from the composer. */
+  onDenyNote?: () => void;
   onApplyDiff: () => void;
   onRejectDiff: () => void;
   onShowDiff: () => void;
@@ -1145,17 +1145,6 @@ export function ChatPane(props: {
           </div>
         ) : null}
 
-        {props.perm ? (
-          <PermissionCard
-            perm={props.perm}
-            busy={Boolean(props.permBusy)}
-            error={Boolean(props.permError)}
-            onAnswer={props.onAnswer ?? (() => undefined)}
-            onAllow={props.onAllow}
-            onDeny={props.onDeny}
-          />
-        ) : null}
-
         {props.diff && (
           <DiffCard
             diff={props.diff}
@@ -1167,6 +1156,20 @@ export function ChatPane(props: {
         )}
       </div>
       </SoftScroll>
+      {props.perm ? (
+        // Docked above the composer, outside the scrolling log (docs/frontend/chat.md "Card xin quyền").
+        <div className="perm-dock">
+          <PermissionCard
+            perm={props.perm}
+            busy={Boolean(props.permBusy)}
+            error={Boolean(props.permError)}
+            onAnswer={props.onAnswer ?? (() => undefined)}
+            onDenyNote={props.onDenyNote}
+            onAllow={props.onAllow}
+            onDeny={props.onDeny}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

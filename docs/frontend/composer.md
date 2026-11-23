@@ -28,9 +28,11 @@ Bám Cursor chat input. File: `components/Composer.tsx`.
 
 ## Mode
 
-Thứ tự menu: **Plan → Agent → Debug → MultiTask → Review**. Icon: List, Infinity, Bug, Users, GitCompare. **Ask** không còn là mode của Composer: nó là một chế độ quyền (menu bên phải, dưới).
+Hai menu riêng, chọn độc lập: **cách làm việc** (mode, nút cam) và **mức quyền** (chế độ quyền, ngay sau).
 
-**Chế độ quyền** (`components/PermModeMenu.tsx`), ngay sau menu mode, trước model: **Ask · Manual · Accept edits · Auto (mặc định) · Bypass permissions**, mô tả ở tooltip. Ask và Bypass mờ khi lõi TS chưa chạy (`core.status`); Bypass còn cần công tắc trong Settings → Quyền (bấm mục mờ mở Settings). Đang ở Bypass thì nút trigger **đỏ** thường trực. Chọn ở đây hay ở Settings là cùng một giá trị (`silence.permission.mode`), áp ngay cho phiên đang mở (`session.set_permission`) và gửi lại trước mỗi lượt. Chi tiết: `docs/security/permissions.md`.
+Thứ tự menu mode: **Ask → Agent → Plan → Debug → Review**. Icon: MessageCircle, Infinity, List, Bug, GitCompare. **Debug** và **Review** chưa làm: hiện trong menu nhưng mờ, không bấm được, tooltip "Sắp có"; không có mode id hay logic nào. Không còn MultiTask.
+
+**Chế độ quyền** (`components/PermModeMenu.tsx`), ngay sau menu mode, trước model: **Auto · Manual · Accept edits · Bypass permissions** (Auto là mặc định nhưng không ghi chữ "mặc định"), mô tả ở tooltip. Bypass mờ khi lõi TS chưa chạy (`core.status`); Bypass còn cần công tắc trong Settings → Quyền (bấm mục mờ mở Settings). Đang ở Bypass thì nút trigger **đỏ** thường trực. Chọn ở đây hay ở Settings là cùng một giá trị (`silence.permission.mode`), áp ngay cho phiên đang mở (`session.set_permission`) và gửi lại trước mỗi lượt. Chi tiết: `docs/security/permissions.md`.
 
 **Worktree** (`WorktreeMenu` trong `components/Worktree.tsx`, chỉ khi lõi TS chạy và có workspace), sau menu chế độ quyền: **Worktree: tự động** (mặc định; tách khi chat khác đang chạy hoặc để lại thay đổi chưa commit) · **luôn tách** · **không tách**. Chọn trước tin nhắn đầu tiên (đổi thì Studio tạo lại session còn trống); sau đó nút khoá (🔒) và ghi **Trong worktree** nếu chat đang chạy trong worktree.
 
@@ -40,19 +42,18 @@ Mỗi mode gửi đúng `mode` cho Engine (hồ sơ ở `profile()` trong `crate
 
 | Mode | `mode` | Hành vi |
 | --- | --- | --- |
+| Ask | `ask` | Chỉ đọc: đọc, tìm kiếm, shell chỉ đọc. Lõi TS ép ở mọi chế độ quyền (`askModeAllows`, `docs/security/permissions.md`); Engine Rust ép bằng `SessionMode::read_only`. Gõ yêu cầu sửa thì hiện gợi ý **Gửi bằng Agent**. |
 | Plan | `plan` | Chỉ đọc + `submit_plan`. Banner: **Duyệt plan** (Engine lưu `.silence/plans/<ts>.md`, chuyển Agent và tự chạy lượt implement) và **Góp ý / sửa** (giữ Plan, model nộp lại plan). |
 | Agent / Code | `agent` | Đủ tool; ghi qua permission + diff. |
-| Debug | `debug` | Như Agent + quy trình tái hiện → giả thuyết → bằng chứng → sửa nhỏ nhất → chạy lại. Auto dùng tier `strong`. Gửi kèm 60 dòng cuối tab Output (`context` của `session.prompt`, Engine redact). |
-| MultiTask | `multitask` | Như Agent; tách việc độc lập và giao cho sub-agent `task` (hiện chạy tuần tự). |
-| Review | `review` | Chỉ đọc; review thay đổi chưa commit, báo lỗi theo mức độ kèm `path:line`. Auto dùng `strong`. Nút **Review** ở hàng Files chọn mode này và điền sẵn yêu cầu. |
+| Debug, Review | không có | Chưa làm (mục mờ). |
 
-Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat.md`). Mode chỉ đọc (Plan/Ask/Review): không có `write`/`edit`/`shell`/`task`, chỉ MCP tool có `readOnlyHint`; Engine từ chối tool ghi kể cả khi model tự gọi. Sub-agent ghi file luôn đi qua permission + diff như agent chính. Mode được đồng bộ bằng `session.set_mode` trước mỗi `session.prompt`.
+Ask có thêm tool `suggest_mode` ở Engine Rust (xem "Gợi ý đổi mode" trong `chat.md`; gợi ý sang mode không còn trong menu bị bỏ qua). Mode chỉ đọc (Plan/Ask): không có `write`/`edit`/`shell`/`task`, chỉ MCP tool có `readOnlyHint`; Engine từ chối tool ghi kể cả khi model tự gọi. Sub-agent ghi file luôn đi qua permission + diff như agent chính. Mode được đồng bộ bằng `session.set_mode` trước mỗi `session.prompt`.
 
 ## Model và Effort
 
 - **Auto** luôn là dòng đầu danh sách, ở **mọi source** (kể cả Claude CLI). Dưới chữ Auto có một dòng tóm tắt theo cấu hình của source đang chọn, ví dụ "Opus lập kế hoạch · Sonnet thực thi · Haiku việc phụ" (`autoSummary`). Auto **không đọc nội dung prompt**. Engine chọn slot theo mode và mục đích của lời gọi (mặc định dưới đây; slot của lượt chính đổi được theo từng mode trong Tuỳ chỉnh Auto):
-  - **Frontier**: Plan, Review, subagent review.
-  - **Strong**: Agent, Ask, Debug, MultiTask, lượt thực thi sau Approve plan, subagent implement.
+  - **Frontier**: Plan, subagent review.
+  - **Strong**: Agent, Ask, lượt thực thi sau Approve plan, subagent implement.
   - **Small**: tiêu đề chat, subagent explore.
 
   Gặp khó thì leo cấp, bậc 1 là effort +1, bậc 2 là lên Frontier, và giữ Frontier đến hết lượt. Tín hiệu leo cấp: test đỏ sau khi sửa, cùng tool lỗi 2 lần, lặp cùng lời gọi 3 lần hoặc 4 bước liền không tiến triển, trả lời rỗng, lỗi provider tạm thời. Ở Debug, test đỏ đầu tiên lên thẳng Frontier. Trên Claude CLI không đổi model giữa lượt được: lượt có tín hiệu xấu khiến lượt **sau** bắt đầu ở Frontier.
@@ -134,4 +135,4 @@ Ask/Review có thêm tool `suggest_mode` (xem "Gợi ý đổi mode" trong `chat
 
 ## Files menu
 
-Mở xuống từ chip (khi có file) hoặc lên từ kẹp giấy (khi 0 file, chỉ usage). “Show context usage” một dòng, `min-width: 240px`.
+Mở **lên** từ chip (khi có file; ô nhập nằm sát đáy cửa sổ nên mở xuống sẽ bị cắt) hoặc lên từ kẹp giấy (khi 0 file, chỉ usage). Nền `--surface-3` có bóng (không trùng nền ô nhập), cao tối đa `min(380px, 55vh)` rồi cuộn. “Show context usage” một dòng, `min-width: 240px`. Rule CSS viết `.mode-menu.files-menu` để thắng `.mode-menu` (khai báo sau, có `bottom`).

@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Hand, MessageCircle, PencilLine, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Check, ChevronDown, Hand, PencilLine, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useT } from "../i18n";
 import { PERM_MODES, permModeAvailable, type UiPermMode } from "../permissionUi";
 
 const ICON: Record<UiPermMode, typeof ShieldCheck> = {
-  ask: MessageCircle,
+  auto: ShieldCheck,
   manual: Hand,
   accept_edits: PencilLine,
-  auto: ShieldCheck,
   bypass: ShieldAlert,
 };
 
@@ -26,7 +25,7 @@ export function PermModeMenu(props: {
   const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const current = PERM_MODES.find((m) => m.id === props.mode) ?? PERM_MODES[3]!;
+  const current = PERM_MODES.find((m) => m.id === props.mode) ?? PERM_MODES[0]!;
   const Icon = ICON[current.id];
 
   useEffect(() => {
