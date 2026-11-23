@@ -54,6 +54,17 @@ describe("ChatPane turns", () => {
     expect(html).not.toContain("Worked for");
   });
 
+  it("lượt dừng giữa chừng không có dòng worked: nhãn không có thời gian, không ra \"Worked for —\"", () => {
+    const html = render([
+      { kind: "user", text: "refactor it" },
+      { kind: "narrate", verb: "Read", detail: "a.ts" },
+      { kind: "token", text: "partial answer" },
+    ]);
+    expect(html).not.toContain("Worked for");
+    expect(html).not.toContain("—");
+    expect(html).toContain("Worked");
+  });
+
   it("tin user cũ không có `at`: giờ gửi suy ra từ worked.at − worked.ms; câu trả lời có giờ riêng", () => {
     const done = Date.now() - 60 * 60_000;
     const html = render([

@@ -126,4 +126,35 @@ describe("metrics RPC", () => {
     await expect(client.call("session.external_messages", { backend_session_id: "ext-1234" })).resolves.toEqual({ lines: [{ role: "user", text: "do it" }] });
     await expect(client.call("session.external_messages", { backend_session_id: "../x" })).rejects.toThrow(/required/);
   });
+
+  it("reads many outside transcripts at once (bounded), counts each one, and skips an unreadable one", async () => {
+    const modified = Date.now() - 60_000;
+    const ids = Array.from({ length: 40 }, (_, i) => `ext-${String(i).padStart(4, "0")}`);
+    let running = 0;
+    let peak = 0;
+    const core = createCoreWithSessions({
+      host: "test",
+      dataDir: tmp("m-data-"),
+      home: tmp("m-home-"),
+      sessions: {
+        backends: {},
+        listExternal: async () => ids.map((id) => ({ sessionId: id, summary: id, lastModified: modified, cwd: "D:/w/shop" })),
+        externalMessages: async (id) => {
+          running++;
+          peak = Math.max(peak, running);
+          await new Promise((r) => setTimeout(r, 5));
+          running--;
+          if (id === "ext-0007") throw new Error("unreadable");
+          return [{ type: "user", message: { content: "do it" } }];
+        },
+      },
+    });
+    const [a, b] = memoryPair();
+    core.server.attach(a);
+    const client = new RpcClient(b);
+    const sum = await client.call<{ external: { turns: number } }>("metrics.summary", { days: 7 });
+    expect(sum.external.turns).toBe(39);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(8);
+  });
 });
