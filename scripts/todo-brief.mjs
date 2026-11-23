@@ -41,12 +41,29 @@ export function criteria(taskMd) {
   return total ? { done, total } : null;
 }
 
+/** Giá trị một trường đơn trong frontmatter (bỏ chú thích `# …`); rỗng → null. */
+export function field(taskMd, name) {
+  const fm = taskMd.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
+  const v = fm.match(new RegExp(`^${name}:[ \\t]*([^#\\r\\n]*)`, "m"))?.[1].trim();
+  return v ? v : null;
+}
+
+/** Model mặc định theo pha (skill todo → "Pha và model"). */
+export const PHASE_MODEL = { design: "Opus", plan: "Opus", build: "Sonnet", verify: "Sonnet" };
+
 export function brief(md, readTask = () => null) {
   const s = sections(md);
   const open = new Set(Object.values(s).flat().map((l) => parseItem(l).id));
   const withProgress = (it) => {
-    const c = it.link ? criteria(readTask(it.link) ?? "") : null;
-    return c ? `${it.title} (tiêu chí ${c.done}/${c.total})` : it.title;
+    const task = it.link ? readTask(it.link) ?? "" : "";
+    const parts = [];
+    const phase = field(task, "phase");
+    if (phase) parts.push(`pha ${phase}${PHASE_MODEL[phase] ? ` → ${PHASE_MODEL[phase]}` : ""}`);
+    const c = criteria(task);
+    if (c) parts.push(`tiêu chí ${c.done}/${c.total}`);
+    const pr = field(task, "pr");
+    if (pr) parts.push(`PR #${pr.replace(/^#/, "")}`);
+    return parts.length ? `${it.title} (${parts.join(" · ")})` : it.title;
   };
   const lines = [];
   const now = (s.Now ?? []).map(parseItem);
