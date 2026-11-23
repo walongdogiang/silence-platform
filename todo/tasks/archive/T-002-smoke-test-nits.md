@@ -1,9 +1,16 @@
 ---
 id: T-002
 title: Sửa các điểm nhỏ còn lại sau chạy thử 1.8–1.11
+type: fix
 status: done
+phase: verify
+area: [studio, core]
+size: M
 depends: []
+branch: fix/smoke-test-nits
+pr: 64
 created: 2026-11-23
+updated: 2026-11-24
 ---
 
 ## Mục tiêu
