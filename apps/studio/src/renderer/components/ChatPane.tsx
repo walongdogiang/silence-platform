@@ -88,6 +88,8 @@ type Turn = {
   worked?: { ms: number; at: number };
   thought?: { ms?: number; brief: string; body?: string };
   narrations: NarrateStep[];
+  /** Bước cuối đã xong: sau nó có kết quả tool (`tool`) hoặc chữ trả lời (`token`). Bước mới thì về false. */
+  stepDone?: boolean;
   checkpoint?: { id: string; at: number; label: string; files: { path: string; before: string; after: string }[] };
   traces: ChatLine[];
   ai?: { text: string; at?: number };
@@ -151,7 +153,9 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
         body: l.body != null ? l.body : prev || undefined,
       };
     } else if (l.kind === "narrate") {
-      ensure(i).narrations.push(lineToStep(l));
+      const t = ensure(i);
+      t.narrations.push(lineToStep(l));
+      t.stepDone = false;
     } else if (l.kind === "checkpoint") {
       ensure(i).checkpoint = { id: l.id, at: l.at, label: l.label, files: l.files };
     } else if (l.kind === "verify") {
@@ -159,6 +163,7 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
       t.verify = [...(t.verify ?? []), l];
     } else if (l.kind === "token") {
       const t = ensure(i);
+      if (t.narrations.length) t.stepDone = true;
       // The agent's answer to a failed check round starts a new paragraph of the same turn.
       const afterVerify = lines[i - 1]?.kind === "verify";
       if (t.ai) t.ai.text += afterVerify && t.ai.text ? `\n\n${l.text}` : l.text;
@@ -168,7 +173,9 @@ function groupTurns(lines: ChatLine[], busy: boolean): Turn[] {
     } else if (l.kind === "mode_suggest") {
       ensure(i).suggest = l;
     } else {
-      ensure(i).traces.push(l);
+      const t = ensure(i);
+      t.traces.push(l);
+      if (l.kind === "tool" && t.narrations.length) t.stepDone = true;
     }
   }
 
@@ -247,14 +254,14 @@ function displaySteps(turn: Turn): { step: NarrateStep; active: boolean }[] {
   }
   /* Live (status.md → Run indicator): Planning là một bước như mọi bước, nhưng chỉ khi nó là việc đang làm —
    * có bước thật thì nó biến mất, không đứng lại in đậm. Thinking/Thought có block riêng nên không vào danh sách;
-   * đang Thinking thì không bước nào "đang chạy". */
+   * đang Thinking, hoặc bước cuối đã có kết quả tool / model đang viết câu trả lời, thì không bước nào "đang chạy". */
   const ns = turn.narrations.filter((s) => !/^Thought$/i.test(s.verb));
   const thinking = /^Thinking$/i.test(ns[ns.length - 1]?.verb ?? "");
   const raw = mergeReadSteps(
-    ns.filter((s, i) => !/^Thinking$/i.test(s.verb) && (!isPlanningVerb(s.verb) || i === ns.length - 1)),
+    ns.filter((s, i) => !/^Thinking$/i.test(s.verb) && (!isPlanningVerb(s.verb) || (i === ns.length - 1 && !turn.stepDone))),
   );
   return raw.map((s, i) => {
-    const active = !thinking && i === raw.length - 1;
+    const active = !thinking && !turn.stepDone && i === raw.length - 1;
     return active ? { step: s, active } : { step: narrateToPast(s), active: false };
   });
 }
