@@ -1,10 +1,17 @@
 # Việc cần làm
 
-Nguồn sự thật duy nhất cho việc sắp làm. Mỗi việc một dòng; việc cần hơn ~5 dòng mô tả thì có file riêng trong `tasks/`.
-Cách thêm / lấy việc tiếp theo / đóng việc: skill `todo` (`.claude/skills/todo/SKILL.md`). Việc đã xong: [`DONE.md`](DONE.md).
+Nguồn sự thật duy nhất cho việc sắp làm. Mỗi việc một dòng; việc cần hơn ~5 dòng mô tả (và mọi việc ở Now) có file riêng trong `tasks/`.
+Quy trình: skill `todo` (`.claude/skills/todo/SKILL.md`). Việc đã xong: [`DONE.md`](DONE.md).
 Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness](../docs/adapters/migration.md) — nội dung chi tiết của mốc nằm ở đó.
 
-Mã tiếp theo: T-019
+```
+/todo            xem bảng + việc tiếp theo
+/todo add …      thêm việc (AI đề xuất chỗ đặt)
+/todo done       đóng việc đang làm (kiểm tiêu chí trước)
+/todo log        ghi nhật ký trước khi đóng chat
+```
+
+Mã tiếp theo: T-020
 
 ## Now
 
@@ -36,6 +43,7 @@ Mã tiếp theo: T-019
 - T-015 4.2 Renderer chạy trên web, PWA cho điện thoại
 - T-016 4.3 Thông báo đẩy, duyệt lệnh rủi ro từ xa
 - T-017 4.4 Hướng dẫn `tailscale serve`
+- T-019 Bảng "Việc" trong Studio đọc `todo/` (Now/Next, tiến độ tiêu chí, PR/CI) — thay bảng chữ của `/todo`
 
 ## Ideas
 
