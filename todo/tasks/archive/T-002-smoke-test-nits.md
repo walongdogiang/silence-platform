@@ -2,7 +2,7 @@
 id: T-002
 title: Sửa các điểm nhỏ còn lại sau chạy thử 1.8–1.11
 type: fix
-status: in-progress
+status: done
 phase: verify
 area: [studio, core]
 size: M
@@ -32,7 +32,7 @@ PR #62 đã sửa thẻ gộp tràn cột và đường dẫn tuyệt đối ở
 - [x] Trang Số liệu: đọc transcript ngoài song song tối đa 8 (`manager.ts::metricsSummary`, `EXTERNAL_READ_CONCURRENCY`); test `metrics.test.ts` (40 transcript, peak 2..8, bỏ qua file lỗi). Chưa đo giây thật trên máy có ~500 transcript
 - [x] `npx tsc --noEmit -p apps/studio` (exit 0), vitest Studio (367 pass) và `npm test --workspace @silence/core` (133 pass) xanh
 - [x] Spec `docs/frontend/chat.md` cập nhật (nhãn lượt dừng không có `worked`)
-- [ ] PR đã merge
+- [x] PR đã merge (PR #64, squash 5a96cc9, CI xanh)
 
 ## Nhật ký
 
@@ -42,3 +42,6 @@ PR #62 đã sửa thẻ gộp tràn cột và đường dẫn tuyệt đối ở
 - Bước kế: `appendTurnMeta` (`apps/studio/src/renderer/App.tsx`) cho lượt abort; `metricsSummary` (`packages/core/src/sessions/manager.ts:637`) đọc transcript ngoài tuần tự.
 - Đã làm tiếp: sửa `formatWorked`, đọc song song ở `metricsSummary`, spec chat.md. Worktree: user chọn giữ như #62.
 - Còn: mở PR, đợi CI xanh, squash merge; nên thử bằng Studio thật (`SILENCE_CORE=1`) khi có dịp.
+
+### 2026-11-24 (đóng)
+- PR #64 đã squash merge, CI xanh. Việc đóng.

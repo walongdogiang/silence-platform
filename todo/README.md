@@ -17,7 +17,6 @@ Mã tiếp theo: T-020
 
 <!-- Tối đa 1 việc đang làm. -->
 
-- T-002 Sửa các điểm nhỏ còn lại sau chạy thử 1.8–1.11 · [chi tiết](tasks/T-002-smoke-test-nits.md)
 
 ## Next
 
