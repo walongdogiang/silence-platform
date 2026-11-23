@@ -17,11 +17,12 @@ Mã tiếp theo: T-020
 
 <!-- Tối đa 1 việc đang làm. -->
 
+- T-002 Sửa các điểm nhỏ còn lại sau chạy thử 1.8–1.11 · [chi tiết](tasks/T-002-smoke-test-nits.md)
+
 ## Next
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
-- T-002 Sửa các điểm nhỏ còn lại sau chạy thử 1.8–1.11 · [chi tiết](tasks/T-002-smoke-test-nits.md)
 - T-003 1.12 Pane xem dev server / URL · [chi tiết](tasks/T-003-browser-preview.md)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 - T-005 Ngôn ngữ đợt 3: phần còn lại của `docs/` sang tiếng Anh, một PR · blocked-by: T-004

@@ -25,6 +25,9 @@ import { scanRepoConfig, type RepoApprovals, type RepoReview } from "../repoConf
 /** JSON-RPC error: the repo config needs the user's review first (`data.review`: `RepoReview`). */
 export const REPO_CONFIG_REVIEW = -32010;
 
+/** Outside transcripts read at once when building the metrics page. */
+const EXTERNAL_READ_CONCURRENCY = 8;
+
 /** `SessionEvent` of `packages/protocol` (subset the core emits). */
 export type ClientEvent =
   | { type: "token"; text: string }
@@ -647,23 +650,31 @@ export class SessionManager {
     if (this.o.externalMessages) {
       const cutoff = Date.now() - days * 86_400_000;
       const { sessions } = await this.externalSessions({ limit: 500 });
+      const read = this.o.externalMessages;
+      const pending: typeof sessions = [];
       for (const x of sessions) {
         const modified = Date.parse(x.updated_at);
         if (modified < cutoff) continue;
         const hit = this.externalCache.get(x.backend_session_id);
-        if (hit && hit.key === modified) {
-          external.push(hit.m);
-          continue;
-        }
-        try {
-          const msgs = await this.o.externalMessages(x.backend_session_id, x.workspace || undefined);
-          const m = externalSessionMetrics(x.backend_session_id, x.workspace, Date.parse(x.created_at ?? x.updated_at), msgs);
-          this.externalCache.set(x.backend_session_id, { key: modified, m });
-          external.push(m);
-        } catch {
-          /* unreadable transcript: leave it out */
-        }
+        if (hit && hit.key === modified) external.push(hit.m);
+        else pending.push(x);
       }
+      // Cold cache: reading hundreds of transcripts one by one took ~10s, so read a few at a time.
+      let next = 0;
+      const worker = async (): Promise<void> => {
+        while (next < pending.length) {
+          const x = pending[next++]!;
+          try {
+            const msgs = await read(x.backend_session_id, x.workspace || undefined);
+            const m = externalSessionMetrics(x.backend_session_id, x.workspace, Date.parse(x.created_at ?? x.updated_at), msgs);
+            this.externalCache.set(x.backend_session_id, { key: Date.parse(x.updated_at), m });
+            external.push(m);
+          } catch {
+            /* unreadable transcript: leave it out */
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(EXTERNAL_READ_CONCURRENCY, pending.length) }, worker));
     }
     return summarize(core, external, days);
   }
