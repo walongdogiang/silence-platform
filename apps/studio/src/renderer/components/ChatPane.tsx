@@ -670,6 +670,10 @@ export function ChatPane(props: {
   wsName: string;
   /** Đường dẫn workspace: xem trước ảnh workspace agent nhắc tới (`fs.read_image`). */
   workspace?: string;
+  /** Folder of this chat's worktree, when it has one: diff paths are shown relative to it. */
+  worktreePath?: string;
+  /** The chat's worktree was merged into this branch since the last edit: no Undo on the diff card. */
+  diffMergedInto?: string;
   busy?: boolean;
   /** Run pulse của lượt live (elapsed, token, Stop) — `runStatus.ts`. */
   run?: RunMeter | null;
@@ -1159,6 +1163,8 @@ export function ChatPane(props: {
             onReject={props.onRejectDiff}
             onShow={props.onShowDiff}
             onOpenImage={openImages}
+            roots={[props.worktreePath, props.workspace]}
+            mergedInto={props.diffMergedInto}
           />
         )}
       </div>

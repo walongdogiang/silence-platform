@@ -414,6 +414,10 @@ export function App() {
   const [wtKept, setWtKept] = useState<Record<string, string>>({});
   const [wtBusy, setWtBusy] = useState(false);
   const [wtOutcome, setWtOutcome] = useState<MergeOutcome | null>(null);
+  /** Files of the last merge, for the card's "Merged N files" state. */
+  const [wtMerged, setWtMerged] = useState<WorktreeFile[]>([]);
+  /** The diff card shown when the merge ran: its edit is in the base now, so it loses Undo. */
+  const [wtMergedDiff, setWtMergedDiff] = useState<Diff | null>(null);
   /** Metrics page (roadmap 1.10, TitleBar icon when the core runs). */
   const [showMetrics, setShowMetrics] = useState(false);
   /** Claude desktop / terminal sessions for the history panel, and the one open read-only. */
@@ -566,7 +570,10 @@ export function App() {
       .rpc("worktree.status", { session_id: sessionId })
       .then((r) => {
         const x = r as { files?: WorktreeFile[]; commits?: number };
-        if (live) setWtStatus({ sid: sessionId, files: x.files ?? [], commits: x.commits ?? 0 });
+        if (!live) return;
+        setWtStatus({ sid: sessionId, files: x.files ?? [], commits: x.commits ?? 0 });
+        // New changes after a merge: back to the merge card for them.
+        if (x.files?.length) setWtOutcome((o) => (o?.ok ? null : o));
       })
       .catch(() => live && setWtStatus(null));
     return () => {
@@ -1935,6 +1942,9 @@ export function App() {
     setWtBusy(true);
     try {
       const r = (await window.silence.rpc("worktree.merge", { session_id: sessionId, title: threadTitleRef.current })) as MergeOutcome;
+      // Keep what went in: after the merge the branch has nothing left to show.
+      setWtMerged(r.ok && wtStatus?.sid === sessionId ? wtStatus.files : []);
+      setWtMergedDiff(r.ok ? diff : null);
       setWtOutcome(r);
       if (r.ok) setWtStatus((st) => (st && st.sid === sessionId ? { ...st, files: [], commits: 0 } : st));
     } catch (e) {
@@ -2298,6 +2308,8 @@ export function App() {
           hasSession={Boolean(sessionId)}
           wsName={wsName}
           workspace={workspace || undefined}
+          worktreePath={worktrees[sessionId]?.path}
+          diffMergedInto={wtOutcome?.ok && diff && diff === wtMergedDiff ? worktrees[sessionId]?.base : undefined}
           busy={busyHere}
           run={busyHere ? run : null}
           mode={mode}
@@ -2368,6 +2380,8 @@ export function App() {
             commits={wtStatus.commits}
             busy={wtBusy || busy}
             outcome={wtOutcome}
+            merged={wtMerged}
+            onClose={() => setWtOutcome(null)}
             onMerge={() => void mergeWorktreeHere()}
             onKeep={() => setWtKept((all) => ({ ...all, [sessionId]: wtStatus.files.map((f) => f.path).join("|") }))}
             onDiscard={() => void discardWorktreeHere()}
