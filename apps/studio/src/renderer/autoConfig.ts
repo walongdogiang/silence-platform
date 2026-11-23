@@ -22,16 +22,13 @@ export type AutoConfig = {
 };
 
 /** Mode order of the composer menu. */
-export const AUTO_MODES: SessionMode[] = ["plan", "agent", "debug", "multitask", "review", "ask"];
+export const AUTO_MODES: SessionMode[] = ["ask", "agent", "plan"];
 
 /** Default slot of each mode's main turn (same as the Engine's `ModeProfile.slot`). */
 export const MODE_SLOT_DEFAULT: Record<SessionMode, AutoSlot> = {
   plan: "frontier",
-  review: "frontier",
   agent: "strong",
   ask: "strong",
-  debug: "strong",
-  multitask: "strong",
 };
 
 export function modeSlot(cfg: AutoConfig, mode: SessionMode): AutoSlot {

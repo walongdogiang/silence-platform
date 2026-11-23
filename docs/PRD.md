@@ -36,7 +36,7 @@ Hướng bắc: **không tự xây vòng agent, không đuổi theo tính năng 
 | Nhóm | Ví dụ |
 | --- | --- |
 | Context & convention | `@` file/folder, `/` skills, `AGENTS.md` / rules theo path, hooks |
-| Modes | Ask / Debug / Review / MultiTask đã gắn runtime (xem `docs/frontend/composer.md`); còn lại: MultiTask chạy sub-agent song song |
+| Modes | Ask, Plan, Agent chạy được; Debug và Review hiện mờ trong menu, chưa làm; bỏ MultiTask (xem `docs/frontend/composer.md`) |
 | Git & session | commit khi user hỏi, worktree, resume thread (event log — ADR 0002) |
 | Task & bối cảnh | project / task / decisions trong `.silence/`, agent nạp vào context (ADR 0002) |
 | CLI | 5ilence CLI kiểu Claude Code, cùng harness với Studio |

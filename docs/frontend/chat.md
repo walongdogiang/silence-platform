@@ -59,11 +59,11 @@ Nhãn trong file này ghi bản tiếng Anh; UI hiện theo ngôn ngữ đã ch�
 - **Tách kênh:** tool / thinking / plan / diff / permission là event protocol riêng, không lẫn vào Copy.
 - Roadmap tiếp: `docs/frontend/chat-markdown-roadmap.md`.
 
-## Gợi ý đổi mode (Ask / Review → Agent)
+## Gợi ý đổi mode (Ask → Agent)
 
-- Ở Ask/Review, khi người dùng muốn thay đổi, model đưa đề xuất bằng khối ```diff có `path:line` rồi gọi tool `suggest_mode` (không ghi gì). Engine phát event `mode_suggestion { mode, reason }`; Engine **không** tự đổi mode.
+- Ở Ask (Engine Rust), khi người dùng muốn thay đổi, model đưa đề xuất bằng khối ```diff có `path:line` rồi gọi tool `suggest_mode` (không ghi gì). Engine phát event `mode_suggestion { mode, reason }`; Engine **không** tự đổi mode.
 - UI hiện thẻ dưới câu trả lời của lượt cuối: **Chuyển sang Agent và thực hiện** (đổi mode, gửi lại đúng prompt cũ; vẫn xin quyền + diff) và **Giữ Ask** (ẩn thẻ). Thẻ ẩn khi đang busy hoặc mode đã đổi.
-- Trước khi gửi: đang ở Ask/Review mà câu có động từ sửa (`looksLikeEditRequest`, `renderer/modes.ts`) → dòng nhỏ trên ô nhập "Đang ở Ask (chỉ đọc) … **Gửi bằng Agent**". Không chặn gửi.
+- Trước khi gửi: đang ở Ask mà câu có động từ sửa (`looksLikeEditRequest`, `renderer/modes.ts`) → dòng nhỏ trên ô nhập "Đang ở Ask (chỉ đọc) … **Gửi bằng Agent**". Không chặn gửi.
 - Dòng route trong meta của lượt có nhãn mode: `Ask · chat → model`.
 - Ngôn ngữ trả lời theo tin nhắn user; code nhắc kèm `path:line` (`SYSTEM`).
 
@@ -219,10 +219,20 @@ Esc / bấm nền / Huỷ đóng hộp (trừ lúc đang đề xuất hoặc đa
 
 **Lõi TS (chế độ quyền mới, `components/PermissionCard.tsx`).** Khi `risk.level` có mặt (protocol 0.1.20, [security/permissions.md](../security/permissions.md)):
 
-- Viền và badge theo mức: **Cần chú ý** (vàng, `caution`), **Nguy hiểm** (đỏ, `danger`), **Bị chặn** (đỏ, `hard_block`, chỉ gặp ở Bypass với đếm ngược). Tiêu đề = lời giải thích của mã đầu tiên theo ngôn ngữ UI (`riskText` trong `i18n.ts`) + "cho phép <tool>?". Lệnh thật nguyên văn bên dưới.
-- Nút: **Cho phép một lần** (chính) · **Luôn cho phép `<luật>`** (chỉ khi lõi gửi `allow_rule`; lệnh đỏ không bao giờ có) · **Từ chối** · **Từ chối, thêm luật `<luật>`** (khi có `deny_rule`). Hai nút "luật" lưu vào `~/.silence/projects/<repo>/permissions.yaml`. Gửi `session.permission { decision }` (kèm `allow` cho Engine Rust).
-- **Chi tiết** thu gọn mặc định (`aria-expanded`); mở ra: **Lệnh làm gì** (từng đoạn của lệnh ghép, vạch màu theo mức) · **Vì sao cần chú ý** (tiêu đề + giải thích theo mã) · **Tác động** (dùng mạng, ngoài workspace, xoá dữ liệu, đổi hệ thống / admin, hoàn tác được hay không) · **Nguồn** (agent / subagent / verify / hook; cảnh báo khi lượt đã đọc nội dung ngoài) · **Cách an toàn hơn** · **Mã luật**.
-- Bypass: thẻ có dòng đỏ "Tự từ chối sau N giây" (`countdown_s`); hết giờ lõi tự từ chối.
+- **Vị trí:** ghim ngay trên ô nhập, ngoài vùng cuộn của luồng chat (`.perm-dock` trong `ChatPane`, cùng độ rộng với composer), nên không trôi theo log. Vẫn gắn `session_id`; Stop hay lượt kết thúc thì gỡ thẻ như cũ. Áp cho thẻ lõi TS; thẻ Engine Rust cũng nằm ở dock nhưng giữ bố cục cũ.
+- **Hai dạng** (`permLayout` trong `permissionUi.ts`):
+  - **C (một dòng)** khi đủ cả: mức không phải đỏ · có `allow_rule` · lệnh shell một dòng ≤ 80 ký tự · tối đa 1 lý do · không có `hosts` · không ghi file (`preview`) · không đếm ngược. Dòng gồm: icon · lệnh mono cắt bằng `…` (tooltip là lệnh đầy đủ) · lý do ngắn màu muted (ẩn khi hẹp) · **Từ chối** (ghost) · **Cho phép ▾** · nút **⌃** mở ra dạng B (B không thu về C).
+  - **B (đầy đủ)** cho mọi trường hợp còn lại.
+- **B, đầu thẻ** (nền `--surface-2`, kẻ dưới): icon theo loại việc (tạo file, sửa file, lệnh, mạng, MCP, tool khác; vàng/đỏ theo mức) · tiêu đề = câu hỏi lời thường khi ghi file (`permHead`: "Cho phép tạo hello.py?"), còn lại = tiêu đề của mã đầu tiên (`riskText`, vd. "Push thẳng vào nhánh chính"), không có thì câu hỏi lời thường · chấm màu + mức (**An toàn** xanh, **Cần chú ý** vàng, **Nguy hiểm** / **Bị chặn** đỏ) · tên tool mono muted (kèm nguồn khi không phải agent: subagent / verify / hook).
+- **B, thân:**
+  - Khung nội dung (bo 8px, nền `--workspace`): ghi/sửa file mà lõi gửi `preview` (`{ path, before, after }`) thì hiện đường dẫn + nhãn **File mới** (khi `before` rỗng) + `+N −M` rồi diff (`PermPreview`, 12 dòng rồi "Xem thêm"). Lệnh shell nguyên văn (duyệt dựa trên lệnh thật), dấu `$` mờ, tô màu cú pháp PowerShell/shell, tối đa 6 dòng rồi **Hiện hết (N dòng)**. Tool MCP: bảng key → value của tham số cấp 1, mỗi giá trị một dòng có `…`; nút **JSON** ở chân chuyển sang JSON gốc (và **Bảng** để quay lại). Tool khác: JSON.
+  - Không tô màu đoạn nguy hiểm trong lệnh: client không tự đoán; tô theo vị trí do lõi gửi (`risk.spans`) là việc sau (roadmap).
+  - Dòng lý do: icon info + `detail` của mã đầu tiên. Còn lý do khác thì có **+N lý do** (`aria-expanded`) mở danh sách tiêu đề + giải thích (`title={code}`) và cách an toàn hơn; chỉ có cách an toàn hơn thì nút ghi **Cách an toàn hơn**. Lượt đã đọc nội dung ngoài thì luôn hiện cảnh báo taint.
+  - Bypass: dòng đỏ "Tự từ chối sau N giây" (`countdown_s`); hết giờ lõi tự từ chối.
+- **B, chân:** trái **Từ chối kèm lời dặn** (ghost, icon tin nhắn) và **JSON** (chỉ MCP); phải **Từ chối `Esc`** (nền xám đặc) · **Cho phép `Enter` ▾** (nút chính: màu đảo của chữ, trắng trên nền tối, gần đen trên nền sáng; ngoài cùng bên phải). Phần chữ = cho phép một lần; **▾** mở menu: **Chỉ lần này `1`** · **Luôn cho phép …** `2` (lời thường theo luật, `alwaysAllowText`: `Edit(**)` → "Luôn cho phép sửa file trong project này") + gợi ý nơi lưu ("Lưu luật … vào permissions.yaml của project"). Không có `allow_rule` (lệnh đỏ, …) thì không có ▾. Thẻ đỏ: nút Cho phép không ghi `Enter`. Không có lựa chọn "Từ chối + thêm luật" (luật cấm sửa ở Settings → Quyền hoặc file luật). Gửi `session.permission { decision }` (kèm `allow` cho Engine Rust). `permBusy` khoá các nút; `permError` hiện như cũ.
+- **Phím** (`permKeyAction`): chỉ khi focus không ở input/textarea/contenteditable. **Enter** = cho phép lần này (không có ở thẻ đỏ và khi focus đang ở một nút), **Esc** = từ chối, **1/2** = phạm vi (chỉ khi có menu). Thẻ hiện ra thì focus vào khung thẻ (không vào nút Cho phép) để Enter lỡ tay không chạy hai lần.
+- **Từ chối kèm lời dặn:** bấm nút (hoặc gõ vào ô nhập khi thẻ lõi TS đang chờ) thì ô nhập vào chế độ trả lời thẻ: viền `--warning`, chip **Đang trả lời thẻ quyền**, nút **Huỷ** (hoặc Esc), placeholder "Bảo agent làm cách khác… Enter = từ chối và gửi". Enter: gửi `deny`, dừng lượt (`session.abort`, như "No, tell Claude what to do differently" của Claude Code; lõi không nhận `session.prompt` khi lượt đang chạy), rồi gửi lời dặn thành tin nhắn kế tiếp khi lượt đã dừng. Không đổi protocol. Thẻ biến mất thì thoát chế độ này.
+- **Sau khi bấm:** thẻ biến mất; log của lượt có thêm một bước (`narrate`, lưu cùng lịch sử): **Đã cho phép** · lần này | luôn trong project · <lệnh rút gọn / file / tool> hoặc **Đã từ chối** [· kèm lời dặn] · <…> (`permTarget`, dòng đầu, tối đa 72 ký tự).
 
 **Engine Rust (đóng băng).** Thẻ không có `risk.level` giữ bố cục cũ dưới đây.
 

@@ -90,7 +90,7 @@ describe("Auto config", () => {
   it("slot per mode: override, back to default removes it", () => {
     const base: AutoConfig = { preset: "balanced" };
     expect(modeSlot(base, "ask")).toBe("strong");
-    expect(modeSlot(base, "review")).toBe("frontier");
+    expect(modeSlot(base, "plan")).toBe("frontier");
     const cheap = withModeSlot(base, "ask", "small");
     expect(cheap.mode_slots).toEqual({ ask: "small" });
     expect(slotModel(cheap, modeSlot(cheap, "ask"), "gw", cat)?.id).toBe("gw-haiku");

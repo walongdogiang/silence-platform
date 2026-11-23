@@ -23,7 +23,7 @@ import { ImageLightbox, type LightboxState } from "./components/ImageLightbox";
 import { TooltipLayer } from "./components/TooltipLayer";
 import { UndoToast } from "./components/UndoToast";
 import { isImagePath, readWorkspaceImage } from "./workspaceImages";
-import { routeText, type SessionMode } from "./modes";
+import { MODE_LABEL, routeText, type SessionMode } from "./modes";
 import { LangContext, translator } from "./i18n";
 import {
   addSpend,
@@ -43,7 +43,7 @@ import {
 import { imagesFromFiles, supportsImages, threadsForStorage } from "./pastedImages";
 import { hydrateImages, needsHydrate, pruneImages, putImages, referencedImageIds } from "./imageStore";
 import { addCost, markStopping, startRun, type RunMeter } from "./runStatus";
-import { blockedStep, effectivePermMode, loadBypassEnabled, loadPermMode, saveBypassEnabled, savePermMode, type PermScope, type UiPermMode } from "./permissionUi";
+import { blockedStep, effectivePermMode, loadBypassEnabled, loadPermMode, permTarget, saveBypassEnabled, savePermMode, takeLegacyAskMode, type PermScope, type UiPermMode } from "./permissionUi";
 import type { PermAnswer } from "./types";
 import { PermModeMenu } from "./components/PermModeMenu";
 import { LessonDialog } from "./components/LessonDialog";
@@ -368,7 +368,8 @@ export function App() {
   }, []);
   const modelsRef = useRef<ModelInfo[]>([]);
   const [modelPrefs, setModelPrefs] = useState(() => loadModelPrefs());
-  const [mode, setMode] = useState<SessionMode>("agent");
+  // A stored legacy "Ask" permission mode becomes the Ask work mode (with Auto permissions).
+  const [mode, setMode] = useState<SessionMode>(() => (takeLegacyAskMode() ? "ask" : "agent"));
   const [tree, setTree] = useState<string[]>([]);
   const [file, setFile] = useState<string | null>(null);
   const [fileText, setFileText] = useState("");
@@ -422,6 +423,10 @@ export function App() {
   const [lessonFor, setLessonFor] = useState<{ user: string; answer: string } | null>(null);
   /** What sessions actually get: an unavailable pick (Ask/Bypass without the core) runs as Auto. */
   const permEff = effectivePermMode(permMode, coreOn, bypassEnabled);
+  /** Session whose permission card the composer is answering with a note ("Deny with a note"). */
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  /** Note to send as the next message once the denied turn has stopped. */
+  const pendingNoteRef = useRef<{ sid: string; text: string } | null>(null);
   /** Sandbox lệnh (`sandbox.status`, Engine cache 30 s). `null` = chưa biết / Engine cũ. */
   const [sandbox, setSandbox] = useState<SandboxStatus | null>(null);
   /** Run pulse của lượt đang chạy: giờ bắt đầu, token/USD cộng từ `cost`, cờ Stop (`docs/frontend/status.md`). */
@@ -876,8 +881,11 @@ export function App() {
           },
         ]);
       } else if (ev.type === "mode_suggestion") {
-        const prompt = tr.prompt;
-        setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode, reason: ev.reason, prompt }]);
+        // Only modes that exist (the Rust Engine may still suggest Debug / Review / MultiTask).
+        if (ev.mode in MODE_LABEL) {
+          const prompt = tr.prompt;
+          setLines((xs) => [...xs, { kind: "mode_suggest", mode: ev.mode as SessionMode, reason: ev.reason, prompt }]);
+        }
       } else if (ev.type === "plan") {
         if (here) setPlan(ev.markdown);
         else {
@@ -898,6 +906,7 @@ export function App() {
           input: ev.input,
           reason: ev.reason,
           risk: ev.risk,
+          ...(ev.preview ? { preview: ev.preview } : {}),
         });
         flagBg();
         // Cửa sổ không ở phía trước thì báo ra desktop. Chỉ gửi lý do (không gửi lệnh).
@@ -1755,12 +1764,9 @@ export function App() {
           throw new Error(t("app.engineNoImages", { protocol: String(pong?.protocol ?? "?") }));
         }
       }
-      // Debug: gửi kèm phần cuối tab Output (Engine lọc secret trước khi đưa cho model).
-      const context = turnMode === "debug" ? outputLog.slice(-60).join("\n") : undefined;
       await window.silence.rpc("session.prompt", {
         session_id: sid,
         text,
-        context,
         ...(turnImages.length ? { images: turnImages } : {}),
         // Ngôn ngữ giao diện: Engine dùng khi tin nhắn không rõ ngôn ngữ ("ok", chỉ dán log).
         // Engine cũ (protocol < 0.1.19) bỏ qua trường này.
@@ -1897,24 +1903,12 @@ export function App() {
 
   function onChip(chip: string) {
     const byChip: Record<string, SessionMode> = {
+      Ask: "ask",
       Plan: "plan",
       Agent: "agent",
       Code: "agent",
-      Debug: "debug",
-      MultiTask: "multitask",
-      Review: "review",
     };
-    if (chip === "Ask") {
-      // Ask is a permission mode now (read-only); the hub chip switches to it when the core runs.
-      if (coreOn) changePermMode("ask");
-      return;
-    }
-    if (chip === "ReviewChanges") {
-      // Nút Review ở hàng Files: chuyển sang Review và điền sẵn yêu cầu nếu ô nhập đang trống.
-      setMode("review");
-      setPrompt((p) => (p.trim() ? p : t("app.reviewPrompt")));
-      focusComposer();
-    } else if (byChip[chip]) setMode(byChip[chip]);
+    if (byChip[chip]) setMode(byChip[chip]);
     else if (chip === "More") openSettings();
   }
 
@@ -2004,25 +1998,51 @@ export function App() {
     if (!on && permMode === "bypass") changePermMode("auto");
   }
 
-  /** Answer a TS core permission card. `allow`/`scope` are sent too for the Rust Engine's reader. */
-  async function answerCorePerm(a: PermAnswer) {
-    if (!perm || permBusy) return;
+  /**
+   * Answer a TS core permission card. `allow`/`scope` are sent too for the Rust Engine's reader.
+   * The card goes away and the turn's log gets a receipt step ("Allowed · this once · npm test").
+   */
+  async function answerCorePerm(a: PermAnswer, opts: { note?: boolean } = {}): Promise<boolean> {
+    const p = perm;
+    if (!p || permBusy) return false;
     setPermBusy(true);
     setPermError(false);
     try {
       await window.silence.rpc("session.permission", {
-        session_id: perm.session_id,
-        request_id: perm.request_id,
+        session_id: p.session_id,
+        request_id: p.request_id,
         decision: a,
         allow: a === "allow_once" || a === "allow_always",
         scope: "once",
       });
-      setPermFor(perm.session_id, null);
+      setPermFor(p.session_id, null);
+      const allowed = a === "allow_once" || a === "allow_always";
+      const scope = a === "allow_always" ? t("perm.receipt.always") : a === "allow_once" ? t("perm.receipt.once") : opts.note ? t("perm.receipt.note") : "";
+      const target = permTarget(p);
+      linesFor(p.session_id, (xs) => [...xs, { kind: "narrate", verb: allowed ? "Allowed" : "Denied", detail: scope ? `${scope} · ${target}` : target }]);
+      return true;
     } catch {
       setPermError(true);
+      return false;
     } finally {
       setPermBusy(false);
     }
+  }
+
+  /**
+   * "Deny with a note": deny the card, stop the turn (like Claude Code's "No, tell Claude what to do
+   * differently"), then send the note as the next message once the turn has ended.
+   */
+  async function denyWithNote() {
+    const p = perm;
+    const note = prompt.trim();
+    if (!p || !note) return;
+    if (!(await answerCorePerm("deny", { note: true }))) return;
+    setNoteFor(null);
+    setPrompt("");
+    pendingNoteRef.current = { sid: p.session_id, text: note };
+    updateRunFor(p.session_id, (m) => (m ? markStopping(m) : m));
+    await window.silence.rpc("session.abort", { session_id: p.session_id }).catch(() => undefined);
   }
 
   async function answerPerm(allow: boolean, scope: PermScope) {
@@ -2135,6 +2155,19 @@ export function App() {
   /** Other chats may run at the same time (roadmap 1.11); the core queues beyond its limit. */
   const busyElsewhere = false;
   const permHere = perm;
+  const noteActive = Boolean(permHere?.risk?.level) && noteFor === permHere?.session_id;
+  // The card went away (answered, stopped, turn ended): leave note mode so the next card starts clean.
+  useEffect(() => {
+    if (!permHere) setNoteFor(null);
+  }, [permHere]);
+  // Send the note of "Deny with a note" once that chat's denied turn has stopped.
+  useEffect(() => {
+    const n = pendingNoteRef.current;
+    if (!n || n.sid !== sessionId || busy) return;
+    pendingNoteRef.current = null;
+    void send(n.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, sessionId]);
   /** History dots: every running chat, waiting when its permission card is up. */
   const runStates: Record<string, "running" | "waiting"> = {};
   for (const x of threads) {
@@ -2164,10 +2197,15 @@ export function App() {
         </>
       }
       prompt={prompt}
-      onPrompt={setPrompt}
+      onPrompt={(v) => {
+        setPrompt(v);
+        // Typing while a core card waits answers that card with a note (docs/frontend/chat.md).
+        if (v.trim() && permHere?.risk?.level && noteFor !== permHere.session_id) setNoteFor(permHere.session_id);
+      }}
       images={images}
       onImages={setImages}
-      onSend={() => void send()}
+      onSend={() => void (noteActive ? denyWithNote() : send())}
+      note={noteActive ? { onCancel: () => setNoteFor(null) } : undefined}
       onSendAs={(m) => {
         setMode(m);
         void send(undefined, m);
@@ -2276,6 +2314,14 @@ export function App() {
           onAllow={(scope) => void answerPerm(true, scope)}
           onDeny={() => void answerPerm(false, "once")}
           onAnswer={(a) => void answerCorePerm(a)}
+          onDenyNote={
+            permHere?.risk?.level
+              ? () => {
+                  setNoteFor(permHere.session_id);
+                  focusComposer();
+                }
+              : undefined
+          }
           onLesson={coreOn ? (user, answer) => setLessonFor({ user, answer }) : undefined}
           onApplyDiff={() => void applyDiff()}
           onRejectDiff={() => void rejectDiff()}

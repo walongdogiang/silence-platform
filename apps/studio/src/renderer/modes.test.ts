@@ -27,12 +27,10 @@ describe("looksLikeEditRequest", () => {
 });
 
 describe("modes", () => {
-  it("chỉ đọc: ask, review, plan", () => {
+  it("chỉ đọc: ask, plan", () => {
     expect(isReadOnlyMode("ask")).toBe(true);
-    expect(isReadOnlyMode("review")).toBe(true);
     expect(isReadOnlyMode("plan")).toBe(true);
     expect(isReadOnlyMode("agent")).toBe(false);
-    expect(isReadOnlyMode("debug")).toBe(false);
   });
 
   it("routeText có nhãn mode", () => {

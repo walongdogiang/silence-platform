@@ -25,20 +25,24 @@ const html = (sandbox: SandboxStatus | null, opts: { mode?: UiPermMode; coreOn?:
 const radios = (out: string) => out.match(/<input[^>]*type="radio"[^>]*>/g) ?? [];
 
 describe("PermissionsSection modes", () => {
-  it("lists Ask, Manual, Accept edits and Auto; Bypass only once its switch is on", () => {
+  it("lists Auto first, then Manual and Accept edits; Bypass only once its switch is on", () => {
     const out = html(null);
-    expect(radios(out)).toHaveLength(4);
-    for (const label of ["Ask", "Manual", "Accept edits", "Auto (default)"]) expect(out).toContain(label);
+    expect(radios(out)).toHaveLength(3);
+    const at = (label: string) => out.indexOf(`<strong>${label}</strong>`);
+    expect(at("Auto")).toBeGreaterThan(-1);
+    expect(at("Auto")).toBeLessThan(at("Manual"));
+    expect(at("Manual")).toBeLessThan(at("Accept edits"));
+    expect(out).not.toContain("Auto (default)");
     expect(out).not.toContain("Everything runs without asking");
-    expect(radios(html(null, { bypass: true }))).toHaveLength(5);
+    expect(radios(html(null, { bypass: true }))).toHaveLength(4);
     expect(out).toContain("Allow Bypass permissions mode");
   });
 
-  it("Ask and Bypass cannot be picked while the core is off", () => {
+  it("Bypass cannot be picked while the core is off", () => {
     const r = radios(html(null, { coreOn: false, bypass: true }));
-    expect(r[0]).toContain("disabled");
+    expect(r[0]).not.toContain("disabled");
     expect(r[1]).not.toContain("disabled");
-    expect(r[4]).toContain("disabled");
+    expect(r[3]).toContain("disabled");
     expect(html(null, { coreOn: false })).toContain("SILENCE_CORE=1");
   });
 });

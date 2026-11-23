@@ -1,18 +1,18 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { LangContext } from "../i18n";
-import type { ChatLine } from "../models";
+import type { ChatLine, Perm } from "../models";
 import { ChatPane } from "./ChatPane";
 
 const noop = () => {};
 
-const render = (lines: ChatLine[]) =>
+const render = (lines: ChatLine[], perm: Perm | null = null) =>
   renderToStaticMarkup(
     <LangContext.Provider value="en">
       <ChatPane
         lines={lines}
         plan={null}
-        perm={null}
+        perm={perm}
         diff={null}
         sessionId="s"
         hasSession
@@ -32,6 +32,23 @@ const render = (lines: ChatLine[]) =>
   );
 
 describe("ChatPane turns", () => {
+  it("docks the permission card outside the scrolling log, right above the composer", () => {
+    const perm: Perm = {
+      session_id: "s",
+      request_id: "r",
+      name: "Bash",
+      reason: "",
+      input: { command: "npm test" },
+      risk: { tier: "auto", reasons: [], level: "safe", codes: ["BUILD_TEST"] },
+    };
+    const html = render([{ kind: "user", text: "hi" }], perm);
+    const dock = html.indexOf('<div class="perm-dock">');
+    expect(dock).toBeGreaterThan(-1);
+    // The dock comes after the whole scroll area (rail included), not inside its viewport.
+    expect(dock).toBeGreaterThan(html.lastIndexOf("soft-scroll-rail"));
+    expect(html.slice(html.indexOf("soft-scroll-viewport"), dock)).not.toContain("perm-card");
+  });
+
   it("không vẽ lượt chỉ có dòng worked (Worked for — trên chat trống)", () => {
     const html = render([{ kind: "worked", ms: undefined as unknown as number, at: 0 }]);
     expect(html).not.toContain("Worked for");

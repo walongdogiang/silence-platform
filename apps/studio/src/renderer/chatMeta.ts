@@ -238,6 +238,8 @@ export function narrateToPast(step: NarrateStep): NarrateStep {
     "Taking screenshot": "Took screenshot",
     "Writing test": "Wrote test",
     Blocked: "Blocked",
+    Allowed: "Allowed",
+    Denied: "Denied",
     "Using tool": "Used tool",
     Using: "Used tool",
     Used: "Used tool",
@@ -294,7 +296,7 @@ export function briefFromNarrations(steps: NarrateStep[]): string {
 /** Known step verbs (stored in English in chat history), shown in the UI language. */
 const VERBS = new Set([
   "Reading", "Read", "Searching", "Searched", "Editing", "Edited", "Running", "Ran", "Testing", "Tested",
-  "Exploring", "Explored", "Writing plan", "Wrote plan", "Using tool", "Used tool", "Blocked", "Thinking",
+  "Exploring", "Explored", "Writing plan", "Wrote plan", "Using tool", "Used tool", "Blocked", "Allowed", "Denied", "Thinking",
   "Thought", "Planning next moves", "Starting", "Started", "Reading logs", "Read logs", "Stopping", "Stopped",
   "Checking processes", "Checked processes", "Checking", "Checked",
   "Opening", "Opened", "Reading page", "Read page", "Clicking", "Clicked", "Typing", "Typed", "Selecting", "Selected", "Pressing", "Pressed", "Hovering", "Hovered", "Reading console", "Read console", "Reading network", "Read network", "Closing browser", "Closed browser", "Taking screenshot", "Took screenshot", "Writing test", "Wrote test",

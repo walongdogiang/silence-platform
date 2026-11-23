@@ -31,7 +31,7 @@ export type ClientEvent =
   | { type: "thinking"; text: string }
   | { type: "tool_start"; call_id: string; name: string; input: unknown }
   | { type: "tool_end"; call_id: string; name: string; ok: boolean; output: string }
-  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string; risk?: ReturnType<Verdict["toRisk"]> }
+  | { type: "permission"; request_id: string; name: string; input: unknown; reason: string; risk?: ReturnType<Verdict["toRisk"]>; preview?: FilePreview }
   | { type: "plan"; markdown: string }
   | { type: "diff"; path: string; before: string; after: string; applied?: boolean }
   | { type: "trace"; event: string; detail: unknown }
@@ -129,7 +129,20 @@ interface Session {
 }
 
 const DIFF_MAX_BYTES = 512 * 1024;
+
+/** What a write/edit would change, for the permission card (`path` relative to the session folder when inside it). */
+export interface FilePreview {
+  path: string;
+  before: string;
+  after: string;
+}
 const UNATTENDED_REASON = "needs human approval; the call was logged for review. Do not retry it; continue without it or stop.";
+
+/** `D:/w/src/a.ts` → `src/a.ts` inside the session folder; outside it stays absolute. */
+function displayPath(cwd: string, file: string): string {
+  const rel = path.relative(cwd, file);
+  return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : file;
+}
 
 function toMode(m: unknown): Mode {
   return m === "plan" || m === "ask" ? m : "agent";
@@ -166,13 +179,14 @@ export class SessionManager {
     const p = obj(params);
     const cwd = str(p.workspace);
     if (!cwd) throw new RpcFailure(ErrorCodes.InvalidParams, "workspace is required");
-    const permMode = p.permission === undefined && p.mode === "ask" ? "ask" : normalizeMode(p.permission);
+    const permMode = normalizeMode(p.permission);
     if (!permMode) throw new RpcFailure(ErrorCodes.InvalidParams, "permission yolo is not allowed over RPC");
     const backendId = str(p.backend) ?? "claude";
     const backend = this.o.backends[backendId];
     if (!backend) throw new RpcFailure(ErrorCodes.InvalidParams, `unknown backend: ${backendId}`);
     const id = (this.o.newId ?? randomUUID)();
-    const mode = toMode(p.mode);
+    // The old read-only `ask` permission mode is the Ask work mode now.
+    const mode = p.permission === "ask" ? "ask" : toMode(p.mode);
     const model = str(p.model);
     const effort = str(p.effort) as Effort | undefined;
     // Read fresh each session: editing ~/.silence applies to the next chat without restarting.
@@ -362,12 +376,11 @@ export class SessionManager {
     return { ok: true };
   }
 
-  /** Change the mode for the next tool calls (ask mode is enforced here; plan goes to the backend too). */
+  /** Change the work mode for the next tool calls (Ask is enforced here; plan goes to the backend too). */
   async setMode(params: unknown): Promise<{ ok: true }> {
     const p = obj(params);
     const s = this.get(p.session_id);
     const mode = toMode(p.mode);
-    if (p.mode === "ask") s.permMode = "ask"; // legacy Composer "Ask" = the Ask permission mode
     if (mode !== s.mode) {
       s.mode = mode;
       await s.handle.setMode?.(mode);
@@ -375,12 +388,16 @@ export class SessionManager {
     return { ok: true };
   }
 
-  /** Change the permission mode from the next tool call. `yolo` is refused. */
+  /** Change the permission mode from the next tool call. `yolo` is refused; legacy `ask` = Ask work mode + Auto. */
   setPermission(params: unknown): { ok: true; permission: PermMode } {
     const p = obj(params);
     const s = this.get(p.session_id);
     const mode = normalizeMode(p.permission);
     if (!mode) throw new RpcFailure(ErrorCodes.InvalidParams, "permission yolo is not allowed over RPC");
+    if (p.permission === "ask" && s.mode !== "ask") {
+      s.mode = "ask";
+      void s.handle.setMode?.("ask")?.catch(() => undefined);
+    }
     if (mode !== s.permMode) this.track(this.o.audit.append({ session: s.id, kind: "permission_mode", detail: { from: s.permMode, to: mode } }));
     s.permMode = mode;
     return { ok: true, permission: mode };
@@ -675,8 +692,8 @@ export class SessionManager {
 
     // 1. A deny rule wins over everything, Bypass included.
     if (rule?.behavior === "deny") return deny(`denied by the user's rule ${rule.text}. Do not retry it.`, "remembered", { rule: rule.text });
-    // 2. Ask mode only offers reading; nothing (not even an allow rule) widens it.
-    if (s.permMode === "ask" && !askModeAllows(call, v)) return deny(ASK_MODE_REASON, "policy");
+    // 2. The Ask work mode only offers reading; nothing (not even an allow rule or Bypass) widens it.
+    if (s.mode === "ask" && !askModeAllows(call, v)) return deny(ASK_MODE_REASON, "policy");
 
     // 3. Hard blocks and Bypass exceptions come from the mode; otherwise ask/allow rules, then the mode.
     const special = s.permMode === "bypass" ? modeAction("bypass", call, v).kind === "ask" : level === "hard_block";
@@ -715,6 +732,9 @@ export class SessionManager {
     const denyRule = isVerify ? null : (ruleFor(call, pattern) ?? (cmd ? `${call.raw.tool}(${cmd.trim()})` : null));
     const segs = cmd ? shellSegments(cmd) : [];
     const ctx = { workspace: s.cwd, tainted: s.tainted, mcpReadOnly: call.mcp?.readOnly ?? false };
+    // The card shows the file and its diff instead of the raw tool input.
+    const change = call.kind === "write" || call.kind === "edit" ? await this.changeOf(s, call) : null;
+    const preview: FilePreview | null = change ? { ...change, path: displayPath(s.cwd, change.path) } : null;
     const risk = {
       ...v.toRisk(pattern ?? undefined),
       level,
@@ -747,7 +767,7 @@ export class SessionManager {
         }, countdownSec * 1000);
       }
       s.pending.set(requestId, { resolve: done, callId: call.callId });
-      this.emit(s, { type: "permission", request_id: requestId, name: call.raw.tool, input: call.raw.input, reason: v.title(), risk });
+      this.emit(s, { type: "permission", request_id: requestId, name: call.raw.tool, input: call.raw.input, reason: v.title(), risk, ...(preview ? { preview } : {}) });
     });
     // Save the rule the card offered; "Always allow" is ignored where it was not offered (red calls).
     const save = isVerify ? null : answer === "allow_always" ? always : answer === "deny_always" ? denyRule : null;
@@ -867,10 +887,10 @@ export class SessionManager {
     await this.o.audit.append({ session: s.id, kind: "decision", tool: call.name, ...(p ? { path: p } : {}), detail: { tier, level, codes, action, by, mode: s.permMode, callId: call.callId, ...extra } });
   }
 
-  /** Diff card before the write lands (Balanced: `applied`, the UI offers Undo). */
-  private async emitDiff(s: Session, call: ToolCall): Promise<void> {
+  /** What a write/edit changes (absolute path); null when unknown, unchanged or too large. */
+  private async changeOf(s: Session, call: ToolCall): Promise<FilePreview | null> {
     const rel = typeof call.args.path === "string" ? call.args.path : "";
-    if (!rel) return;
+    if (!rel) return null;
     const file = path.resolve(s.cwd, rel);
     let before = "";
     try {
@@ -878,10 +898,16 @@ export class SessionManager {
     } catch {
       before = "";
     }
-    if (before.length > DIFF_MAX_BYTES) return;
+    if (before.length > DIFF_MAX_BYTES) return null;
     const after = applyEdit(call, before);
-    if (after === null || after === before) return;
-    this.emit(s, { type: "diff", path: file, before, after, applied: true });
+    if (after === null || after === before || after.length > DIFF_MAX_BYTES) return null;
+    return { path: file, before, after };
+  }
+
+  /** Diff card before the write lands (Balanced: `applied`, the UI offers Undo). */
+  private async emitDiff(s: Session, call: ToolCall): Promise<void> {
+    const change = await this.changeOf(s, call);
+    if (change) this.emit(s, { type: "diff", ...change, applied: true });
   }
 
   // ---- events ------------------------------------------------------------------------------
@@ -931,7 +957,7 @@ export class SessionManager {
         return { type: "cost", input_tokens: ev.inputTokens, output_tokens: ev.outputTokens, usd: ev.usd, cache_read_tokens: ev.cacheRead, cache_write_tokens: ev.cacheWrite };
       case "turn.end":
         // A completed turn that edited files is checked first; `done` is sent once checks finish.
-        if (ev.stop === "completed" && s.permMode !== "ask") {
+        if (ev.stop === "completed" && s.mode !== "ask") {
           void this.afterTurn(s, ev.stop);
           return null;
         }

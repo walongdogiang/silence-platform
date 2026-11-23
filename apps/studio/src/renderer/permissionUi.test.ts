@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Perm } from "./models";
 import {
+  alwaysAllowText,
   blockedStep,
+  permKeyAction,
+  permLayout,
+  permTarget,
   effectivePermMode,
   hostsText,
   normalizePermMode,
+  PERM_MODES,
   permEscalation,
   permHosts,
   permModeAvailable,
@@ -48,8 +53,10 @@ describe("permission card helpers", () => {
     expect(scopeLabels(p, vi)?.session).toBe("Cho phép src/** trong phiên này");
   });
 
-  it("restores the five modes and maps legacy values (old Cautious ask = new Ask)", () => {
-    for (const m of ["ask", "manual", "accept_edits", "auto", "bypass"]) expect(normalizePermMode(m)).toBe(m);
+  it("restores the four modes and maps legacy values (old read-only ask = Auto + Ask work mode)", () => {
+    for (const m of ["auto", "manual", "accept_edits", "bypass"]) expect(normalizePermMode(m)).toBe(m);
+    expect(normalizePermMode("ask")).toBe("auto");
+    expect(PERM_MODES.map((m) => m.id)).toEqual(["auto", "manual", "accept_edits", "bypass"]);
     expect(normalizePermMode("balanced")).toBe("auto");
     expect(normalizePermMode("autonomous")).toBe("auto");
     expect(normalizePermMode("allowlist")).toBe("manual");
@@ -57,16 +64,67 @@ describe("permission card helpers", () => {
     expect(normalizePermMode(null)).toBe("auto");
   });
 
-  it("Ask and Bypass need the core; Bypass also needs the Settings switch; otherwise Auto runs", () => {
+  it("Bypass needs the core and the Settings switch; otherwise Auto runs", () => {
     expect(permModeAvailable("manual", false, false)).toBe(true);
-    expect(permModeAvailable("ask", false, false)).toBe(false);
-    expect(permModeAvailable("ask", true, false)).toBe(true);
     expect(permModeAvailable("bypass", true, false)).toBe(false);
     expect(permModeAvailable("bypass", true, true)).toBe(true);
     expect(permModeAvailable("bypass", false, true)).toBe(false);
     expect(effectivePermMode("bypass", true, false)).toBe("auto");
-    expect(effectivePermMode("ask", false, false)).toBe("auto");
     expect(effectivePermMode("accept_edits", false, false)).toBe("accept_edits");
+  });
+
+  it("one line (C) only for a short low-risk command with a rule", () => {
+    const base: Perm = { session_id: "s", request_id: "r", name: "Bash", reason: "", input: { command: "npm install zod" }, risk: { tier: "ask", reasons: [], level: "caution", codes: ["PKG_INSTALL"], allow_rule: "Bash(npm install:*)" } };
+    const r = base.risk!;
+    expect(permLayout(base)).toBe("compact");
+    expect(permLayout({ ...base, risk: { ...r, level: "danger" } })).toBe("full");
+    expect(permLayout({ ...base, risk: { ...r, allow_rule: undefined } })).toBe("full");
+    expect(permLayout({ ...base, risk: { ...r, codes: ["PKG_INSTALL", "NET_ACCESS"] } })).toBe("full");
+    expect(permLayout({ ...base, risk: { ...r, hosts: ["x.dev"] } })).toBe("full");
+    expect(permLayout({ ...base, risk: { ...r, countdown_s: 30 } })).toBe("full");
+    expect(permLayout({ ...base, input: { command: "a\nb" } })).toBe("full");
+    expect(permLayout({ ...base, input: { command: "x".repeat(81) } })).toBe("full");
+    expect(permLayout({ ...base, preview: { path: "a.py", before: "", after: "x" } })).toBe("full");
+    expect(permLayout({ ...base, input: { path: "a" } })).toBe("full");
+    expect(permLayout({ ...base, risk: { tier: "ask", reasons: [] } })).toBe("full"); // Rust Engine card
+  });
+
+  it("names the target for the receipt line", () => {
+    const p: Perm = { session_id: "s", request_id: "r", name: "Bash", reason: "", input: { command: "  npm   test\nsecond" } };
+    expect(permTarget(p)).toBe("npm test");
+    expect(permTarget({ ...p, input: {}, preview: { path: "src/a.py", before: "", after: "" } })).toBe("src/a.py");
+    expect(permTarget({ ...p, name: "mcp__db__query", input: { sql: "x" } })).toBe("mcp__db__query");
+    expect(permTarget({ ...p, input: { command: "x".repeat(100) } })).toHaveLength(72);
+  });
+
+  it("keys: Enter allows (not red, not on a button, never while typing), 1/2 pick a scope, Esc denies", () => {
+    const o = { level: "caution" as const, hasRule: true, inText: false, onButton: false, busy: false };
+    expect(permKeyAction("Enter", o)).toBe("allow_once");
+    expect(permKeyAction("Enter", { ...o, level: "danger" })).toBeNull();
+    expect(permKeyAction("Enter", { ...o, level: "hard_block" })).toBeNull();
+    expect(permKeyAction("Enter", { ...o, onButton: true })).toBeNull();
+    expect(permKeyAction("Enter", { ...o, inText: true })).toBeNull();
+    expect(permKeyAction("Escape", { ...o, inText: true })).toBeNull();
+    expect(permKeyAction("Enter", { ...o, busy: true })).toBeNull();
+    expect(permKeyAction("Enter", { ...o, mods: true })).toBeNull();
+    expect(permKeyAction("1", o)).toBe("allow_once");
+    expect(permKeyAction("2", o)).toBe("allow_always");
+    expect(permKeyAction("2", { ...o, hasRule: false })).toBeNull();
+    expect(permKeyAction("Escape", { ...o, level: "danger" })).toBe("deny");
+  });
+
+  it("says the Always allow rule in plain words", () => {
+    const vi = translator("vi");
+    const en = translator("en");
+    expect(alwaysAllowText("Edit(**)", vi)).toBe("Luôn cho phép sửa file trong project này");
+    expect(alwaysAllowText("Edit(src/app/**)", en)).toBe("Always allow edits in src/app/");
+    expect(alwaysAllowText("Read(**)", en)).toBe("Always allow reading this project");
+    expect(alwaysAllowText("Bash(npm install:*)", vi)).toBe("Luôn cho phép lệnh npm install …");
+    expect(alwaysAllowText("Bash(git status)", en)).toBe("Always allow git status");
+    expect(alwaysAllowText("WebFetch(domain:example.com)", vi)).toBe("Luôn cho phép truy cập example.com");
+    expect(alwaysAllowText("mcp__db__query", en)).toBe("Always allow query (db)");
+    expect(alwaysAllowText("mcp__db", en)).toBe("Always allow MCP db");
+    expect(alwaysAllowText("npm run lint", en)).toBe("Always allow npm run lint");
   });
 
   it("a host card offers host scopes, not a command pattern", () => {

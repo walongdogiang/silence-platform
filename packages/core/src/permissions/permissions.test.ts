@@ -9,7 +9,7 @@ import { toToolCall } from "../backends/claude/toolMap.js";
 import type { Backend, BackendHooks, ToolCall } from "../backends/types.js";
 import { createCoreWithSessions } from "../core.js";
 import { classify } from "../risk/classify.js";
-import { BYPASS_COUNTDOWN_SEC, levelOf, modeAction, normalizeMode, type PermMode } from "./modes.js";
+import { askModeAllows, BYPASS_COUNTDOWN_SEC, levelOf, modeAction, normalizeMode, type PermMode } from "./modes.js";
 import { addRule, loadRules, matchRules, parseRule, ruleFor, ruleMatches, type Rule } from "./rules.js";
 
 const tmp = (p: string) => mkdtempSync(path.join(os.tmpdir(), p));
@@ -48,7 +48,7 @@ describe("normalizeMode", () => {
     expect(normalizeMode("balanced")).toBe("auto");
     expect(normalizeMode("allowlist")).toBe("manual");
     expect(normalizeMode("autonomous")).toBe("auto");
-    expect(normalizeMode("ask")).toBe("ask");
+    expect(normalizeMode("ask")).toBe("auto"); // old read-only mode: the session becomes the Ask work mode
     expect(normalizeMode(undefined)).toBe("auto");
     expect(normalizeMode("bypass")).toBe("bypass");
     expect(normalizeMode("yolo")).toBeNull();
@@ -58,8 +58,9 @@ describe("normalizeMode", () => {
 describe("mode table", () => {
   const kinds = (mode: PermMode) => Object.fromEntries(Object.entries(CALLS).map(([k, c]) => [k, modeAction(mode, c, verdict(c)).kind]));
 
-  it("Ask: reading only", () => {
-    expect(kinds("ask")).toEqual({ read: "allow", gitStatus: "allow", edit: "deny", test: "deny", install: "deny", pushMain: "deny", curlSh: "deny", regAdd: "deny", format: "deny", tamper: "deny", mcp: "deny" });
+  it("the Ask work mode offers reading only", () => {
+    const ask = Object.fromEntries(Object.entries(CALLS).map(([k, c]) => [k, askModeAllows(c, verdict(c))]));
+    expect(ask).toEqual({ read: true, gitStatus: true, edit: false, test: false, install: false, pushMain: false, curlSh: false, regAdd: false, format: false, tamper: false, mcp: false });
   });
   it("Manual: reading runs, everything else asks, hard blocks are refused", () => {
     expect(kinds("manual")).toEqual({ read: "allow", gitStatus: "allow", edit: "ask", test: "ask", install: "ask", pushMain: "ask", curlSh: "ask", regAdd: "ask", format: "deny", tamper: "deny", mcp: "ask" });
@@ -166,7 +167,7 @@ describe("decisions in a session", () => {
     const [a, b] = memoryPair();
     core.server.attach(a);
     const client = new RpcClient(b);
-    const cards: Array<{ request_id: string; risk: Record<string, unknown> }> = [];
+    const cards: Array<{ request_id: string; risk: Record<string, unknown>; preview?: unknown }> = [];
     client.onNotification((m, p) => {
       const ev = (p as { event: { type: string } }).event;
       if (m === "session.event" && ev.type === "permission") cards.push(ev as never);
@@ -208,6 +209,17 @@ describe("decisions in a session", () => {
     await expect(t.decide("Bash", { command: "npm install react" })).resolves.toEqual({ action: "allow" });
   });
 
+  it("a write card carries the file and its before/after, not just the raw input", async () => {
+    const t = await setup("manual");
+    const pending = t.decide("Write", { file_path: "notes/hello.py", content: 'print("hi")\n' });
+    const card = await t.answer("allow_once");
+    expect(card.preview).toEqual({ path: "notes/hello.py", before: "", after: 'print("hi")\n' });
+    await expect(pending).resolves.toEqual({ action: "allow" });
+    const shell = t.decide("Bash", { command: "npm test" });
+    expect((await t.answer("allow_once")).preview).toBeUndefined();
+    await shell;
+  });
+
   it("Deny always saves a deny rule", async () => {
     const t = await setup("manual");
     const first = t.decide("Bash", { command: "npm test" });
@@ -226,13 +238,21 @@ describe("decisions in a session", () => {
     await expect(pending).resolves.toMatchObject({ action: "deny" });
   });
 
-  it("unattended sessions refuse what would ask; Ask mode refuses edits; yolo is refused", async () => {
+  it("unattended sessions refuse what would ask; a legacy ask permission is Ask mode; yolo is refused", async () => {
     const t = await setup("manual", {}, true);
     await expect(t.decide("Bash", { command: "npm test" })).resolves.toMatchObject({ action: "deny", reason: expect.stringContaining("human approval") });
     await t.client.call("session.set_permission", { session_id: t.session_id, permission: "ask" });
     await expect(t.decide("Edit", { file_path: "a.txt", old_string: "a", new_string: "b" })).resolves.toMatchObject({ action: "deny", reason: expect.stringContaining("Ask mode") });
     await expect(t.decide("Read", { file_path: "a.txt" })).resolves.toEqual({ action: "allow" });
     await expect(t.client.call("session.set_permission", { session_id: t.session_id, permission: "yolo" })).rejects.toThrow(/yolo/);
+  });
+
+  it("the Ask work mode stays read-only even in Bypass", async () => {
+    const t = await setup("bypass");
+    await t.client.call("session.set_mode", { session_id: t.session_id, mode: "ask" });
+    await expect(t.decide("Edit", { file_path: "a.txt", old_string: "a", new_string: "b" })).resolves.toMatchObject({ action: "deny", reason: expect.stringContaining("Ask mode") });
+    await t.client.call("session.set_mode", { session_id: t.session_id, mode: "agent" });
+    await expect(t.decide("Edit", { file_path: "a.txt", old_string: "a", new_string: "b" })).resolves.toEqual({ action: "allow" });
   });
 
   it("lists the rules that apply and where to edit them", async () => {

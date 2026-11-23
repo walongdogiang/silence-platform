@@ -40,13 +40,12 @@ function record(params: unknown): Record<string, unknown> {
 
 /**
  * Permission mode for the Rust Engine, which only knows ask (cautious) / balanced. The UI speaks the
- * core's modes; Ask (read-only) and Bypass cannot be chosen while the core is off, and an Engine
- * session resumed while it is on gets the closest safe mode.
+ * core's modes; Bypass cannot be chosen while the core is off, and an Engine session resumed while it
+ * is on gets the closest safe mode.
  */
 export function toEngineMode(mode: unknown): unknown {
   switch (mode) {
     case "manual":
-    case "ask":
       return "ask";
     case "accept_edits":
     case "auto":
