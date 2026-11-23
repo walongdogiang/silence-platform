@@ -95,6 +95,47 @@ describe("RunIndicator", () => {
     expect(html).toMatch(/msg-thought-label active"><span class="run-ind md working"/);
   });
 
+  it("tool đã trả kết quả: bước cuối thành quá khứ, không còn sao; tiêu đề vẫn chạy", () => {
+    const html = render([
+      { kind: "user", text: "fix it" },
+      { kind: "narrate", verb: "Reading", detail: "a.ts" },
+      { kind: "tool", name: "read", output: "..." },
+    ]);
+    expect(html).not.toContain("msg-step active");
+    expect(html).toMatch(/msg-step-verb">Read</);
+    expect(count(html, /run-ind md working/g)).toBe(1);
+  });
+
+  it("model đang viết câu trả lời: không bước nào còn sao", () => {
+    const html = render([
+      { kind: "user", text: "fix it" },
+      { kind: "narrate", verb: "Reading", detail: "a.ts" },
+      { kind: "token", text: "a.ts làm" },
+    ]);
+    expect(html).not.toContain("msg-step active");
+    expect(count(html, /run-ind md working/g)).toBe(1);
+  });
+
+  it("trả lời thẳng không dùng tool: Planning không đứng lại khi chữ đã chạy", () => {
+    const html = render([
+      { kind: "user", text: "hi" },
+      { kind: "narrate", verb: "Planning next moves" },
+      { kind: "token", text: "Chào" },
+    ]);
+    expect(html).not.toContain("Planning next moves");
+  });
+
+  it("bước mới sau bước đã xong lại là bước đang chạy", () => {
+    const html = render([
+      { kind: "user", text: "fix it" },
+      { kind: "narrate", verb: "Read", detail: "a.ts" },
+      { kind: "tool", name: "read", output: "..." },
+      { kind: "narrate", verb: "Reading", detail: "b.ts" },
+    ]);
+    expect(count(html, /msg-step active/g)).toBe(1);
+    expect(html).toMatch(/run-shimmer"><span class="msg-step-verb">Reading/);
+  });
+
   it("bước mới chạy dưới 3s không hiện thời gian", () => {
     const html = render([
       { kind: "user", text: "fix it" },
