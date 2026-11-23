@@ -139,7 +139,7 @@ Chuột phải vào bubble user hoặc câu trả lời AI → `MessageMenu` (c�
 
 | Live | Past | Ghi chú |
 | --- | --- | --- |
-| Planning next moves | *(không lưu)* | Placeholder; bị thay |
+| Planning next moves | *(không lưu)* | Bước đang chạy (sao + shimmer) khi chưa có bước thật; có bước thật thì biến mất |
 | Thinking | Thought briefly / Thought Ns | Bản ghi + full body |
 | Reading | Read | |
 | Starting | Started | `proc_start` (dev server nền) |

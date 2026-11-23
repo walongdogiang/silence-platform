@@ -243,22 +243,21 @@ function thoughtLabel(turn: Turn, t: T): { label: string; live: boolean } {
 }
 
 function displaySteps(turn: Turn): { step: NarrateStep; active: boolean }[] {
-  /* Live: Planning/Thinking; Done: bỏ placeholder; Thought hiển thị block riêng */
   /* Gộp Read liên tiếp cùng file → `Read App.tsx (1–40, 615–629)` (docs/frontend/status.md). */
-  const raw = mergeReadSteps(
-    turn.live
-      ? turn.narrations.filter((s) => !/^Thought$/i.test(s.verb))
-      : turn.narrations.filter((s) => !isPlanningVerb(s.verb) && !/^Thinking$/i.test(s.verb) && !/^Thought$/i.test(s.verb)),
-  );
   if (!turn.live) {
-    return raw.map((s) => ({ step: narrateToPast(s), active: false }));
+    return mergeReadSteps(activityNarrations(turn.narrations)).map((s) => ({ step: narrateToPast(s), active: false }));
   }
+  /* Live (status.md → Run indicator): Planning là một bước như mọi bước, nhưng chỉ khi nó là việc đang làm —
+   * có bước thật thì nó biến mất, không đứng lại in đậm. Thinking/Thought có block riêng nên không vào danh sách;
+   * đang Thinking thì không bước nào "đang chạy". */
+  const ns = turn.narrations.filter((s) => !/^Thought$/i.test(s.verb));
+  const thinking = /^Thinking$/i.test(ns[ns.length - 1]?.verb ?? "");
+  const raw = mergeReadSteps(
+    ns.filter((s, i) => !/^Thinking$/i.test(s.verb) && (!isPlanningVerb(s.verb) || i === ns.length - 1)),
+  );
   return raw.map((s, i) => {
-    const active = i === raw.length - 1;
-    if (active || isPlanningVerb(s.verb) || /^Thinking$/i.test(s.verb)) {
-      return { step: s, active };
-    }
-    return { step: narrateToPast(s), active: false };
+    const active = !thinking && i === raw.length - 1;
+    return active ? { step: s, active } : { step: narrateToPast(s), active: false };
   });
 }
 
@@ -508,16 +507,27 @@ function AgentMeta(props: {
   const phase = runPhase(run, awaiting);
   const explored = exploreLabel(props.turn.traces, props.turn.narrations, t);
   const steps = displaySteps(props.turn);
-  const active = steps.find((s) => s.active);
   const { label: tLabel, live: thinkingLive } = thoughtLabel(props.turn, t);
-  const liveBrief = active
-    ? stepText(active.step, t)
-    : props.turn.narrations.some((s) => isPlanningVerb(s.verb))
-      ? t("verb.Planning next moves")
-      : thinkingLive
-        ? t("verb.Thinking")
-        : t("run.workingDots");
   const thoughtBody = props.turn.thought?.body?.trim() ?? "";
+  const stepList = (
+    <ul className="msg-step-list">
+      {steps.map(({ step, active }, j) => (
+        <li key={j} className={`msg-step${active ? " active" : ""}`}>
+          {active ? <RunIndicator phase={phase} /> : null}
+          <span className={`msg-step-body${active && phase === "working" ? " run-shimmer" : ""}`}>
+            <span className="msg-step-verb">{verbText(step.verb, t)}</span>
+            {step.detail ? <span className="msg-step-detail">{detailText(step.detail, t)}</span> : null}
+            {step.sandboxed ? (
+              <span className="msg-step-sbx" title={t("sandbox.badgeTip")}>
+                {t("sandbox.badge")}
+              </span>
+            ) : null}
+            {active ? <StepElapsed at={step.at} now={now} /> : null}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
   const routes = props.turn.traces.filter((l) => l.kind === "route");
   const chip = autoChip(routes, t);
   const tools = props.turn.traces.filter((l) => l.kind === "tool" || l.kind === "sys");
@@ -558,8 +568,6 @@ function AgentMeta(props: {
       </summary>
       {hasBody ? (
         <div className="msg-agent-meta-body">
-          {props.turn.live && !tLabel ? <p className="msg-status-brief">{liveBrief}</p> : null}
-
           {tLabel ? (
             <details
               className={`msg-thought-block${thinkingLive ? " live" : ""}`}
@@ -587,27 +595,12 @@ function AgentMeta(props: {
                 <span className={explored.stub ? "stub" : undefined}>{explored.label}</span>
                 {steps.length > 0 ? <ChevronDown size={13} className="msg-agent-meta-chev" /> : null}
               </summary>
-              {steps.length > 0 ? (
-                <ul className="msg-step-list">
-                  {steps.map(({ step, active }, j) => (
-                    <li key={j} className={`msg-step${active ? " active" : ""}`}>
-                      {active ? <RunIndicator phase={phase} /> : null}
-                      <span className={`msg-step-body${active && phase === "working" ? " run-shimmer" : ""}`}>
-                        <span className="msg-step-verb">{verbText(step.verb, t)}</span>
-                        {step.detail ? <span className="msg-step-detail">{detailText(step.detail, t)}</span> : null}
-                        {step.sandboxed ? (
-                          <span className="msg-step-sbx" title={t("sandbox.badgeTip")}>
-                            {t("sandbox.badge")}
-                          </span>
-                        ) : null}
-                        {active ? <StepElapsed at={step.at} now={now} /> : null}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              {steps.length > 0 ? stepList : null}
             </details>
           ) : null}
+
+          {/* Chỉ có Planning (chưa có bước thật): bước đang chạy đứng riêng, chưa có nhãn "Explored". */}
+          {!explored.show && props.turn.live && steps.length > 0 ? stepList : null}
 
           {routes.map((l, j) =>
             l.kind === "route" ? (

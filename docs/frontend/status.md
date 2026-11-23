@@ -96,6 +96,7 @@ Một ngôn ngữ chuyển động cho **mọi thứ đang chạy**, để nhìn
 | --- | --- | --- |
 | Summary lượt live (`Working · Ns`) | có | không |
 | Bước cuối đang chạy (`msg-step.active`) | có, nằm ở lề trái để bước xong và bước đang chạy thẳng hàng | có |
+| `Planning next moves` khi chưa có bước thật | có (là bước đang chạy, đứng riêng, chưa có nhãn "Explored") | có |
 | Nhãn `Thinking` khi đang suy nghĩ | có | có |
 | Ảnh SVG đang vẽ (`VisualBlock`) | có | có |
 | Thread đang chạy trong lịch sử | có (`sm`) | không |
@@ -111,6 +112,7 @@ Theo pha (`runPhase`):
 Quy tắc:
 
 - Icon dùng `--info` (xanh), không dùng accent copper, để không lẫn với "chờ duyệt". Theme sáng làm đậm `--info` 28% cho đủ tương phản. Vẽ bằng SVG (không dùng ký tự ✻) để giống nhau trên mọi máy và tự theo 6 theme.
+- Planning là một bước như mọi bước nhưng **chỉ khi nó là việc đang làm** (narration cuối). Có bước thật thì Planning biến mất khỏi danh sách, không đứng lại in đậm. Thinking/Thought không vào danh sách bước (đã có block riêng); khi đang Thinking thì không bước nào "đang chạy". Không còn dòng chữ tĩnh `msg-status-brief` lặp lại bước đang chạy.
 - Shimmer chỉ ở **một** dòng cụ thể nhất (bước đang chạy hoặc Thinking), không ở summary, để mắt có một chỗ để nhìn.
 - Shimmer làm bằng `mask-image` trên khối chữ `inline-flex` (rộng bằng chữ), nên áp đều cho động từ, chi tiết và badge mà không cắt icon.
 - Bước đang chạy từ 3s trở lên hiện thời gian đã chạy (`msg-step-time`, từ `narrate.at` do `tool_start` gắn). Dưới 3s không hiện để Read/Search nhanh không nháy số.
