@@ -47,6 +47,8 @@ export type ChatLine =
       ranges?: [number, number | null][];
       /** Lệnh shell chạy trong sandbox (Tự chủ): Engine gửi trace `sandbox.run`. */
       sandboxed?: boolean;
+      /** Lúc bước bắt đầu (ms), chỉ để hiện thời gian bước đang chạy. */
+      at?: number;
       /** legacy persist */ text?: string;
     }
   | { kind: "thought"; ms?: number; brief: string; body?: string }

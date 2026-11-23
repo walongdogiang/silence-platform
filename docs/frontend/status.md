@@ -85,8 +85,37 @@ Quy tắc:
 - Token = **output** của lượt, format bằng `fmtTok`. Chưa có `cost` thì không hiện phần token.
 - Tooltip: `This turn: 12K input · 800 output · $0.0042` (VI: `Lượt này: …`). Input cộng qua nhiều call nên lớn hơn kích thước context; đó là số đã tính phí, không phải context.
 - Mọi nhãn (pulse, tooltip, thông báo lỗi) theo ngôn ngữ UI ([i18n.md](i18n.md)); ví dụ trong file này ghi bản tiếng Anh. Động từ bước lưu trong lịch sử bằng tiếng Anh (`Read`, `Searched`…) và chỉ dịch lúc hiển thị (`stepText` trong `chatMeta.ts`).
-- Lịch sử (`ChatHistoryPanel`): chấm của thread đang mở nhấp nháy khi chạy, đổi sang màu accent khi chờ duyệt. Tôn trọng `prefers-reduced-motion`. Engine chỉ đẩy event của session đang mở, nên chấm chỉ áp dụng cho thread đó.
+- Lịch sử (`ChatHistoryPanel`): thread đang chạy hiện cùng icon sao như trong chat (cỡ `sm`), chờ duyệt là chấm accent đứng yên. Xem mục Run indicator.
 - Không toast, không âm thanh, không đếm ngược giả.
+
+## Run indicator
+
+Một ngôn ngữ chuyển động cho **mọi thứ đang chạy**, để nhìn lướt là biết flow còn sống và đang ở bước nào. Component `RunIndicator.tsx`, CSS `.run-ind*` / `.run-shimmer` trong `styles.css`.
+
+| Chỗ | Icon đầu dòng | Shimmer chữ |
+| --- | --- | --- |
+| Summary lượt live (`Working · Ns`) | có | không |
+| Bước cuối đang chạy (`msg-step.active`) | có, nằm ở lề trái để bước xong và bước đang chạy thẳng hàng | có |
+| Nhãn `Thinking` khi đang suy nghĩ | có | có |
+| Ảnh SVG đang vẽ (`VisualBlock`) | có | có |
+| Thread đang chạy trong lịch sử | có (`sm`) | không |
+
+Theo pha (`runPhase`):
+
+| Pha | Icon | Shimmer |
+| --- | --- | --- |
+| working | sao 4 tia màu `--info`, chỉ xoay đều (không co giãn, sáng cố định), 1,5s mỗi nửa vòng | dải sáng quét ngang chữ, 2,2s |
+| awaiting_permission | chấm `--accent` **đứng yên**: copper chỉ dành cho "cần bạn làm gì đó", không dùng cho icon đang chạy | không |
+| stopping | sao chậm lại (4s), mờ; chữ bước về `--text-muted` | không |
+
+Quy tắc:
+
+- Icon dùng `--info` (xanh), không dùng accent copper, để không lẫn với "chờ duyệt". Theme sáng làm đậm `--info` 28% cho đủ tương phản. Vẽ bằng SVG (không dùng ký tự ✻) để giống nhau trên mọi máy và tự theo 6 theme.
+- Shimmer chỉ ở **một** dòng cụ thể nhất (bước đang chạy hoặc Thinking), không ở summary, để mắt có một chỗ để nhìn.
+- Shimmer làm bằng `mask-image` trên khối chữ `inline-flex` (rộng bằng chữ), nên áp đều cho động từ, chi tiết và badge mà không cắt icon.
+- Bước đang chạy từ 3s trở lên hiện thời gian đã chạy (`msg-step-time`, từ `narrate.at` do `tool_start` gắn). Dưới 3s không hiện để Read/Search nhanh không nháy số.
+- Lượt xong thì icon biến mất (về `Worked for Ns`). Không vẽ ✓ vì dòng `worked` không phân biệt xong hay bị dừng.
+- Chỉ animate `transform`, `opacity`, `mask-position`, không có timer JS. `prefers-reduced-motion`: icon tĩnh, bỏ shimmer.
 
 ## Ai quyết định cái gì (3 tầng)
 

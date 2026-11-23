@@ -16,17 +16,27 @@ export type NarrateStep = {
   ranges?: LineRange[];
   /** Lệnh shell chạy trong sandbox (Tự chủ): hiện badge "sandbox". */
   sandboxed?: boolean;
+  /** Lúc bước bắt đầu (ms) — bước đang chạy hiện thời gian đã chạy (RunIndicator, status.md). */
+  at?: number;
 };
 
 const READ_RE = /read|outline|cat|open|fs\.read|list|tree/;
 const READ_VERB = /^(Reading|Read)$/;
 
 /** Dòng `narrate` đã lưu → bước, giữ `file`/`ranges` để gộp Read. */
-export function narrateFromLine(l: { verb: string; detail?: string; file?: string; ranges?: LineRange[]; sandboxed?: boolean }): NarrateStep {
+export function narrateFromLine(l: {
+  verb: string;
+  detail?: string;
+  file?: string;
+  ranges?: LineRange[];
+  sandboxed?: boolean;
+  at?: number;
+}): NarrateStep {
   const s: NarrateStep = { verb: l.verb, detail: l.detail };
   if (l.file) s.file = l.file;
   if (l.ranges) s.ranges = l.ranges;
   if (l.sandboxed) s.sandboxed = true;
+  if (typeof l.at === "number") s.at = l.at;
   return s;
 }
 
@@ -81,6 +91,7 @@ export function mergeReadSteps(steps: NarrateStep[]): NarrateStep[] {
     if (prev?.file && s.file && prev.file === s.file && READ_VERB.test(prev.verb) && READ_VERB.test(s.verb)) {
       const ranges = mergeRanges(prev.ranges, s.ranges);
       out[out.length - 1] = { verb: s.verb, file: s.file, ranges, detail: readDetail(s.file, ranges) };
+      if (typeof s.at === "number") out[out.length - 1].at = s.at;
     } else {
       out.push(s);
     }
