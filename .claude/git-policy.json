@@ -1,0 +1,21 @@
+{
+  "_doc": "Ngưỡng và đường dẫn rủi ro cho skill task-git. Chỉnh ở đây, không sửa skill.",
+  "maxFilesAutoMerge": 15,
+  "maxLinesAutoMerge": 600,
+  "maxCiFixAttempts": 2,
+  "highRiskPaths": [
+    "docs/security/",
+    "crates/sandbox/",
+    ".github/workflows/",
+    ".githooks/",
+    ".claude/settings",
+    ".claude/git-policy.json",
+    ".claude/skills/",
+    "scripts/pr-merge.mjs",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "package-lock.json",
+    "Cargo.lock"
+  ],
+  "forbidden": ["push main", "--no-verify", "commit secrets/.env"]
+}
