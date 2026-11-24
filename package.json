@@ -25,6 +25,7 @@
     "evals:weekly": "cargo run -p silence-engine -- evals-profile --profile weekly --repo-root .",
     "check:rules": "node scripts/check-rules.mjs",
     "check:docs": "node scripts/check-docs-meta.mjs",
+    "test:todo": "node --test scripts/todo.test.mjs",
     "build:core": "npm run build --workspace @silence/core",
     "test:core": "npm test --workspace @silence/core"
   }

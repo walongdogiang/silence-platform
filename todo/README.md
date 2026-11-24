@@ -9,13 +9,18 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 /todo add …      thêm việc (AI đề xuất chỗ đặt)
 /todo done       đóng việc đang làm (kiểm tiêu chí trước)
 /todo log        ghi nhật ký trước khi đóng chat
+/todo resume T-xxx   làm tiếp ở chat này việc đang dở ở chat khác
+/todo release    trả việc chat này đang giữ
+/todo doctor     kiểm mục lục, file task, sổ giữ việc có khớp không
 ```
+
+Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
 Mã tiếp theo: T-020
 
 ## Now
 
-<!-- Tối đa 1 việc đang làm. -->
+<!-- Tối đa 2 việc đang làm, mỗi việc do đúng một chat giữ (scripts/todo-claims.mjs). -->
 
 
 ## Next

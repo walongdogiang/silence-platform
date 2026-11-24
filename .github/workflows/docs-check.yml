@@ -2,7 +2,8 @@ name: docs-check
 
 # Docs và rule cho agent:
 # - rule .claude/rules/*.md có `paths:` hợp lệ, path còn tồn tại;
-# - mọi docs/**/*.md (trừ archive/) có frontmatter hợp lệ và có trong mục lục.
+# - mọi docs/**/*.md (trừ archive/) có frontmatter hợp lệ và có trong mục lục;
+# - test script của todo/ (scripts/todo-brief.mjs, scripts/todo-claims.mjs).
 # Tách khỏi ci.yml vì ci.yml bỏ qua thay đổi chỉ chạm **/*.md. Không cần npm install.
 # Chạy trên mọi PR (base bất kỳ, kể cả PR xếp chồng) và mỗi lần push main.
 
@@ -14,6 +15,8 @@ on:
       - "scripts/check-rules.mjs"
       - "scripts/check-docs-meta.mjs"
       - "scripts/frontmatter.mjs"
+      - "scripts/todo-*.mjs"
+      - "scripts/todo.test.mjs"
       - ".github/workflows/docs-check.yml"
   push:
     branches: [main]
@@ -23,6 +26,8 @@ on:
       - "scripts/check-rules.mjs"
       - "scripts/check-docs-meta.mjs"
       - "scripts/frontmatter.mjs"
+      - "scripts/todo-*.mjs"
+      - "scripts/todo.test.mjs"
       - ".github/workflows/docs-check.yml"
 
 permissions:
@@ -41,3 +46,5 @@ jobs:
         run: node scripts/check-rules.mjs
       - name: Docs frontmatter and index
         run: node scripts/check-docs-meta.mjs
+      - name: Todo scripts
+        run: node --test scripts/todo.test.mjs

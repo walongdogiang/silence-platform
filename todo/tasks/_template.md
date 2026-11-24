@@ -3,11 +3,11 @@ id: T-000
 title: Tên việc
 type: feature          # feature | fix | chore | docs | research
 status: todo           # todo | in-progress | blocked | done | dropped
-phase:                 # design | plan | build | verify — điền khi bắt đầu; size S bắt đầu ở build
+phase:                 # design | plan | build | verify — điền khi bắt đầu
 area: []               # studio | core | engine | docs | ci | agent-kit
 size: M                # S (<1 phiên) | M (1–3 phiên) | L (nên tách)
 depends: []            # vd [T-012]
-branch:                # điền khi bắt đầu
+branch:                # <type>/T-000-slug — điền khi bắt đầu
 pr:                    # điền khi mở PR
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
@@ -17,8 +17,8 @@ updated: YYYY-MM-DD
 Chi tiết tăng dần (skill todo → "Chi tiết theo vòng đời"):
 - Lúc thêm: Mục tiêu + Phạm vi sơ bộ.
 - Pha design: + Đọc trước, Bối cảnh, Tái hiện/Thiết kế (theo type), Câu hỏi mở.
-- Pha plan: + Kế hoạch, Tiêu chí xong.
-- Pha build/verify: tick bước + tiêu chí, ghi Nhật ký.
+- Pha plan: + Kế hoạch, Tiêu chí xong → CỔNG DUYỆT (user duyệt một lần cả thiết kế, kế hoạch, tiêu chí).
+- Sau cổng duyệt: agent tự làm tới merge; ghi Phát sinh và Nhật ký.
 Xoá mục không dùng; không để mục rỗng.
 -->
 
@@ -45,26 +45,39 @@ Vì sao làm, xong thì cái gì đúng (1–3 câu).
 
 ## Thiết kế
 
-<!-- type = feature / research: phương án a/b/c · **Đã chốt:** … vì … · Ràng buộc không được phá: … -->
+<!-- type = feature / research: phương án a/b/c · **Đã chốt:** … vì … · **Đã thử, bỏ:** … vì … · Ràng buộc không được phá: … -->
 
 ## Câu hỏi mở
 
-<!-- Việc chờ user quyết. Gặp câu hỏi ở đây thì dừng lại hỏi, không đoán. -->
+<!-- Việc chờ user quyết. Câu hỏi chặn bước đang làm thì dừng lại hỏi, không đoán. -->
+
+- [ ] …
 
 ## Kế hoạch
 
-<!-- Bước nhỏ, mỗi bước: việc · file · cách kiểm. Bước khó ghi "(cần Opus: lý do)". -->
+<!-- Bước nhỏ, mỗi bước: việc · file → hàm · cách kiểm. fix: bước 1 là test đỏ tái hiện lỗi. -->
 
 1. [ ] …
 
 ## Tiêu chí xong
 
-<!-- Chốt với user trước khi code. Mỗi dòng kiểm được; tick kèm chứng cứ, vd: - [x] vitest xanh (npm test, 214 pass). Hơn ~7 dòng thì tách việc. -->
+<!--
+Mỗi dòng: hành vi — kiểm: `lệnh` (hoặc chỗ xem cụ thể). Tick kèm kết quả: - [x] … — kiểm: `npm test …` → 214 pass
+(user): user tự kiểm tay; không chặn merge trừ khi ghi (user, chặn). Hơn ~7 dòng thì tách việc.
+-->
 
-- [ ] Code + test theo phạm vi (AGENTS.md → Test theo phạm vi)
-- [ ] Docs/spec/rule cập nhật nếu đổi hành vi
-- [ ] PR đã merge
+- [ ] … — kiểm: `…`
+- [ ] (user) …
+
+## Phát sinh
+
+<!-- Việc thấy được ngoài phạm vi: ghi vào đây, không ngắt user. Lúc đóng việc, đề xuất đưa vào Later. -->
 
 ## Nhật ký
 
-<!-- Mỗi phiên dở dang: ### YYYY-MM-DD · pha … · model … rồi Đã làm / Nhánh-PR / Vướng / Bước kế. -->
+<!--
+Chỉ ghi điều git và Kế hoạch không cho biết. Ghi khi: xong một bước, chốt quyết định, một cách thử hỏng, trước khi dừng.
+### YYYY-MM-DD HH:MM · bước N · Opus|Sonnet
+- Dở: …  - Quyết định: … vì …  - Đã thử, bỏ: …  - Phát hiện: …  - Bước kế: …
+(chỉ những dòng có nội dung; >~40 dòng thì gộp mục cũ thành "Tóm tắt tới nay")
+-->
