@@ -1,43 +1,59 @@
 ---
 name: task-git
-description: Quy trình git cho một việc trong todo/ — khi nào commit, push, mở PR, sửa CI, merge, và khi nào phải hỏi user. Dùng khi mọi tiêu chí của việc vừa đạt, khi chuẩn bị commit/push/mở PR/merge, hoặc khi CI của PR đỏ.
+description: Cơ chế git cho một việc trong todo/ — worktree, khi nào commit, push, mở PR, sửa CI, merge qua scripts/pr-merge.mjs, và khi nào phải hỏi user. Dùng khi chuẩn bị commit/push/mở PR/merge, hoặc khi CI của PR đỏ. Vòng đời việc (cổng duyệt, tiêu chí, đóng việc) thuộc skill todo.
 ---
 
 # task-git
 
-Chính sách gốc: mục **Tự chủ** trong `AGENTS.md`. Ngưỡng và đường dẫn rủi ro: `.claude/git-policy.json` (đọc file này, đừng nhớ số).
+Chia việc với skill `todo`:
+- `todo` quyết **việc gì, lúc nào xong**: cổng duyệt, tiêu chí, đóng việc (DONE, archive) **trong PR của việc, trước merge**.
+- `task-git` lo **cơ chế git** dưới đây.
 
-## Cổng 0 — bắt đầu việc
-- Nhánh từ `origin/main` (`git fetch` trước): `feat|fix|chore|docs/<T-xxx>-<slug>`. Làm trong worktree/nhánh việc, không làm trên `main`.
-- `git status`: thay đổi dở có sẵn (không phải của việc) → ghi lại, **không bao giờ stage**.
+Chính sách gốc: mục **Tự chủ** trong `AGENTS.md`. Ngưỡng và đường dẫn rủi ro: `.claude/git-policy.json` (đọc file, đừng nhớ số).
 
-## Cổng 1 — commit (chỉ khi xong trọn việc)
-Đủ cả:
-1. Mọi tiêu chí của việc trong `todo/` đạt (không đạt đủ mà muốn commit → hỏi user).
-2. Test/check theo phạm vi (`AGENTS.md` → *Test theo phạm vi*) đã chạy và xanh. Chưa chạy được thì ghi rõ, không giả vờ.
-3. `git diff --stat`: chỉ file thuộc việc; không `.env`/secrets/`node_modules`.
-4. Stage **từng file** (`git add <path>`), cấm `git add -A` / `git add .`.
-5. Message Conventional Commits, nhắc `T-xxx`.
+## Khi nào làm gì
 
-## Cổng 2 — push + PR
-- `git push -u origin <nhánh>`; không force, không `--no-verify`, không bao giờ đích `main`.
-- `gh pr create` vào `main`: tiêu đề Conventional Commits; mô tả gồm `T-xxx`, tiêu chí đã đạt, cách đã kiểm (lệnh + kết quả), phần chưa chạy.
-- Sau khi mở: `mcp__ccd_pr__get_status`, chưa gắn thì `bind_pr`; không tự poll CI.
+| Bước | Khi nào | Không bao giờ |
+|---|---|---|
+| Nhánh + worktree | Việc đã qua cổng duyệt của `todo` | Làm trên `main`; đổi nhánh thư mục chính |
+| Commit đầu | Mọi tiêu chí (trừ `(user)`) đã tick, check theo phạm vi xanh | Commit lưu tạm giữa chừng |
+| Commit sau | Chỉ để sửa CI đỏ hoặc góp ý review, cùng nhánh | Amend/rebase commit đã push |
+| Push | Ngay sau mỗi commit | Force, `--no-verify`, đích `main` |
+| Mở PR | Ngay sau push đầu | Mở PR cho việc chưa xong |
+| Merge | `pr-merge.mjs` exit 0 | Gọi `gh pr merge` trực tiếp; bật auto-merge GitHub |
 
-## Cổng 3 — CI
-- Đỏ: đọc log job hỏng, sửa trong phạm vi việc, commit + push cùng nhánh. Tối đa `maxCiFixAttempts` lần, quá thì **hỏi user**.
+Việc không có `T-xxx` (user nhờ trong chat): tạo việc qua skill `todo`, lấy cổng duyệt làm tiêu chí "xong". Không có cổng duyệt thì không tự commit.
+
+## Worktree
+- Không đổi nhánh, pull hay stash ở thư mục chính của repo; nơi đó là của user.
+- Dùng worktree riêng có `git status` sạch; worktree đang có thay đổi lạ là của phiên khác → không đụng, tạo worktree mới (`git worktree add -b <nhánh> <thư-mục> origin/main`, rồi `npm install` nếu cần).
+- Nhánh `<type>/T-xxx-slug` từ `origin/main` (`git fetch` trước).
+
+## Commit
+1. `git diff --stat`: chỉ file thuộc việc; không `.env`/secrets/`node_modules`.
+2. Stage **từng file** (`git add <path>`); cấm `git add -A` / `git add .`.
+3. Message Conventional Commits, nhắc `T-xxx`. Trên Windows ghi message ra file rồi `git commit -F <file>`.
+
+## Push + PR
+- `git push -u origin <nhánh>`.
+- `gh pr create --base main` (mô tả qua `--body-file`): tiêu đề Conventional Commits; mô tả gồm `T-xxx`, tiêu chí đã đạt, cách đã kiểm (lệnh + kết quả), phần chưa chạy.
+- Sau khi mở: `mcp__ccd_pr__get_status`, chưa gắn thì `bind_pr`. Không tự poll CI.
+- Đề nghị user bật Auto-fix cho PR, để app đánh thức agent khi CI có kết quả. Không bật thì bước merge diễn ra ở lượt kế tiếp user nhắn; nói rõ điều đó trong tin cuối.
+
+## CI đỏ
+- Đọc log job hỏng, sửa trong phạm vi việc, commit + push cùng nhánh. Tối đa `maxCiFixAttempts` lần, quá thì **hỏi user**.
 - Cấm sửa CI bằng cách tắt/giảm test hoặc workflow.
 
-## Cổng 4 — merge
-Merge **chỉ bằng** `node scripts/pr-merge.mjs <số-PR>`, không gọi `gh pr merge` trực tiếp. Script tự kiểm: PR mở, không draft, base `main`, không xung đột, `ci-ok` xanh, diff ≤ `maxFilesAutoMerge` file / `maxLinesAutoMerge` dòng, không file nào khớp `highRiskPaths`; đạt hết thì squash merge và xoá nhánh. Thêm `--dry-run` để chỉ kiểm.
-- Exit 0 = xong. Exit 1 = chưa sẵn sàng (CI chưa xanh/xung đột…): chờ hoặc sửa, không ép.
-- Exit 2 = cần rủi ro/diff lớn → **hỏi user**, nêu các dòng script in ra. Chỉ khi user nói rõ duyệt trong chat mới chạy lại với `--user-approved`. Việc user đã duyệt ở cổng duyệt của skill `todo` cũng dùng cờ này.
-- Mọi file phải thuộc phạm vi việc (script không biết phạm vi — tự rà `git diff --stat` ở cổng 1).
-Không bật auto-merge của GitHub.
+## Merge
+Chỉ bằng `node scripts/pr-merge.mjs <số-PR>` (thêm `--dry-run` để chỉ kiểm). Script kiểm: PR mở, không draft, base `main`, không xung đột, `ci-ok` xanh, diff trong ngưỡng, không file nào khớp `highRiskPaths`; đạt hết thì squash merge và xoá nhánh remote.
+- Exit 0 = xong. Exit 1 = chưa sẵn sàng (CI chưa xanh, xung đột…): chờ hoặc sửa, không ép.
+- Exit 2 = rủi ro cao/diff lớn → **hỏi user**, kèm các dòng script in ra. Chỉ chạy lại với `--user-approved` khi user nói rõ duyệt trong chat, hoặc việc đã qua cổng duyệt của `todo`.
+- Script không biết phạm vi việc: tự rà `git diff --stat` trước đó.
 
-## Cổng 5 — dọn
-- Về `main`, `git pull`, xoá nhánh cục bộ; dùng skill `todo` để chuyển việc sang DONE.
+## Sau merge
+- Worktree về `git switch --detach origin/main` (sau `git fetch`), xoá nhánh cục bộ.
+- `node scripts/todo-claims.mjs release T-xxx` (việc đã đóng trong PR, không sửa `todo/` sau merge).
 
 ## Luôn hỏi / không bao giờ
-- Hỏi: amend/force-push commit đã push, tag, release, xung đột merge không tầm thường, nghi ngờ phạm vi.
+- Hỏi: amend/force-push commit đã push, tag, release, xung đột merge không tầm thường, nghi ngờ phạm vi, đụng thư mục chính.
 - Cấm: push `main`, `--no-verify`, commit secrets.
