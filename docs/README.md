@@ -57,6 +57,7 @@ Họ crate phụ vẫn `silence-*` (protocol, tools, …). Không đổi sang t�
 | [adr/0002-harness-architecture.md](adr/0002-harness-architecture.md) | Kiến trúc đích harness — event log, kernel, tool registry, store task, lộ trình | Đổi agent loop, session, tool, hook, lưu trữ |
 | [adr/0003-pr-watch.md](adr/0003-pr-watch.md) | Quyết định theo dõi PR / Auto-fix: chủ là PR, local + khay, hợp đồng sẵn cho cloud, 4 lớp bảo vệ main, lộ trình PR | Trước khi làm bất kỳ phần theo dõi PR, lease, bảo vệ main |
 | [adr/0004-backend-adapters.md](adr/0004-backend-adapters.md) | Quyết định harness cá nhân: tám trụ, lõi TS chạy ở khay thay Engine Rust, Claude qua Agent SDK, điều khiển từ xa qua Tailscale | **Đọc trước mọi việc lớn**: hướng sản phẩm và kiến trúc hiện hành |
+| [adr/0005-skill-architecture.md](adr/0005-skill-architecture.md) | Kiến trúc skill cá nhân: 4 tầng theo cách nạp, mdm/skm, vòng đời có cổng duyệt, global qua plugin, ánh xạ sơ đồ Trang-3 | Thêm hoặc sắp xếp skill, rule, subagent, hook |
 | [adapters/protocol.md](adapters/protocol.md) | API lõi (MessagePort/WebSocket) và interface Backend: ToolCall, decide, sự kiện, vòng đời, kiểm chứng, hàng đợi, quota | Code `packages/core`, adapter, hàng đợi job |
 | [adapters/claude-sdk.md](adapters/claude-sdk.md) | Adapter Claude ánh xạ sang Agent SDK, thứ tự hook/permission, test cần xác minh; ánh xạ Codex/Cursor/agy/ACP | Code adapter Claude hoặc thêm backend mới |
 | [adapters/migration.md](adapters/migration.md) | Mang gì từ Rust sang TS, xoá gì và khi nào, lộ trình 6 giai đoạn | Chọn việc tiếp theo, chia PR |
