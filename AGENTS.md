@@ -41,11 +41,13 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 ## Tự chủ
 
 - Được: sửa code, chạy build/test, đọc log (không in API key).
-- Hỏi user trước: `git commit`, push, tag, amend, force.
-  - Ngoại lệ duy nhất: việc trong `todo/` mà user đã duyệt ở **cổng duyệt** (skill `todo`) — với riêng việc đó, agent được commit và push nhánh của việc, mở PR vào `main`, sửa CI, squash merge khi CI xanh và đủ tiêu chí. Tag, amend, force vẫn phải hỏi.
+- Tự làm, không cần hỏi (khi đã xong trọn một việc, mọi tiêu chí đạt, test/check theo phạm vi xanh): tạo nhánh việc, `git commit` (chỉ stage đúng file của việc), push nhánh việc (không force), mở PR, sửa CI đỏ trên nhánh của mình, **squash merge khi `ci-ok` xanh và PR rủi ro thấp** (không dính mục "Hỏi" dưới đây), rồi xoá nhánh và cập nhật `todo/`.
+- Hỏi user trước: merge PR rủi ro cao; amend hoặc force-push commit đã push, tag, release; diff lớn hoặc có file ngoài phạm vi việc; chạm `docs/security/`, `.github/workflows`, `.githooks`, `.claude/settings*`, `AGENTS.md`, `CLAUDE.md`; CI vẫn đỏ sau 2 lần sửa; xung đột merge không tầm thường; có thay đổi dở của user trong thư mục (không được stage chúng).
+  - Ngoại lệ: việc trong `todo/` mà user đã duyệt ở **cổng duyệt** (skill `todo`) — với riêng việc đó, agent được commit, push nhánh của việc, mở PR vào `main`, sửa CI, squash merge khi CI xanh và đủ tiêu chí, kể cả khi PR thuộc loại "hỏi". Tag, amend, force vẫn phải hỏi.
+- Cấm kể cả khi user bảo: push `main`, `--no-verify`, commit secrets/`.env`.
 - Không commit `.env`, secrets, `node_modules/`.
 - **Không tự chọn thay user, không đoán ý.** Khi đã đưa phương án (a/b/c) hoặc hỏi user, phải chờ user chọn rõ rồi mới làm. Câu hỏi bị ngắt, bị từ chối hay chưa có trả lời thì **không** được coi là đồng ý với phương án khuyến nghị: dừng lại và hỏi lại. Việc, phạm vi hay thay đổi user chưa chọn thì không tự động sửa.
-- Chỉ commit, push, merge khi đã xong trọn một chức năng hoặc một việc (code + test + docs đã kiểm); không commit lẻ tẻ giữa chừng.
+- Chỉ commit, push, mở PR khi đã xong trọn một chức năng hoặc một việc (code + test + docs đã kiểm, mọi tiêu chí của việc trong `todo/` đạt); không commit lẻ tẻ giữa chừng.
 
 ## Quy trình Git
 

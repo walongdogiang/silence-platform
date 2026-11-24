@@ -26,6 +26,7 @@
     "check:rules": "node scripts/check-rules.mjs",
     "check:docs": "node scripts/check-docs-meta.mjs",
     "test:todo": "node --test scripts/todo.test.mjs",
+    "test:pr-merge": "node --test scripts/pr-merge.test.mjs",
     "build:core": "npm run build --workspace @silence/core",
     "test:core": "npm test --workspace @silence/core"
   }

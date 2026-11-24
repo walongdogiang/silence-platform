@@ -3,7 +3,8 @@ name: docs-check
 # Docs và rule cho agent:
 # - rule .claude/rules/*.md có `paths:` hợp lệ, path còn tồn tại;
 # - mọi docs/**/*.md (trừ archive/) có frontmatter hợp lệ và có trong mục lục;
-# - test script của todo/ (scripts/todo-brief.mjs, scripts/todo-claims.mjs).
+# - test script của todo/ (scripts/todo-brief.mjs, scripts/todo-claims.mjs);
+# - test cổng merge PR (scripts/pr-merge.mjs, ngưỡng ở .claude/git-policy.json).
 # Tách khỏi ci.yml vì ci.yml bỏ qua thay đổi chỉ chạm **/*.md. Không cần npm install.
 # Chạy trên mọi PR (base bất kỳ, kể cả PR xếp chồng) và mỗi lần push main.
 
@@ -17,6 +18,8 @@ on:
       - "scripts/frontmatter.mjs"
       - "scripts/todo-*.mjs"
       - "scripts/todo.test.mjs"
+      - "scripts/pr-merge*.mjs"
+      - ".claude/git-policy.json"
       - ".github/workflows/docs-check.yml"
   push:
     branches: [main]
@@ -28,6 +31,8 @@ on:
       - "scripts/frontmatter.mjs"
       - "scripts/todo-*.mjs"
       - "scripts/todo.test.mjs"
+      - "scripts/pr-merge*.mjs"
+      - ".claude/git-policy.json"
       - ".github/workflows/docs-check.yml"
 
 permissions:
@@ -48,3 +53,5 @@ jobs:
         run: node scripts/check-docs-meta.mjs
       - name: Todo scripts
         run: node --test scripts/todo.test.mjs
+      - name: PR merge gate
+        run: node --test scripts/pr-merge.test.mjs
