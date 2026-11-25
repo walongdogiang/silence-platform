@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-022
+Mã tiếp theo: T-023
 
 ## Now
 

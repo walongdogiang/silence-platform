@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Cổng merge PR cho agent: chỉ squash merge khi PR đạt chính sách trong .claude/git-policy.json.
-// Chạy: node scripts/pr-merge.mjs <số-PR> [--dry-run] [--user-approved]
+// Chạy: node scripts/pr-merge.mjs <số-PR> [--dry-run] [--user-approved] [--session <id>]
+//   --session        mã phiên đang merge; ghi vào sự kiện `merged` của sổ chung (ADR 0006) để phiên đó không tự nhận báo.
 //   --dry-run        chỉ kiểm tra, không merge.
 //   --user-approved  chỉ dùng khi user đã nói rõ trong chat là duyệt merge PR này (bỏ qua giới hạn rủi ro/kích thước,
 //                    KHÔNG bỏ qua CI xanh, xung đột, draft, base khác main).
@@ -9,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { recordEvent } from "./todo-claims.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -75,6 +77,26 @@ function main() {
   }
   gh(["pr", "merge", num, "--squash", "--delete-branch"]);
   console.log("Đã squash merge và xoá nhánh.");
+  try {
+    const i = argv.indexOf("--session");
+    const r = recordEvent(mergedEvent(pr, i >= 0 ? argv[i + 1] : null));
+    if (!r.ok) console.error(`Không ghi được sự kiện merged: ${r.msg}`);
+  } catch (e) {
+    console.error(`Không ghi được sự kiện merged: ${e?.message ?? e}`);
+  }
+}
+
+/** Sự kiện `merged` cho sổ chung (ADR 0006): mã việc lấy từ tên nhánh, không có thì từ tiêu đề. */
+export function mergedEvent(pr, session = null) {
+  const task = (pr.headRefName ?? "").match(/T-\d+/)?.[0] ?? (pr.title ?? "").match(/T-\d+/)?.[0];
+  return {
+    kind: "merged",
+    session,
+    pr: pr.number,
+    task,
+    files: (pr.files ?? []).map((f) => f.path),
+    text: (pr.title ?? "").slice(0, 200),
+  };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

@@ -38,14 +38,15 @@ Việc không có `T-xxx` (user nhờ trong chat): tạo việc qua skill `todo`
 - `git push -u origin <nhánh>`.
 - `gh pr create --base main` (mô tả qua `--body-file`): tiêu đề Conventional Commits; mô tả gồm `T-xxx`, tiêu chí đã đạt, cách đã kiểm (lệnh + kết quả), phần chưa chạy.
 - Sau khi mở: `mcp__ccd_pr__get_status`, chưa gắn thì `bind_pr`. Không tự poll CI.
+- Ghi vào sổ chung (ADR 0006): `node scripts/todo-claims.mjs event pr_opened --pr <n> --session <id>`.
 - Đề nghị user bật Auto-fix cho PR, để app đánh thức agent khi CI có kết quả. Không bật thì bước merge diễn ra ở lượt kế tiếp user nhắn; nói rõ điều đó trong tin cuối.
 
 ## CI đỏ
-- Đọc log job hỏng, sửa trong phạm vi việc, commit + push cùng nhánh. Tối đa `maxCiFixAttempts` lần, quá thì **hỏi user**.
+- Đọc log job hỏng, sửa trong phạm vi việc, commit + push cùng nhánh. Tối đa `maxCiFixAttempts` lần, quá thì **hỏi user** và ghi `event ci_red --pr <n>`.
 - Cấm sửa CI bằng cách tắt/giảm test hoặc workflow.
 
 ## Merge
-Chỉ bằng `node scripts/pr-merge.mjs <số-PR>` (thêm `--dry-run` để chỉ kiểm). Script kiểm: PR mở, không draft, base `main`, không xung đột, `ci-ok` xanh, diff trong ngưỡng, không file nào khớp `highRiskPaths`; đạt hết thì squash merge và xoá nhánh remote.
+Chỉ bằng `node scripts/pr-merge.mjs <số-PR> --session <id>` (thêm `--dry-run` để chỉ kiểm). Merge xong script tự ghi sự kiện `merged` kèm danh sách file; `--session` để phiên này không tự nhận báo. Script kiểm: PR mở, không draft, base `main`, không xung đột, `ci-ok` xanh, diff trong ngưỡng, không file nào khớp `highRiskPaths`; đạt hết thì squash merge và xoá nhánh remote.
 - Exit 0 = xong. Exit 1 = chưa sẵn sàng (CI chưa xanh, xung đột…): chờ hoặc sửa, không ép.
 - Exit 2 = rủi ro cao/diff lớn → **hỏi user**, kèm các dòng script in ra. Chỉ chạy lại với `--user-approved` khi user nói rõ duyệt trong chat, hoặc việc đã qua cổng duyệt của `todo`.
 - Script không biết phạm vi việc: tự rà `git diff --stat` trước đó.

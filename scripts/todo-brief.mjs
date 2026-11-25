@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Tóm tắt vài dòng việc ở Now / Next trong todo/README.md cho hook SessionStart của Claude Code:
-// mã phiên này, ai đang giữ việc nào (scripts/todo-claims.mjs), việc tiếp theo kèm gợi ý model.
+// mã phiên này, ai đang giữ việc nào (scripts/todo-claims.mjs), việc tiếp theo kèm gợi ý model,
+// master hiện tại và ≤3 sự kiện mới liên quan từ sổ chung (scripts/todo-events.mjs).
 // Stdout được nạp vào ngữ cảnh đầu phiên. Không có todo/ hay lỗi đọc thì im lặng, exit 0.
 // Chạy: node scripts/todo-brief.mjs   (hook truyền JSON có session_id qua stdin)
 import { readFileSync, existsSync } from "node:fs";
-import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput } from "./todo-claims.mjs";
+import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput, pullEvents, syncMain } from "./todo-claims.mjs";
+import { eventsPathFor, readEvents } from "./todo-events.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -88,7 +90,7 @@ export function modelHint(taskMd) {
   return build === think ? think : `${think}, build ${build}`;
 }
 
-export function brief(md, readTask = () => null, { session = null, book = null, now = new Date() } = {}) {
+export function brief(md, readTask = () => null, { session = null, book = null, events = [], now = new Date() } = {}) {
   const s = sections(md);
   const open = new Set(Object.values(s).flat().map((l) => parseItem(l).id));
   const claims = book?.claims ?? {};
@@ -116,6 +118,8 @@ export function brief(md, readTask = () => null, { session = null, book = null, 
   const ready = next.find((it) => !it.blockedBy.some((b) => open.has(b)));
   if (ready) lines.push(`[todo] ${now_.length ? "Sau đó" : "Now trống. Việc tiếp theo"}: ${describe(ready, { withModel: true })}`);
   if (!now_.length && !ready) lines.push("[todo] Now và Next đều trống.");
+  if (book?.master) lines.push(`[todo] Master: ${book.master.session === session ? "phiên này" : `phiên ${short(book.master.session)}`} (điều phối; báo bằng event note --to master).`);
+  for (const l of events) lines.push(l.replace(/^\[todo\] /, "[todo] Từ lần trước — "));
   lines.push("[todo] Danh sách: todo/README.md · skill todo (/todo). Khi user hỏi làm gì tiếp / làm tiếp / việc tiếp theo thì dùng skill todo. Việc do phiên khác giữ thì không làm; hỏi user rồi /todo resume.");
   return lines.join("\n");
 }
@@ -131,11 +135,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const input = readHookInput();
       const file = claimsPath(root);
       const book = file ? load(file) : null;
+      let events = [];
       if (book && input.session_id) {
         touchSession(book, { session: input.session_id, transcript: input.transcript_path, cwd: input.cwd });
+        syncMain(book, eventsPathFor(file), root);
+        events = pullEvents(book, readEvents(eventsPathFor(file)), input.session_id);
         save(file, book);
       }
-      console.log(brief(readFileSync(readme, "utf8"), readTask, { session: input.session_id ?? null, book }));
+      console.log(brief(readFileSync(readme, "utf8"), readTask, { session: input.session_id ?? null, book, events }));
     }
   } catch {
     // Hook đầu phiên không được làm hỏng phiên.
