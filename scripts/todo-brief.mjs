@@ -56,16 +56,36 @@ export function hasOpenQuestions(taskMd) {
   return !!m && /^\s*-\s+\[ \]/m.test(m[1]);
 }
 
+const MODELS = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku" };
+const modelName = (v) => MODELS[String(v ?? "").toLowerCase()] ?? null;
+
 /**
- * Gợi ý model cho cả việc (skill todo → "Model"): mặc định Opus; việc nhẹ dùng Sonnet được.
- * Nhẹ = type chore/docs, hoặc fix size S không còn câu hỏi mở. Không đọc được file → Opus.
+ * Model tối thiểu cho pha suy nghĩ (design/plan) — skill todo → "Model".
+ * Field `model:` trong file task (họ model, không phiên bản) thắng; không có thì suy từ type/size:
+ * mặc định Opus; Sonnet cho chore/docs, hoặc fix size S không còn câu hỏi mở. Không đọc được file → Opus.
  */
 export function suggestModel(taskMd) {
+  const set = modelName(field(taskMd, "model"));
+  if (set) return set;
   const type = field(taskMd, "type");
   const size = field(taskMd, "size");
   if (type === "chore" || type === "docs") return "Sonnet";
   if (type === "fix" && size === "S" && !hasOpenQuestions(taskMd)) return "Sonnet";
   return "Opus";
+}
+
+/** Model tối thiểu cho một pha: build/verify dùng `model-build:` nếu có, còn lại như suggestModel. */
+export function modelFor(taskMd, phase) {
+  const build = modelName(field(taskMd, "model-build"));
+  if (build && (phase === "build" || phase === "verify")) return build;
+  return suggestModel(taskMd);
+}
+
+/** Chuỗi gợi ý cho cả việc: "Opus" hoặc "Opus, build Sonnet". */
+export function modelHint(taskMd) {
+  const think = suggestModel(taskMd);
+  const build = modelFor(taskMd, "build");
+  return build === think ? think : `${think}, build ${build}`;
 }
 
 export function brief(md, readTask = () => null, { session = null, book = null, now = new Date() } = {}) {
@@ -84,7 +104,8 @@ export function brief(md, readTask = () => null, { session = null, book = null, 
     const cl = claims[it.id];
     if (cl) parts.push(cl.session === session ? "phiên này đang giữ" : `phiên ${short(cl.session)} đang giữ, ${ago(cl.lastSeen, now)}${isStale(cl, now) ? " (im lâu)" : ""}`);
     else if (book && inNow) parts.push("chưa phiên nào giữ");
-    if (withModel) parts.push(`model: ${suggestModel(task)}`);
+    if (withModel) parts.push(`model: ${modelHint(task)}`);
+    else if (inNow && task) parts.push(`model: ${modelFor(task, phase)}`);
     return parts.length ? `${it.title} (${parts.join(" · ")})` : it.title;
   };
   const lines = [];

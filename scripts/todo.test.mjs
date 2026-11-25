@@ -1,7 +1,7 @@
 // Test cho scripts/todo-brief.mjs và scripts/todo-claims.mjs. Chạy: npm run test:todo
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { brief, suggestModel } from "./todo-brief.mjs";
+import { brief, suggestModel, modelFor, modelHint } from "./todo-brief.mjs";
 import { emptyBook, touchSession, claim, release, doctor, transcriptTail, isStale, MAX_NOW } from "./todo-claims.mjs";
 
 const t0 = new Date("2026-11-25T10:00:00Z");
@@ -17,6 +17,19 @@ test("suggestModel: Opus mặc định, Sonnet cho việc nhẹ", () => {
   assert.equal(suggestModel(task("type: fix\nsize: S", "## Câu hỏi mở\n\n- [ ] A hay B?\n")), "Opus");
   assert.equal(suggestModel(task("type: fix\nsize: M")), "Opus");
   assert.equal(suggestModel(""), "Opus");
+});
+
+test("field model/model-build ghi đè gợi ý theo type, tách pha suy nghĩ và build", () => {
+  assert.equal(suggestModel(task("type: docs\nmodel: opus")), "Opus");
+  assert.equal(suggestModel(task("type: feature\nmodel: Sonnet  # nhẹ")), "Sonnet");
+  assert.equal(suggestModel(task("type: docs\nmodel: gpt")), "Sonnet");
+  const t = task("type: feature\nmodel: opus\nmodel-build: sonnet");
+  assert.equal(modelFor(t, "design"), "Opus");
+  assert.equal(modelFor(t, "plan"), "Opus");
+  assert.equal(modelFor(t, "build"), "Sonnet");
+  assert.equal(modelFor(t, "verify"), "Sonnet");
+  assert.equal(modelHint(t), "Opus, build Sonnet");
+  assert.equal(modelHint(task("type: feature\nmodel-build:")), "Opus");
 });
 
 test("claim: mỗi phiên một việc, tối đa MAX_NOW, không lấy việc của phiên khác", () => {
@@ -84,7 +97,7 @@ test("brief: hiện phiên này, ai giữ việc ở Now, gợi ý model cho vi�
   claim(book, "T-001", "other-session", { now: t0, worktree: "D:/wt" });
   const out = brief(md, (p) => files[p] ?? null, { session: "me", book, now: hours(3) });
   assert.match(out, /Phiên này: me/);
-  assert.match(out, /T-001 Việc A \(pha build · tiêu chí 1\/2 · PR #70 · phiên other-se đang giữ, 3 giờ trước\)/);
+  assert.match(out, /T-001 Việc A \(pha build · tiêu chí 1\/2 · PR #70 · phiên other-se đang giữ, 3 giờ trước · model: Opus\)/);
   assert.match(out, /Sau đó: T-003 Việc C \(model: Sonnet\)/);
   const mine = brief(md, (p) => files[p] ?? null, { session: "other-session", book, now: hours(3) });
   assert.match(mine, /phiên này đang giữ/);
