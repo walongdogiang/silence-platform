@@ -13,7 +13,7 @@
       "Bash(git switch -c:*)",
       "Bash(git fetch:*)",
       "Bash(gh pr create:*)",
-      "Bash(gh pr merge:*)",
+      "Bash(node scripts/pr-merge.mjs:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr checks:*)",
       "PowerShell(cargo test:*)",
@@ -38,7 +38,7 @@
       "PowerShell(git switch -c:*)",
       "PowerShell(git fetch:*)",
       "PowerShell(gh pr create:*)",
-      "PowerShell(gh pr merge:*)",
+      "PowerShell(node scripts/pr-merge.mjs:*)",
       "PowerShell(gh pr view:*)",
       "PowerShell(gh pr checks:*)"
     ],
