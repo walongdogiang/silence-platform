@@ -6,6 +6,8 @@ status: todo           # todo | in-progress | blocked | done | dropped
 phase:                 # design | plan | build | verify — điền khi bắt đầu
 area: []               # studio | core | engine | docs | ci | agent-kit
 size: M                # S (<1 phiên) | M (1–3 phiên) | L (nên tách)
+model:                 # opus | sonnet — tối thiểu cho design/plan; trống = suy từ type/size (skill todo → Model)
+model-build:           # tuỳ chọn, model tối thiểu cho build/verify; trống = như model
 depends: []            # vd [T-012]
 branch:                # <type>/T-000-slug — điền khi bắt đầu
 pr:                    # điền khi mở PR

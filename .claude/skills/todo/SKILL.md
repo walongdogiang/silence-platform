@@ -71,6 +71,7 @@ LATER 13 việc · IDEAS 1
 2. Kiểm trùng: `git ls-remote origin "*T-xxx*"` và `gh pr list --search T-xxx --state open`. Có nhánh/PR rồi → hỏi user, không mở nhánh thứ hai.
 3. Nhánh `<type>/T-xxx-slug` từ `origin/main`, trong worktree riêng nếu thư mục đang dùng có việc khác.
 4. Chưa có file → tạo từ mẫu. Chuyển dòng sang **Now**; trong file đặt `status: in-progress`, `branch`, `updated`, `phase: design` (hoặc `plan` khi không có gì để thiết kế: chore/docs đơn giản, fix đã rõ nguyên nhân).
+5. **Tự kiểm model** (mục **Model**) trước khi bắt tay vào `design`/`plan`.
 
 ## Vòng đời và cổng duyệt
 
@@ -101,15 +102,23 @@ Mọi thứ khác (việc ngoài phạm vi, ý tưởng, nợ kỹ thuật) ghi 
 
 ## Model
 
-Agent không tự đổi được model; user chọn bằng `/model`. Gợi ý **một lần cho cả việc**, lúc bắt đầu (hook đã in sẵn `model: …`), không đổi giữa chừng.
+Agent không tự đổi được model; user chọn bằng `/model`. Hook in sẵn `model: …` cho việc tiếp theo (và cho việc ở Now theo pha hiện tại).
 
-| Việc | Model |
+**Field trong file task** (ghi họ model, không ghi phiên bản — `/model opus` luôn là bản mới nhất):
+- `model:` — model **tối thiểu** cho `design`/`plan` (pha cần suy nghĩ). Trống → suy theo bảng dưới.
+- `model-build:` — tuỳ chọn, tối thiểu cho `build`/`verify`. Trống → như `model`.
+
+| Việc (khi `model:` trống) | Model |
 |---|---|
 | Mặc định: feature, research, fix chưa rõ nguyên nhân, mọi việc size M/L không thuộc dòng dưới | **Opus** |
 | Việc nhẹ: `type` chore/docs, hoặc fix `size: S` không còn câu hỏi mở | **Sonnet** được |
 
-- Đang chạy Sonnet mà việc hoá ra khó hơn dự kiến (cần thiết kế lại, bảo mật/quyền, đồng bộ, race) → nói một dòng, đề xuất đổi sang Opus; làm tiếp nếu user không đổi.
-- User nói "tiết kiệm quota" → có thể đề xuất làm phần build/verify của việc size M bằng Sonnet khi Kế hoạch đã duyệt; thiết kế vẫn Opus.
+- **Thêm việc**: điền `model:` theo bảng; việc trông nhẹ nhưng thực ra là thiết kế kiến trúc/khó (vd "docs" viết lại kiến trúc) → ghi `opus`, lý do một dòng trong Mục tiêu.
+- **Cổng duyệt**: xem lại `model` / `model-build` theo thiết kế thật (Kế hoạch đủ chi tiết → `model-build: sonnet` để tiết kiệm quota); user duyệt cùng Kế hoạch, không hỏi riêng.
+- **Tự kiểm model** khi bắt đầu việc, khi vào `design`/`plan`, và khi nhận chuyển giao: so model đang chạy (thông tin phiên) với model tối thiểu của pha.
+  - Pha `design`/`plan` mà đang chạy yếu hơn (Opus > Sonnet > Haiku) → **dừng trước khi làm**, một tin: việc gì, cần model nào, vì sao; "đổi bằng `/model …` rồi nhắn tiếp, hay vẫn làm bằng model này?". Chỉ làm tiếp khi user trả lời rõ.
+  - Pha `build`/`verify` yếu hơn → cảnh báo một dòng, làm tiếp.
+- Đang chạy Sonnet mà việc hoá ra khó hơn dự kiến (cần thiết kế lại, bảo mật/quyền, đồng bộ, race) → nói một dòng, đề xuất đổi sang Opus và nâng `model:` trong file; làm tiếp nếu user không đổi.
 
 ## Chi tiết theo vòng đời
 
@@ -178,7 +187,7 @@ Thêm vào cuối **Nhật ký**, cập nhật `updated`. Chỉ ghi điều mà 
 1. Lấy mã ở dòng `Mã tiếp theo`, rồi tăng bộ đếm lên 1.
 2. Việc cần hơn ~5 dòng → tạo `todo/tasks/T-xxx-slug.md` từ mẫu, chỉ điền frontmatter + Mục tiêu + Phạm vi; slug ngắn, tiếng Anh không dấu. Việc nhỏ → chỉ một dòng.
 3. Mặc định thêm vào **Later**. Thấy nên vào **Next** → đề xuất vị trí và lý do; chỉ chuyển khi user đồng ý. Ý tưởng chưa chắc → **Ideas**.
-4. Ghi `blocked-by:` (trong dòng) và `depends:` (trong file) nếu phụ thuộc việc khác.
+4. Ghi `blocked-by:` (trong dòng) và `depends:` (trong file) nếu phụ thuộc việc khác. Điền `model:` (mục **Model**).
 5. Mục lấy từ backlog theo mảng (`docs/security/backlog.md`, …) thì link ngược về mục đó.
 
 ## Đóng việc
@@ -189,7 +198,7 @@ Làm **trong PR của việc**, trước khi merge, khi mọi tiêu chí (trừ 
 2. Thêm lên đầu `todo/DONE.md`: `YYYY-MM-DD · T-xxx Tên việc · PR #n · [chi tiết](tasks/archive/…)`.
 3. Đặt `status: done`, chuyển file vào `todo/tasks/archive/`.
 4. **Phát sinh** có mục → đề xuất thêm vào Later (cần user đồng ý; đồng ý thì thêm ngay trong PR này).
-5. Commit, chờ CI xanh, squash merge, xoá nhánh; rồi `node scripts/todo-claims.mjs release T-xxx`.
+5. Commit, push, PR, merge theo skill `task-git` (merge chỉ qua `scripts/pr-merge.mjs`); rồi `node scripts/todo-claims.mjs release T-xxx`.
 6. Tin cuối: PR đã merge, danh sách kiểm `(user)` còn lại, việc vừa hết bị chặn, **Bảng** mới.
 
 Việc không có PR (user nói xong) → bước 1–3 qua một PR `chore/todo-…`, rồi release.
