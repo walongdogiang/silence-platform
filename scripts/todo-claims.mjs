@@ -9,9 +9,16 @@
 //   node scripts/todo-claims.mjs list
 //   node scripts/todo-claims.mjs handoff T-xxx      gom ngữ cảnh để làm tiếp ở chat mới
 //   node scripts/todo-claims.mjs doctor             so mục lục, file task, sổ giữ việc
+// Sổ sự kiện chung (scripts/todo-events.mjs, ADR 0006):
+//   node scripts/todo-claims.mjs claim T-xxx --session <id> --areas "packages/protocol/**,scripts/x.mjs"
+//   node scripts/todo-claims.mjs event <kind> [T-xxx] --session <id> [--pr n] [--areas a,b] [--to T-xxx|all|master] [--text "…"]
+//   node scripts/todo-claims.mjs feed [--hours 24] [--limit 20]
+//   node scripts/todo-claims.mjs master [--session <id> | --clear]
 // Hook (đọc JSON của Claude Code ở stdin):
-//   node scripts/todo-claims.mjs heartbeat          UserPromptSubmit: cập nhật lastSeen, cảnh báo nếu việc đã chuyển đi
+//   node scripts/todo-claims.mjs heartbeat          UserPromptSubmit: cập nhật lastSeen, cảnh báo nếu việc đã chuyển đi,
+//                                                   in ≤3 sự kiện mới liên quan tới phiên này
 import { readFileSync, writeFileSync, existsSync, renameSync, readdirSync } from "node:fs";
+import { eventsPathFor, makeEvent, appendEvent, readEvents, relevantFor, pushLines, firstLook, formatEvent, areasOverlap, list } from "./todo-events.mjs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,7 +40,7 @@ export function claimsPath(cwd = root) {
 }
 
 export function emptyBook() {
-  return { claims: {}, sessions: {}, moved: {} };
+  return { claims: {}, sessions: {}, moved: {}, master: null };
 }
 
 export function load(file) {
@@ -55,10 +62,10 @@ export function save(file, book) {
 export function touchSession(book, { session, transcript, cwd }, now = new Date()) {
   if (!session) return book;
   const prev = book.sessions[session] ?? {};
-  book.sessions[session] = { transcript: transcript ?? prev.transcript ?? null, cwd: cwd ?? prev.cwd ?? null, lastSeen: now.toISOString() };
+  book.sessions[session] = { ...prev, transcript: transcript ?? prev.transcript ?? null, cwd: cwd ?? prev.cwd ?? null, lastSeen: now.toISOString() };
   for (const c of Object.values(book.claims)) if (c.session === session) c.lastSeen = now.toISOString();
   // Bỏ phiên im quá SESSION_TTL_DAYS mà không giữ việc nào, để sổ không phình.
-  const held = new Set(Object.values(book.claims).map((c) => c.session));
+  const held = new Set([...Object.values(book.claims).map((c) => c.session), book.master?.session]);
   for (const [id, s] of Object.entries(book.sessions))
     if (!held.has(id) && (now - new Date(s.lastSeen)) / 864e5 > SESSION_TTL_DAYS) delete book.sessions[id];
   return book;
@@ -72,11 +79,14 @@ export function heldBy(book, session) {
  * Nhận việc. Trả { ok, msg }. Từ chối khi: việc do phiên khác giữ (trừ takeover), phiên này đang giữ việc khác,
  * hoặc đã đủ MAX_NOW việc.
  */
-export function claim(book, task, session, { takeover = false, worktree = null, branch = null, now = new Date() } = {}) {
+export function claim(book, task, session, { takeover = false, worktree = null, branch = null, areas = null, now = new Date() } = {}) {
   if (!/^T-\d+$/.test(task)) return { ok: false, msg: `Mã việc không hợp lệ: ${task}` };
   if (!session) return { ok: false, msg: "Thiếu --session (dòng \"[todo] Phiên này:\" ở đầu phiên)." };
   const cur = book.claims[task];
-  if (cur && cur.session === session) return { ok: true, msg: `Phiên này đã giữ ${task}.` };
+  if (cur && cur.session === session) {
+    if (areas?.length) cur.areas = list(areas);
+    return { ok: true, msg: `Phiên này đã giữ ${task}.` };
+  }
   const mine = heldBy(book, session);
   if (mine) return { ok: false, msg: `Phiên này đang giữ ${mine}. Mỗi phiên một việc: đóng hoặc release ${mine} trước.` };
   if (cur && !takeover)
@@ -90,11 +100,37 @@ export function claim(book, task, session, { takeover = false, worktree = null, 
     transcript: sess.transcript ?? null,
     worktree: worktree ?? cur?.worktree ?? sess.cwd ?? null,
     branch: branch ?? cur?.branch ?? null,
+    areas: areas?.length ? list(areas) : cur?.areas ?? [],
     started: cur?.started ?? now.toISOString(),
     lastSeen: now.toISOString(),
     ...(cur && takeover ? { from: cur.session } : {}),
   };
   return { ok: true, msg: cur ? `Đã chuyển ${task} từ phiên ${short(cur.session)} sang phiên này.` : `Đã nhận ${task}.` };
+}
+
+/** Việc khác đang giữ có vùng chồng với `areas` → danh sách cảnh báo (không chặn; user quyết). */
+export function overlaps(book, task, areas) {
+  const out = [];
+  if (!list(areas).length) return out;
+  for (const [t, c] of Object.entries(book.claims))
+    if (t !== task && c.areas?.length && areasOverlap(areas, c.areas))
+      out.push(`Cảnh báo: vùng chồng với ${t} (phiên ${short(c.session)}: ${c.areas.join(", ")}). Báo user; dễ xung đột merge.`);
+  return out;
+}
+
+/** Ngữ cảnh "tôi là ai" của một phiên để lọc sự kiện. */
+export function whoAmI(book, session) {
+  const task = heldBy(book, session);
+  return { session, task, areas: task ? book.claims[task].areas ?? [] : [], isMaster: book.master?.session === session };
+}
+
+/** Sự kiện mới liên quan tới phiên + dời con trỏ. Trả các dòng để in. */
+export function pullEvents(book, events, session, now = new Date()) {
+  const s = book.sessions[session];
+  if (!s) return [];
+  const r = relevantFor(events, whoAmI(book, session), s.lastEvent ?? firstLook(now));
+  if (r.last) s.lastEvent = r.last;
+  return pushLines(r);
 }
 
 export function release(book, task, session = null) {
@@ -243,12 +279,21 @@ function arg(args, name) {
   return i >= 0 ? args[i + 1] : null;
 }
 
+/** Ghi một sự kiện vào sổ chung; lỗi schema → trả msg. Dùng chung cho CLI và script khác (pr-merge). */
+export function recordEvent(input, claimsFile = claimsPath()) {
+  const r = makeEvent(input);
+  if (!r.ok) return r;
+  appendEvent(eventsPathFor(claimsFile), r.event);
+  return r;
+}
+
 function main(argv) {
   const [cmd, ...rest] = argv;
   const file = claimsPath();
   if (!file) return 0;
   const book = load(file);
   const task = rest.find((a) => /^T-\d+$/.test(a));
+  const evFile = eventsPathFor(file);
   switch (cmd) {
     case "heartbeat": {
       const input = readHookInput();
@@ -260,32 +305,76 @@ function main(argv) {
         console.log(`[todo] ${moved.task} đã chuyển sang phiên ${short(moved.to)} (${ago(moved.at)}). Phiên này không sửa ${moved.task} nữa; báo user.`);
         delete book.moved[session];
       }
+      for (const l of pullEvents(book, readEvents(evFile), session)) console.log(l);
       save(file, book);
       return 0;
     }
     case "claim": {
       const session = arg(rest, "--session");
       const cwd = process.cwd();
+      const areas = list(arg(rest, "--areas"));
+      const prev = book.claims[task];
       const r = claim(book, task, session, {
         takeover: rest.includes("--takeover"),
         worktree: cwd,
         branch: git(cwd, ["branch", "--show-current"]) || null,
+        areas,
       });
+      console.log(r.msg);
+      if (!r.ok) return 1;
+      for (const w of overlaps(book, task, book.claims[task].areas)) console.log(w);
+      save(file, book);
+      if (prev && prev.session !== session) recordEvent({ kind: "handoff", session, task }, file);
+      else if (!prev || areas.length) recordEvent({ kind: "claim", session, task, areas: book.claims[task].areas }, file);
+      return 0;
+    }
+    case "release": {
+      const session = arg(rest, "--session");
+      const had = book.claims[task];
+      const r = release(book, task, session);
       if (r.ok) save(file, book);
+      if (r.ok && had) recordEvent({ kind: "release", session: session ?? had.session, task }, file);
       console.log(r.msg);
       return r.ok ? 0 : 1;
     }
-    case "release": {
-      const r = release(book, task, arg(rest, "--session"));
-      if (r.ok) save(file, book);
-      console.log(r.msg);
+    case "event": {
+      const [kind] = rest;
+      const session = arg(rest, "--session");
+      if (!session) return console.log('Thiếu --session (dòng "[todo] Phiên này:" ở đầu phiên).'), 1;
+      const r = recordEvent(
+        { kind, session, task: task ?? heldBy(book, session) ?? undefined, pr: arg(rest, "--pr"), areas: arg(rest, "--areas"), to: arg(rest, "--to"), text: arg(rest, "--text") },
+        file,
+      );
+      console.log(r.ok ? `Đã ghi: ${formatEvent(r.event)}` : r.msg);
       return r.ok ? 0 : 1;
+    }
+    case "feed": {
+      const hours = Number(arg(rest, "--hours") ?? 24);
+      const limit = Number(arg(rest, "--limit") ?? 20);
+      const since = new Date(Date.now() - hours * 36e5).toISOString();
+      const evs = readEvents(evFile).filter((e) => e.ts > since).slice(-limit);
+      console.log(evs.length ? evs.map(formatEvent).join("\n") : `Không có sự kiện trong ${hours} giờ qua.`);
+      return 0;
+    }
+    case "master": {
+      const session = arg(rest, "--session");
+      if (rest.includes("--clear")) {
+        book.master = null;
+        save(file, book);
+        console.log("Đã bỏ master.");
+      } else if (session) {
+        book.master = { session, since: new Date().toISOString() };
+        save(file, book);
+        console.log(`Phiên ${short(session)} là master: nhận mọi sự kiện và note --to master.`);
+      } else console.log(book.master ? `Master: phiên ${short(book.master.session)} (từ ${ago(book.master.since)}).` : "Chưa có master.");
+      return 0;
     }
     case "list": {
       const entries = Object.entries(book.claims);
       if (!entries.length) console.log("Không có việc nào đang được giữ.");
       for (const [t, c] of entries)
-        console.log(`${t} · phiên ${short(c.session)} · ${c.worktree ?? "?"} · ${c.branch ?? "?"} · ${ago(c.lastSeen)}${isStale(c) ? " · im lâu" : ""}`);
+        console.log(`${t} · phiên ${short(c.session)} · ${c.worktree ?? "?"} · ${c.branch ?? "?"} · ${ago(c.lastSeen)}${isStale(c) ? " · im lâu" : ""}${c.areas?.length ? ` · vùng ${c.areas.join(", ")}` : ""}`);
+      if (book.master) console.log(`Master: phiên ${short(book.master.session)}`);
       return 0;
     }
     case "handoff":
@@ -300,7 +389,7 @@ function main(argv) {
       return issues.length ? 1 : 0;
     }
     default:
-      console.log("Lệnh: claim | release | list | handoff | doctor | heartbeat");
+      console.log("Lệnh: claim | release | list | handoff | doctor | event | feed | master | heartbeat");
       return 1;
   }
 }

@@ -67,7 +67,7 @@ LATER 13 việc · IDEAS 1
 
 ## Bắt đầu việc
 
-1. **Nhận việc**: `node scripts/todo-claims.mjs claim T-xxx --session <id phiên này>`. Bị từ chối → báo đúng lý do script in ra, không làm.
+1. **Nhận việc**: `node scripts/todo-claims.mjs claim T-xxx --session <id phiên này>`. Bị từ chối → báo đúng lý do script in ra, không làm. Khi đã biết sẽ sửa đâu (cuối `plan`), chạy lại kèm `--areas "<glob>,<glob>"`; script in cảnh báo trùng vùng → báo user.
 2. Kiểm trùng: `git ls-remote origin "*T-xxx*"` và `gh pr list --search T-xxx --state open`. Có nhánh/PR rồi → hỏi user, không mở nhánh thứ hai.
 3. Nhánh `<type>/T-xxx-slug` từ `origin/main`, trong worktree riêng nếu thư mục đang dùng có việc khác.
 4. Chưa có file → tạo từ mẫu. Chuyển dòng sang **Now**; trong file đặt `status: in-progress`, `branch`, `updated`, `phase: design` (hoặc `plan` khi không có gì để thiết kế: chore/docs đơn giản, fix đã rõ nguyên nhân).
@@ -155,6 +155,25 @@ Viết ở `plan`, duyệt ở cổng. Mỗi dòng: `hành vi — kiểm: \`lệ
 | Mọi tiêu chí (trừ `(user)`) đã tick, CI xanh | **Đóng việc** trong PR rồi squash merge |
 | Hơn ~7 tiêu chí, hoặc qua hơn 3 phiên chưa xong | Đề xuất tách thành nhiều việc, mỗi việc một PR |
 | Phiên dài, ngữ cảnh đã nặng, hoặc user sắp đóng chat | Kết thúc **phiên**, không phải việc: **Ghi nhật ký**, commit dở dang lên nhánh nếu có, nhắc user mở chat mới và gõ `/todo resume T-xxx` |
+
+## Điều phối giữa các phiên
+
+Sổ sự kiện chung (ADR 0006, `scripts/todo-events.mjs`): mọi phiên đọc thẳng; ghi chỉ qua lệnh dưới, script kiểm schema.
+
+- Hook in sẵn ≤3 dòng `[todo] …` khi có sự kiện mới liên quan: `gửi bạn` (note/blocked tới việc mình) → đọc và làm theo nếu thuộc việc mình, cần quyết thì hỏi user; `cần rebase` (merge đụng vùng mình) → rebase nhánh của việc lên `origin/main` trước commit kế; `hợp đồng chung đổi` → đọc lại phần bị đổi trước khi dùng.
+- Xem thêm: `node scripts/todo-claims.mjs feed [--hours 24]`.
+- Ghi tay, **chỉ** những thứ ảnh hưởng phiên khác (không ghi tiến độ, diff, suy nghĩ — đã có Nhật ký và git):
+
+| Khi | Lệnh (`node scripts/todo-claims.mjs event … --session <id>`) |
+|---|---|
+| Đổi protocol, script/skill dùng chung, hay file nhiều việc đọc | `contract_changed --areas "<glob>" --text "<đổi gì>"` |
+| Bị chặn bởi việc khác | `blocked --to T-yyy --text "<chờ gì>"` |
+| Nhắn việc khác / tất cả / master | `note --to T-yyy\|all\|master --text "…"` (≤200 ký tự) |
+| CI đỏ mà chưa sửa được | `ci_red --pr <n> --text "…"` |
+
+`claim`, `release`, chuyển giao, `merged` (qua `pr-merge.mjs`) tự ghi; `pr_opened` theo skill `task-git`.
+
+**Master** (tuỳ chọn): user bảo một chat làm điều phối → `node scripts/todo-claims.mjs master --session <id>`. Master đọc bảng + `feed`, đề xuất chia việc (một việc một phiên, vùng không chồng), mở phiên con bằng công cụ phiên của app khi user đồng ý, nhận `note --to master`. Master không tự nhận việc của phiên con, không sửa file của việc khác; bỏ vai: `master --clear`. Không có master thì mọi thứ trên vẫn chạy.
 
 ## Chuyển giao
 
