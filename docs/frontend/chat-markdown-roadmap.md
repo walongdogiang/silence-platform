@@ -27,7 +27,7 @@ Cố ý **chưa** làm — mở lại khi cần.
 - [x] Syntax highlight trong code fence (`syntax.ts`, tokenizer Monaco, màu `--syn-*`).
 - [x] Copy từng code block riêng (`CopyButton` trong `CodeView.tsx`).
 - [x] Khối ```diff render như diff (vạch màu, số dòng, tô phần chữ đổi).
-- [ ] Thẻ xin quyền: tô đoạn nguy hiểm trong lệnh theo vị trí do lõi gửi (`risk.spans`); client không tự đoán (`chat.md` → "Card xin quyền").
+- [x] Thẻ xin quyền: tô đoạn nguy hiểm trong lệnh theo `risk.segments` (lõi) và `risk.hosts` (Engine), tìm nguyên văn; client không tự đoán (`chat.md` → "Card xin quyền").
 - [ ] Thẻ xin quyền: duyệt nhiều yêu cầu cùng lúc (hàng đợi thẻ, "Cho phép tất cả" có kiểm soát).
 
 ## Agent / protocol (không redesign sớm)

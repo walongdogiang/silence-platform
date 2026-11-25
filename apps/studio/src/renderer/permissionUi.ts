@@ -1,6 +1,6 @@
 import type { MsgKey, T } from "./i18n";
 import type { Perm } from "./models";
-import type { PermAnswer, RiskLevel, RiskTier } from "./types";
+import type { PermAnswer, PermissionRisk, RiskLevel, RiskTier } from "./types";
 
 /** Phạm vi một lần duyệt: `once` chỉ lần này, `session` tới hết phiên (bộ nhớ), `workspace` ghi vào `.silence/permissions.json`. */
 export type PermScope = "once" | "session" | "workspace";
@@ -94,20 +94,62 @@ export function alwaysAllowText(rule: string, t: T): string {
 /** How the TS core card is drawn: one line (C) or the full card (B). */
 export type PermLayout = "compact" | "full";
 
+/** A short one-line shell command (≤ 80 characters): the only kind a one-line card can show whole. */
+function shortCommand(perm: Perm): boolean {
+  const c = (perm.input as { command?: unknown } | null | undefined)?.command;
+  if (typeof c !== "string") return false;
+  const cmd = c.trim();
+  return Boolean(cmd) && !cmd.includes("\n") && cmd.length <= 80;
+}
+
 /**
  * One line only for a low-risk shell command the core lets us remember: not red, has `allow_rule`,
  * one line of at most 80 characters, at most one reason, no hosts, no file change to review, no countdown.
+ * Rust Engine cards (no `level`) are always full.
  */
 export function permLayout(perm: Perm): PermLayout {
   const r = perm.risk;
   if (!r?.level || r.level === "danger" || r.level === "hard_block") return "full";
-  if (!r.allow_rule || perm.preview || r.hosts?.length || r.escalation || r.countdown_s) return "full";
-  const c = (perm.input as { command?: unknown } | null | undefined)?.command;
-  if (typeof c !== "string") return "full";
-  const cmd = c.trim();
-  if (!cmd || cmd.includes("\n") || cmd.length > 80) return "full";
+  if (!r.allow_rule || perm.preview || r.hosts?.length || r.escalation || r.countdown_s || !shortCommand(perm)) return "full";
   const codes = new Set(r.reasons.length ? r.reasons.map((x) => x.code) : (r.codes ?? []));
   return codes.size > 1 ? "full" : "compact";
+}
+
+/** A highlighted stretch of the real command, `[start, end)`. `net` = a host not allowlisted yet. */
+export type PermMark = { start: number; end: number; level: "caution" | "danger" | "net"; codes: string[] };
+
+/**
+ * Where to highlight the command, only from what the core / Engine sent: `risk.segments` (non-safe
+ * ones, found in order, each search starting after the previous match) and `risk.hosts`. A piece that
+ * is not found verbatim is skipped, never guessed. A mark covering the whole command says nothing
+ * (the level badge already does), so it is dropped. Overlaps keep the earlier mark.
+ */
+export function permMarks(text: string, risk: PermissionRisk | undefined): PermMark[] {
+  if (!risk) return [];
+  const found: PermMark[] = [];
+  let from = 0;
+  for (const s of risk.segments ?? []) {
+    const piece = s.text.trim();
+    if (!piece) continue;
+    const at = text.indexOf(piece, from);
+    if (at < 0) continue;
+    from = at + piece.length;
+    if (s.level === "safe") continue;
+    found.push({ start: at, end: at + piece.length, level: s.level === "caution" ? "caution" : "danger", codes: s.codes });
+  }
+  for (const h of risk.hosts ?? []) {
+    const at = h ? text.indexOf(h) : -1;
+    if (at >= 0) found.push({ start: at, end: at + h.length, level: "net", codes: [] });
+  }
+  const whole = text.trim();
+  const lead = text.indexOf(whole);
+  const out: PermMark[] = [];
+  for (const m of found.sort((a, b) => a.start - b.start)) {
+    if (m.start <= lead && m.end >= lead + whole.length) continue;
+    if (out.length && m.start < out[out.length - 1]!.end) continue;
+    out.push(m);
+  }
+  return out;
 }
 
 /**

@@ -99,12 +99,32 @@ describe("PermissionCard (TS core)", () => {
     expect(out).toContain(">JSON</button>");
   });
 
+  it("full card: Allow ▾ first, then Deny, then Deny with a note; JSON last on the right", () => {
+    const out = card({ tier: "ask", reasons: [], level: "caution", codes: ["MCP_CALL"], allow_rule: "mcp__github__create_issue" }, "en", {
+      name: "mcp__github__create_issue",
+      input: { repo: "5ilence" },
+    }, false, true);
+    const at = (s: string) => out.indexOf(s);
+    expect(at("perm-allow")).toBeGreaterThan(-1);
+    expect(at("perm-allow")).toBeLessThan(at("perm-deny"));
+    expect(at("perm-deny")).toBeLessThan(at("Deny with a note"));
+    expect(at("Deny with a note")).toBeLessThan(at('class="perm-spacer"'));
+    expect(at('class="perm-spacer"')).toBeLessThan(at(">JSON</button>"));
+  });
+
   it("keeps the Rust Engine card for cards without a level", () => {
     const out = card({ tier: "ask", reasons: [{ code: "PKG_INSTALL", title: "Cài package", detail: "…" }], pattern: "npm install *" });
     expect(out).toContain("Allow npm install * for this session");
     expect(out).not.toContain("Details");
   });
+
+  it("marks the flagged segment of the real command, with the reason as tooltip", () => {
+    const out = card(red);
+    expect(out).toContain('<mark class="perm-mark perm-mark-danger" title="Push straight to the main branch">git push origin main</mark>');
+    expect(out).not.toContain('perm-mark-danger" title="">npm test');
+  });
 });
+
 
 describe("risk code texts", () => {
   it("explain every policy code in both languages", () => {

@@ -4,6 +4,7 @@ import {
   alwaysAllowText,
   blockedStep,
   permKeyAction,
+  permMarks,
   permLayout,
   permTarget,
   scopeHint,
@@ -88,6 +89,32 @@ describe("permission card helpers", () => {
     expect(permLayout({ ...base, preview: { path: "a.py", before: "", after: "x" } })).toBe("full");
     expect(permLayout({ ...base, input: { path: "a" } })).toBe("full");
     expect(permLayout({ ...base, risk: { tier: "ask", reasons: [] } })).toBe("full"); // Rust Engine card
+  });
+
+  it("marks only what the core / Engine flagged, found verbatim and in order", () => {
+    const cmd = "npm test && rm -rf ../cache && npm test";
+    const marks = permMarks(cmd, {
+      tier: "ask",
+      reasons: [],
+      segments: [
+        { text: "npm test", level: "safe", codes: [] },
+        { text: "rm -rf ../cache", level: "caution", codes: ["FS_DELETE"] },
+        { text: "npm test", level: "danger", codes: ["X"] }, // second occurrence, after the previous match
+        { text: "not in the command", level: "danger", codes: ["Y"] },
+      ],
+    });
+    expect(marks).toEqual([
+      { start: 12, end: 27, level: "caution", codes: ["FS_DELETE"] },
+      { start: 31, end: 39, level: "danger", codes: ["X"] },
+    ]);
+    // A single segment covering the whole command marks nothing (the level badge already says it).
+    expect(permMarks("git push --force", { tier: "ask", reasons: [], segments: [{ text: "git push --force", level: "danger", codes: [] }] })).toEqual([]);
+    expect(permMarks("curl https://api.x.dev/v1", { tier: "ask", reasons: [], hosts: ["api.x.dev", "missing.io"] })).toEqual([{ start: 13, end: 22, level: "net", codes: [] }]);
+    expect(permMarks("a b", undefined)).toEqual([]);
+    // hard_block counts as red; overlapping marks keep the earlier one.
+    expect(
+      permMarks("x; rm -rf /", { tier: "ask", reasons: [], segments: [{ text: "x", level: "safe", codes: [] }, { text: "rm -rf /", level: "hard_block", codes: ["DISK"] }], hosts: ["rf"] }),
+    ).toEqual([{ start: 3, end: 11, level: "danger", codes: ["DISK"] }]);
   });
 
   it("scope hint: a repo verify command is approved as that command, not saved as a rule", () => {
