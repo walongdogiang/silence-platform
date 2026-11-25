@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-024
+Mã tiếp theo: T-025
 
 ## Now
 
@@ -50,6 +50,7 @@ Mã tiếp theo: T-024
 - T-016 4.3 Thông báo đẩy, duyệt lệnh rủi ro từ xa
 - T-017 4.4 Hướng dẫn `tailscale serve`
 - T-019 Bảng "Việc" trong Studio đọc `todo/` (Now/Next, tiến độ tiêu chí, PR/CI) — thay bảng chữ của `/todo`
+- T-024 Lời báo hook chủ worktree: chat chủ đang làm T-xxx nào + tên chat dễ nhận ra · [chi tiết](tasks/T-024-owner-msg-context.md)
 
 ## Ideas
 
