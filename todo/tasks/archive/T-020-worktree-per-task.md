@@ -101,7 +101,7 @@ Quyết định cho một lệnh git đổi trạng thái trong worktree W:
 - [x] Lệnh `worktree` tạo đúng `5ilence-worktrees\<tên>`; SessionStart liệt kê thư mục thừa và hỏi — kiểm: `npm run test:todo` + chạy tay → chạy tay: tạo đúng chỗ, không upstream, tạo trùng bị từ chối; đầu phiên in `rac-cu (không còn là worktree)`
 - [x] Hook lỗi không chặn công cụ; mỗi lần ≤ ~0,3 s — kiểm: test pipe JSON hỏng → exit 0, không in gì; `Measure-Command` → test pipe JSON hỏng: exit 0, không in gì; đo thật: pre ~195 ms, post git ~200 ms (Node rỗng ~125 ms)
 - [x] Docs + rule + test xanh — kiểm: `npm run check:docs` · `npm run check:rules` · `npm run test:todo` → 26 docs OK · 6 rule OK · 29 test pass
-- [ ] (user) Sau khi cập nhật thư mục chính lên `main` mới: chat B thử commit trong worktree của chat A → bị chặn, có tên chat A
+- [x] (user) Sau khi cập nhật thư mục chính lên `main` mới: chat B thử commit trong worktree của chat A → bị chặn, có tên chat A — kiểm: user chạy tay 2026-11-25 (worktree `hook-test`): `git commit` của chat B bị `deny`, lý do có chat `37a7cd15`; `git status` không bị hook chặn; `worktree remove` xoá mục chủ trong sổ. Phát hiện chủ ghi qua Write có `branch: null` → sửa ở PR `fix/hook-owner-branch`
 
 ## Phát sinh
 
