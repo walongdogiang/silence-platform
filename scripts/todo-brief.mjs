@@ -5,7 +5,7 @@
 // Stdout được nạp vào ngữ cảnh đầu phiên. Không có todo/ hay lỗi đọc thì im lặng, exit 0.
 // Chạy: node scripts/todo-brief.mjs   (hook truyền JSON có session_id qua stdin)
 import { readFileSync, existsSync } from "node:fs";
-import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput, pullEvents } from "./todo-claims.mjs";
+import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput, pullEvents, syncMain } from "./todo-claims.mjs";
 import { eventsPathFor, readEvents } from "./todo-events.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,6 +138,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       let events = [];
       if (book && input.session_id) {
         touchSession(book, { session: input.session_id, transcript: input.transcript_path, cwd: input.cwd });
+        syncMain(book, eventsPathFor(file), root);
         events = pullEvents(book, readEvents(eventsPathFor(file)), input.session_id);
         save(file, book);
       }

@@ -22,7 +22,8 @@ export const KINDS = {
   handoff: { required: ["task"], optional: ["to"] },
   pr_opened: { required: ["pr"], optional: ["task", "areas", "text"] },
   ci_red: { required: ["pr"], optional: ["task", "text"] },
-  merged: { required: ["pr"], optional: ["task", "files", "text"] },
+  merged: { required: ["pr"], optional: ["task", "files", "text", "sha"] },
+  id_reserved: { required: ["task"], optional: [] },
   contract_changed: { required: ["areas", "text"], optional: ["task", "pr"] },
   blocked: { required: ["task", "text"], optional: ["to"] },
   note: { required: ["to", "text"], optional: ["task"] },
@@ -74,6 +75,10 @@ export function makeEvent(input, now = new Date()) {
     if (l.some((p) => p.startsWith("/") || /^[a-z]:/i.test(p) || p.split("/").includes("..")))
       return { ok: false, msg: `${k} phải là đường dẫn tương đối trong repo.` };
     ev[k] = k === "files" ? l.slice(0, 100) : l;
+  }
+  if (fields.sha != null) {
+    if (!/^[0-9a-f]{7,40}$/.test(fields.sha)) return { ok: false, msg: `sha không hợp lệ: ${fields.sha}` };
+    ev.sha = fields.sha;
   }
   if (fields.text != null) {
     const t = String(fields.text).replace(/\s+/g, " ").trim();
@@ -153,6 +158,70 @@ export function matchArea(file, areas) {
 }
 
 /**
+ * Đường dẫn "hợp đồng chung": file nhiều việc cùng đọc. Merge đụng chúng → mọi phiên được báo "hợp đồng chung đổi",
+ * không cần agent tự khai `contract_changed`.
+ */
+export const CONTRACT_PATHS = [
+  "packages/protocol/",
+  "crates/protocol/",
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".claude/skills/",
+  ".claude/rules/",
+  ".claude/settings.json",
+  ".claude/git-policy.json",
+  "scripts/",
+  "package.json",
+];
+
+export function contractFiles(files) {
+  return list(files).filter((f) => CONTRACT_PATHS.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p)));
+}
+
+/**
+ * Sự kiện `merged` dựng từ commit mới trên origin/main — bắt cả merge không qua pr-merge.mjs (GitHub UI, gh pr merge).
+ * commits: [{ sha, subject, files }] (cũ → mới). Bỏ commit đã có sự kiện cùng sha hoặc cùng số PR.
+ * Commit không có "(#n)" trong tiêu đề (push thẳng) → bỏ qua: main-guard lo phần đó.
+ */
+export function mergeEventsFromCommits(commits, events, now = new Date()) {
+  const seenPr = new Set(events.filter((e) => e.kind === "merged").map((e) => e.pr));
+  const seenSha = new Set(events.filter((e) => e.sha).map((e) => e.sha));
+  const out = [];
+  for (const c of commits) {
+    const pr = Number(c.subject.match(/\(#(\d+)\)\s*$/)?.[1]);
+    if (!pr || seenPr.has(pr) || seenSha.has(c.sha)) continue;
+    const r = makeEvent(
+      { kind: "merged", session: null, pr, sha: c.sha, task: c.subject.match(/T-\d+/)?.[0], files: c.files, text: c.subject.slice(0, TEXT_MAX) },
+      now,
+    );
+    if (r.ok) {
+      out.push(r.event);
+      seenPr.add(pr);
+    }
+  }
+  return out;
+}
+
+/** Lấy mã T-xxx lớn nhất trong một chuỗi bất kỳ (README, tên nhánh, tiêu đề). */
+export function maxTaskNum(...texts) {
+  let max = 0;
+  for (const t of texts) for (const m of String(t ?? "").matchAll(/T-(\d+)/g)) max = Math.max(max, Number(m[1]));
+  return max;
+}
+
+/**
+ * Mã việc kế tiếp không trùng: lớn hơn mọi mã đã thấy ở bộ đếm README (local và origin/main), tên nhánh remote đã fetch,
+ * và mọi mã đã giữ chỗ trong sổ chung (`idHigh`).
+ */
+export function nextTaskId({ readmeLocal = "", readmeMain = "", refNames = "", idHigh = 0 }) {
+  const COUNTER = /Mã tiếp theo:\s*T-(\d+)/;
+  const counter = (md) => Number(String(md).match(COUNTER)?.[1] ?? 0);
+  const ids = (md) => String(md).replace(COUNTER, "");
+  const n = Math.max(counter(readmeLocal), counter(readmeMain), maxTaskNum(ids(readmeLocal), ids(readmeMain), refNames) + 1, idHigh + 1);
+  return `T-${String(n).padStart(3, "0")}`;
+}
+
+/**
  * Sự kiện mới đáng báo cho một phiên, xếp theo độ ưu tiên.
  * me: { session, task?, areas?, isMaster? }. since: ISO (loại sự kiện có ts <= since).
  * Trả { items: [{ ev, why }], others: số sự kiện mới khác (không báo chi tiết), last: ts mới nhất đã xét }.
@@ -161,9 +230,15 @@ export function relevantFor(events, me, since) {
   const items = [];
   let others = 0;
   let last = since ?? null;
+  const mergedSeen = new Set();
   for (const ev of events) {
     if (since && ev.ts <= since) continue;
     if (!last || ev.ts > last) last = ev.ts;
+    if (ev.kind === "merged") {
+      // pr-merge.mjs và quét origin/main có thể cùng ghi một PR: chỉ xét lần đầu.
+      if (mergedSeen.has(ev.pr)) continue;
+      mergedSeen.add(ev.pr);
+    }
     if (me.session && ev.session === me.session) continue;
     if (me.task && ev.task === me.task && ev.kind !== "note" && ev.kind !== "blocked") continue;
     const toMe = ev.to && (ev.to === "all" || ev.to === me.task || (ev.to === "master" && me.isMaster));
@@ -172,6 +247,7 @@ export function relevantFor(events, me, since) {
     if ((ev.kind === "note" || ev.kind === "blocked" || ev.kind === "handoff") && toMe) [prio, why] = [3, "gửi bạn"];
     else if (ev.kind === "merged" && me.areas?.length && (ev.files ?? []).some((f) => matchArea(f, me.areas))) [prio, why] = [2, "đụng vùng bạn sửa — cần rebase"];
     else if (ev.kind === "contract_changed") [prio, why] = [me.areas?.length && areasOverlap(ev.areas, me.areas) ? 2 : 1, "hợp đồng chung đổi"];
+    else if (ev.kind === "merged" && contractFiles(ev.files).length) [prio, why] = [1, `hợp đồng chung đổi (${contractFiles(ev.files).slice(0, 3).join(", ")})`];
     else if (me.isMaster && ev.kind !== "note") [prio, why] = [1, ""];
     if (prio) items.push({ ev, why, prio });
     else others++;
@@ -183,7 +259,8 @@ export function relevantFor(events, me, since) {
 const short = (id) => (id ? String(id).slice(0, 8) : "?");
 
 export function formatEvent(ev) {
-  const who = ev.task ? `${ev.task} (${short(ev.session)})` : `phiên ${short(ev.session)}`;
+  const src = ev.session ? short(ev.session) : "từ origin/main";
+  const who = ev.task ? `${ev.task} (${src})` : ev.session ? `phiên ${src}` : src;
   const parts = [`${ev.ts.slice(0, 16).replace("T", " ")} ${ev.kind}`, who];
   if (ev.pr) parts.push(`PR #${ev.pr}`);
   if (ev.to) parts.push(`→ ${ev.to}`);

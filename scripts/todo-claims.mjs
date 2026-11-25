@@ -14,11 +14,26 @@
 //   node scripts/todo-claims.mjs event <kind> [T-xxx] --session <id> [--pr n] [--areas a,b] [--to T-xxx|all|master] [--text "…"]
 //   node scripts/todo-claims.mjs feed [--hours 24] [--limit 20]
 //   node scripts/todo-claims.mjs master [--session <id> | --clear]
+//   node scripts/todo-claims.mjs reserve-id --session <id>   giữ chỗ mã T-xxx mới (không trùng với phiên khác)
+// Hook cũng quét origin/main (ref đã fetch, không gọi mạng): PR merge bằng đường nào cũng thành sự kiện `merged`.
 // Hook (đọc JSON của Claude Code ở stdin):
 //   node scripts/todo-claims.mjs heartbeat          UserPromptSubmit: cập nhật lastSeen, cảnh báo nếu việc đã chuyển đi,
 //                                                   in ≤3 sự kiện mới liên quan tới phiên này
 import { readFileSync, writeFileSync, existsSync, renameSync, readdirSync } from "node:fs";
-import { eventsPathFor, makeEvent, appendEvent, readEvents, relevantFor, pushLines, firstLook, formatEvent, areasOverlap, list } from "./todo-events.mjs";
+import {
+  eventsPathFor,
+  makeEvent,
+  appendEvent,
+  readEvents,
+  relevantFor,
+  pushLines,
+  firstLook,
+  formatEvent,
+  areasOverlap,
+  list,
+  mergeEventsFromCommits,
+  nextTaskId,
+} from "./todo-events.mjs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -279,6 +294,49 @@ function arg(args, name) {
   return i >= 0 ? args[i + 1] : null;
 }
 
+/** Số commit tối đa xét mỗi lần quét origin/main. */
+export const SYNC_MAX_COMMITS = 30;
+
+/**
+ * Quét commit mới trên `origin/main` (ref đã fetch, dùng chung mọi worktree) → sự kiện `merged`.
+ * Lần đầu chỉ ghi mốc, không sinh sự kiện. Mốc không còn là tổ tiên (force-push) → đặt lại mốc.
+ * Trả số sự kiện đã ghi.
+ */
+export function syncMain(book, evFile, cwd = root, now = new Date()) {
+  const head = git(cwd, ["rev-parse", "--verify", "-q", "refs/remotes/origin/main"]);
+  if (!head || head === book.mainSeen) return 0;
+  const prev = book.mainSeen;
+  book.mainSeen = head;
+  if (!prev) return 0;
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", prev, head], { cwd, stdio: "ignore" });
+  } catch {
+    return 0;
+  }
+  const log = git(cwd, ["log", "--first-parent", "--reverse", `-${SYNC_MAX_COMMITS}`, "--format=%H%x09%s", `${prev}..${head}`]);
+  const commits = log
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      const [sha, ...s] = l.split("\t");
+      return { sha, subject: s.join("\t"), files: git(cwd, ["diff-tree", "--no-commit-id", "--name-only", "-r", sha]).split("\n").filter(Boolean) };
+    });
+  const evs = mergeEventsFromCommits(commits, readEvents(evFile), now);
+  for (const e of evs) appendEvent(evFile, e);
+  return evs.length;
+}
+
+/** Giữ chỗ mã việc mới trong sổ chung. Trả mã. */
+export function reserveId(book, session, sources, now = new Date()) {
+  const id = nextTaskId({ ...sources, idHigh: book.idHigh ?? 0 });
+  book.idHigh = Number(id.slice(2));
+  book.reserved = Object.fromEntries(
+    Object.entries(book.reserved ?? {}).filter(([, r]) => (now - new Date(r.at)) / 864e5 <= SESSION_TTL_DAYS),
+  );
+  book.reserved[id] = { session, at: now.toISOString() };
+  return id;
+}
+
 /** Ghi một sự kiện vào sổ chung; lỗi schema → trả msg. Dùng chung cho CLI và script khác (pr-merge). */
 export function recordEvent(input, claimsFile = claimsPath()) {
   const r = makeEvent(input);
@@ -305,8 +363,30 @@ function main(argv) {
         console.log(`[todo] ${moved.task} đã chuyển sang phiên ${short(moved.to)} (${ago(moved.at)}). Phiên này không sửa ${moved.task} nữa; báo user.`);
         delete book.moved[session];
       }
+      syncMain(book, evFile);
       for (const l of pullEvents(book, readEvents(evFile), session)) console.log(l);
       save(file, book);
+      return 0;
+    }
+    case "reserve-id": {
+      const session = arg(rest, "--session");
+      if (!session) return console.log('Thiếu --session (dòng "[todo] Phiên này:" ở đầu phiên).'), 1;
+      const cwd = process.cwd();
+      try {
+        // Lệnh tay, không phải hook: được gọi mạng để thấy bộ đếm mới nhất trên main. Lỗi (mất mạng, khoá ref) → dùng ref đang có.
+        execFileSync("git", ["fetch", "-q", "origin", "main"], { cwd, stdio: "ignore", timeout: 15000 });
+      } catch {
+        console.log("(không fetch được origin/main; dùng bản đã có)");
+      }
+      const readmeAt = path.join(cwd, "todo", "README.md");
+      const id = reserveId(book, session, {
+        readmeLocal: existsSync(readmeAt) ? readFileSync(readmeAt, "utf8") : "",
+        readmeMain: git(cwd, ["show", "refs/remotes/origin/main:todo/README.md"]),
+        refNames: git(cwd, ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin", "refs/heads"]),
+      });
+      save(file, book);
+      recordEvent({ kind: "id_reserved", session, task: id }, file);
+      console.log(`${id} — đã giữ chỗ. Ghi "Mã tiếp theo: T-${String(Number(id.slice(2)) + 1).padStart(3, "0")}" vào todo/README.md của nhánh.`);
       return 0;
     }
     case "claim": {
@@ -389,7 +469,7 @@ function main(argv) {
       return issues.length ? 1 : 0;
     }
     default:
-      console.log("Lệnh: claim | release | list | handoff | doctor | event | feed | master | heartbeat");
+      console.log("Lệnh: claim | release | list | handoff | doctor | event | feed | master | reserve-id | heartbeat");
       return 1;
   }
 }

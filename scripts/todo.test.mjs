@@ -230,3 +230,44 @@ test("brief: hiện master và sự kiện từ lần trước", () => {
   assert.match(out, /Master: phiên M/);
   assert.match(out, /Từ lần trước — gửi bạn: x/);
 });
+
+// ── Sửa sau review (T-022, phương án a) ──
+import { mergeEventsFromCommits, nextTaskId, contractFiles } from "./todo-events.mjs";
+import { reserveId } from "./todo-claims.mjs";
+
+test("mergeEventsFromCommits: bắt merge không qua pr-merge, bỏ PR đã ghi, bỏ commit không có (#n)", () => {
+  const known = [ev({ kind: "merged", session: "S", pr: 77, files: ["a.ts"] })];
+  const commits = [
+    { sha: "aaaaaaa", subject: "feat: x (T-021) (#77)", files: ["a.ts"] },
+    { sha: "bbbbbbb", subject: "fix: y (#79)", files: ["packages/protocol/p.ts"] },
+    { sha: "ccccccc", subject: "chore: push thẳng", files: ["b.ts"] },
+    { sha: "ddddddd", subject: "fix: y lại (#79)", files: [] },
+  ];
+  const out = mergeEventsFromCommits(commits, known, t0);
+  assert.deepEqual(out.map((e) => [e.pr, e.sha, e.session]), [[79, "bbbbbbb", null]]);
+});
+
+test("relevantFor: merge đụng hợp đồng chung → báo mọi phiên; cùng PR ghi hai lần chỉ báo một lần", () => {
+  const events = [
+    ev({ kind: "merged", session: "B", pr: 79, files: ["packages/protocol/p.ts"] }, hours(1)),
+    ev({ kind: "merged", session: null, pr: 79, sha: "bbbbbbb", files: ["packages/protocol/p.ts"] }, hours(2)),
+    ev({ kind: "merged", session: null, pr: 80, files: ["apps/studio/x.tsx"] }, hours(3)),
+  ];
+  const r = relevantFor(events, { session: "A", task: "T-1", areas: [] }, t0.toISOString());
+  assert.equal(r.items.length, 1);
+  assert.match(r.items[0].why, /hợp đồng chung đổi \(packages\/protocol\/p\.ts\)/);
+  assert.equal(r.others, 1);
+  assert.deepEqual(contractFiles(["AGENTS.md", "docs/AGENTS.md", "scripts/x.mjs"]), ["AGENTS.md", "scripts/x.mjs"]);
+});
+
+test("nextTaskId / reserveId: không trùng khi README local cũ hơn main, nhánh có mã lớn hơn, hai phiên giữ liên tiếp", () => {
+  const stale = "Mã tiếp theo: T-022\n- T-020 a";
+  const main = "Mã tiếp theo: T-023\n- T-020 a";
+  assert.equal(nextTaskId({ readmeLocal: stale }), "T-022");
+  assert.equal(nextTaskId({ readmeLocal: stale, readmeMain: main }), "T-023");
+  assert.equal(nextTaskId({ readmeLocal: stale, readmeMain: main, refNames: "origin/feat/T-030-x" }), "T-031");
+  const book = emptyBook();
+  assert.equal(reserveId(book, "A", { readmeLocal: stale, readmeMain: main }, t0), "T-023");
+  assert.equal(reserveId(book, "B", { readmeLocal: stale, readmeMain: main }, t0), "T-024");
+  assert.equal(book.reserved["T-024"].session, "B");
+});

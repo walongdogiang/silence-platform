@@ -21,7 +21,7 @@ Mọi phiên Claude Code trên repo biết phiên khác vừa làm gì có ảnh
 
 ## Phạm vi
 
-**Làm:** sổ sự kiện `todo-events.jsonl` (thư mục git chung) + schema; `claim --areas` cảnh báo trùng vùng; `event`, `feed`, `master` trong `scripts/todo-claims.mjs`; `pr-merge.mjs` tự ghi `merged`; hook SessionStart/UserPromptSubmit đẩy ≤3 dòng sự kiện mới liên quan; skill `todo`/`task-git`; ADR 0006.
+**Làm:** giữ chỗ mã việc (`reserve-id`); phát hiện merge từ `origin/main`; tự báo đổi hợp đồng chung theo đường dẫn; sổ sự kiện `todo-events.jsonl` (thư mục git chung) + schema; `claim --areas` cảnh báo trùng vùng; `event`, `feed`, `master` trong `scripts/todo-claims.mjs`; `pr-merge.mjs` tự ghi `merged`; hook SessionStart/UserPromptSubmit đẩy ≤3 dòng sự kiện mới liên quan; skill `todo`/`task-git`; ADR 0006.
 **Không làm:** chủ worktree, trạng thái 🟢🟡⚪, chặn commit bằng PreToolUse (T-020); sửa `.claude/settings.json` (hook cũ đủ dùng); UI Studio (T-019).
 
 ## Bối cảnh
@@ -40,12 +40,15 @@ Phát hiện khi bắt đầu: thư mục chính còn ở `387c629`, trong khi `
 - Con trỏ đọc: `sessions[id].lastEvent` (ts). Phiên mới: xem 24 giờ gần nhất.
 - `areas`: glob kiểu `packages/protocol/**`; trùng = tiền tố tĩnh của glob này là tiền tố của glob kia. Chỉ cảnh báo.
 
+**Sửa sau review (user chọn phương án a, 2026-11-25):** lời nhắn là thông tin, không phải lệnh; `merged` thêm nguồn quét `origin/main` (bắt merge ngoài `pr-merge.mjs`), trùng PR báo một lần; "hợp đồng chung đổi" tự sinh từ `CONTRACT_PATHS`; `reserve-id` giữ chỗ mã trong sổ chung. Vùng thật theo diff + worktree đúng → T-020. Giới hạn còn lại: ADR 0006 → Giới hạn đã biết.
+
 ## Kế hoạch
 
 1. [x] `scripts/todo-events.mjs`: `eventsPathFor`, `makeEvent` (kiểm schema), `appendEvent`, `readEvents`, `areasOverlap`, `matchArea`, `relevantFor`, `formatEvent` — kiểm: test.
 2. [x] `scripts/todo-claims.mjs`: `claim --areas` (lưu + cảnh báo trùng + sự kiện), sự kiện cho release/takeover, lệnh `event`, `feed`, `master`; heartbeat in sự kiện liên quan và dời con trỏ — kiểm: test + chạy tay.
 3. [x] `scripts/pr-merge.mjs`: merge xong → `merged` (pr, task từ nhánh/tiêu đề, files, `--session`) — kiểm: test hàm dựng sự kiện.
 4. [x] `scripts/todo-brief.mjs`: dòng `[todo] Từ lần trước: …`, master hiện tại — kiểm: test `brief`.
+6. [x] Sau review: skill (lời nhắn), `syncMain` + `mergeEventsFromCommits`, `contractFiles`, `reserve-id` (`nextTaskId`, `reserveId`) — kiểm: test + chạy tay với repo/remote tạm
 5. [x] Skill `todo` (mục Điều phối), `task-git` (areas, `pr_opened`, `--session` cho pr-merge); ADR 0006 + `docs/README.md` — kiểm: `npm run check:docs`, `npm run check:rules`.
 
 ## Tiêu chí xong
@@ -56,6 +59,8 @@ Phát hiện khi bắt đầu: thư mục chính còn ở `387c629`, trong khi `
 - [x] `claim --areas` trùng vùng việc khác → cảnh báo, vẫn nhận — kiểm: `npm run test:todo` → test `overlaps`, chạy tay in `Cảnh báo: vùng chồng với T-022`
 - [x] `pr-merge.mjs` dựng sự kiện `merged` đúng task/files — kiểm: `npm run test:todo` → test `mergedEvent` pass
 - [x] Docs + rule hợp lệ — kiểm: `npm run check:docs` · `npm run check:rules` → 26 docs OK · 6 rule OK
+- [x] Merge không qua `pr-merge.mjs` vẫn thành sự kiện; trùng PR báo một lần; merge đụng hợp đồng chung báo mọi phiên — kiểm: `npm run test:todo` → test `mergeEventsFromCommits`, `relevantFor`; chạy tay: push `(#9)` lên remote tạm → heartbeat A in "cần rebase", lượt 2 rỗng
+- [x] Hai phiên `reserve-id` liên tiếp nhận hai mã khác nhau, không lùi theo README cũ — kiểm: `npm run test:todo` → test `nextTaskId / reserveId`; chạy tay T-005, T-006
 - [ ] (user) Sau khi pull main ở thư mục chính: hai chat, chat B `event note --to T-xxx`, chat A thấy ở lượt kế
 
 ## Phát sinh
@@ -72,3 +77,7 @@ Phát hiện khi bắt đầu: thư mục chính còn ở `387c629`, trong khi `
 ### 2026-11-25 · verify · Opus
 - Quyết định: logic sự kiện ở module riêng `scripts/todo-events.mjs` để T-020 ít đụng; `touchSession` giữ field cũ của phiên (trước đó ghi đè, sẽ mất con trỏ `lastEvent`).
 - Đã kiểm: `npm run test:todo` 16 pass; chạy tay đủ luồng trong repo git tạm (không đụng sổ thật).
+
+### 2026-11-25 · review · Opus
+- Review plan theo yêu cầu user: sổ không ngăn được trùng mã (sự cố T-021), `merged` chỉ có khi qua `pr-merge.mjs`, skill bảo "làm theo" lời nhắn (trái AGENTS.md). User chọn a: sửa trong PR #78.
+- Phát hiện: sổ ghi worktree = thư mục chính, nhánh `main` cho T-022 (lỗi T-020 đã ghi nhận).
