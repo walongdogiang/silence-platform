@@ -69,7 +69,7 @@ LATER 13 việc · IDEAS 1
 
 1. **Nhận việc**: `node scripts/todo-claims.mjs claim T-xxx --session <id phiên này>`. Bị từ chối → báo đúng lý do script in ra, không làm. Khi đã biết sẽ sửa đâu (cuối `plan`), chạy lại kèm `--areas "<glob>,<glob>"`; script in cảnh báo trùng vùng → báo user.
 2. Kiểm trùng: `git ls-remote origin "*T-xxx*"` và `gh pr list --search T-xxx --state open`. Có nhánh/PR rồi → hỏi user, không mở nhánh thứ hai.
-3. Nhánh `<type>/T-xxx-slug` từ `origin/main`, trong worktree riêng nếu thư mục đang dùng có việc khác.
+3. Worktree mới cho việc: `node scripts/todo-claims.mjs worktree T-xxx --branch <type>/T-xxx-slug --session <id>` (skill `task-git` → Worktree), rồi chạy lại `claim` **trong** worktree đó để sổ ghi đúng worktree.
 4. Chưa có file → tạo từ mẫu. Chuyển dòng sang **Now**; trong file đặt `status: in-progress`, `branch`, `updated`, `phase: design` (hoặc `plan` khi không có gì để thiết kế: chore/docs đơn giản, fix đã rõ nguyên nhân).
 5. **Tự kiểm model** (mục **Model**) trước khi bắt tay vào `design`/`plan`.
 
@@ -181,7 +181,7 @@ Làm tiếp ở chat này một việc đang dở ở chat khác (chat cũ đã 
 
 1. `node scripts/todo-claims.mjs handoff T-xxx` → file task, worktree/nhánh cũ, commit chưa lên main, thay đổi chưa commit, ~10 lượt cuối của chat cũ.
 2. Nói với user: việc đang ở chat nào, hoạt động lúc nào, tới bước nào. Hỏi rõ có chuyển sang đây không; chưa có "có" thì không làm gì.
-3. User đồng ý → `node scripts/todo-claims.mjs claim T-xxx --session <id> --takeover`. Chat cũ sẽ được hook báo ở lượt kế của nó.
+3. User đồng ý → `node scripts/todo-claims.mjs claim T-xxx --session <id> --takeover`, chạy **trong worktree của việc**. Chat cũ sẽ được hook báo ở lượt kế của nó. Script từ chối khi chat cũ còn hoạt động (< 2 giờ): nhờ user đóng chat đó; user xác nhận đã đóng thì thêm `--force`. Cùng một chat được app mở lại (mã phiên mới, chung lịch sử) thì `claim` tự nhận lại, không cần hỏi.
 4. Làm tiếp **trên đúng worktree và nhánh cũ** (không tạo nhánh mới). Thay đổi chưa commit trong worktree cũ là của việc này: giữ nguyên.
 5. Ghi một mục Nhật ký `### … · chuyển giao từ phiên <8 ký tự đầu>` gồm Dở / Bước kế, rút từ file task + git; đuôi transcript chỉ dùng khi Nhật ký cũ thiếu.
 

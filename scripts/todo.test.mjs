@@ -271,3 +271,157 @@ test("nextTaskId / reserveId: không trùng khi README local cũ hơn main, nhá
   assert.equal(reserveId(book, "B", { readmeLocal: stale, readmeMain: main }, t0), "T-024");
   assert.equal(book.reserved["T-024"].session, "B");
 });
+
+// ── T-020: chủ worktree theo chat ──
+import { guardGit } from "./todo-owner.mjs";
+
+test("tái hiện sự cố 25/11: chat B đổi nhánh rồi chat A commit trong cùng worktree → chặn", () => {
+  const book = emptyBook();
+  const W = "D:/vuhieu/5ilence-wt2";
+  book.sessions.A = { chat: "chatA", lastSeen: t0.toISOString() };
+  book.sessions.B = { chat: "chatB", lastSeen: t0.toISOString() };
+  book.worktrees = { [W.toLowerCase()]: { chat: "chatA", session: "A", path: W, lastSeen: t0.toISOString(), state: "running" } };
+  const b = guardGit(book, { session: "B", targets: [{ op: "switch", wt: W }] }, hours(0.2));
+  assert.equal(b.decision, "deny");
+  assert.match(b.reason, /chat/);
+});
+
+import { chatIdFromTranscript, ensureChat, parseGitCommand, normPath, setOwner, strayWorktrees, worktreesHome } from "./todo-owner.mjs";
+
+test("mã chat: chung tin đầu = một chat; fork = chat mới; transcript hỏng = không biết", () => {
+  const tr = '{"type":"custom-title","sessionId":"s1"}\n{"type":"user","uuid":"root-1","sessionId":"s1"}\n{"uuid":"x2"}';
+  assert.equal(chatIdFromTranscript(tr), "root-1");
+  assert.equal(chatIdFromTranscript('{"uuid":'), null);
+  const book = emptyBook();
+  const read = () => tr;
+  assert.equal(ensureChat(book, { session: "s1", transcript: "a" }, read), "root-1");
+  assert.equal(ensureChat(book, { session: "s2", transcript: "b" }, read), "root-1"); // mở lại
+  assert.equal(ensureChat(book, { session: "s3", transcript: "c", source: "fork" }, read), "s3");
+  assert.equal(ensureChat(book, { session: "s4", transcript: "d" }, () => ""), null);
+});
+
+test("parseGitCommand: chỉ lệnh đổi trạng thái; thư mục từ -C, cd, Set-Location, cwd", () => {
+  const cwd = "D:\\vuhieu\\5ilence";
+  assert.deepEqual(parseGitCommand("git status && git log -3 && git diff", cwd), []);
+  assert.deepEqual(parseGitCommand('cd /d/vuhieu/5ilence-worktrees/T-020 && git add a && git commit -F "m.txt"', cwd), [
+    { op: "commit", dir: "D:/vuhieu/5ilence-worktrees/T-020" },
+  ]);
+  assert.deepEqual(parseGitCommand("git -C ../5ilence-wt2 switch fix/x", cwd), [{ op: "switch", dir: "D:/vuhieu/5ilence-wt2" }]);
+  assert.deepEqual(parseGitCommand("Set-Location 'D:\\vuhieu\\x'; git push -u origin feat/a", cwd), [{ op: "push", dir: "D:/vuhieu/x" }]);
+  assert.deepEqual(parseGitCommand("git -c core.x=1 worktree remove D:/a", cwd), [{ op: "worktree remove", dir: "D:/a" }]);
+  assert.deepEqual(parseGitCommand("git worktree list; echo git commit", cwd), []);
+  assert.equal(normPath("d:\\A\\b\\"), "D:/A/b");
+});
+
+test("guardGit: cùng chat mở lại cho chạy; chủ im ≥ 2 giờ → hỏi; không biết chat → hỏi; lệnh không đụng worktree có chủ → cho chạy", () => {
+  const W = "D:/w/T-1";
+  const mk = () => {
+    const b = emptyBook();
+    b.sessions = { A: { chat: "c1" }, A2: { chat: "c1" }, B: { chat: "c2" }, U: {} };
+    b.worktrees = { [W.toLowerCase()]: { path: W, chat: "c1", session: "A", lastSeen: t0.toISOString() } };
+    return b;
+  };
+  const t = [{ op: "commit", wt: W }];
+  assert.equal(guardGit(mk(), { session: "A2", targets: t }, hours(1)).decision, "allow");
+  assert.equal(guardGit(mk(), { session: "B", targets: t }, hours(1.9)).decision, "deny");
+  assert.equal(guardGit(mk(), { session: "B", targets: t }, hours(2.1)).decision, "ask");
+  assert.equal(guardGit(mk(), { session: "U", targets: t }, hours(1)).decision, "ask");
+  assert.equal(guardGit(mk(), { session: "B", targets: [{ op: "commit", wt: "D:/w/other" }, { op: "push", wt: null }] }, hours(1)).decision, "allow");
+});
+
+test("setOwner: không cướp chủ khi chưa được phép; chuyển chủ thì báo chat cũ và chuyển việc đang giữ", () => {
+  const book = emptyBook();
+  book.sessions = { A: { chat: "c1" }, B: { chat: "c2" } };
+  book.claims["T-1"] = { session: "A", worktree: "D:\\w\\T-1", lastSeen: t0.toISOString() };
+  assert.ok(setOwner(book, { session: "A", wt: "D:/w/T-1", branch: "feat/T-1" }, t0).took);
+  assert.equal(setOwner(book, { session: "B", wt: "d:/W/t-1" }, hours(1)).took, false);
+  const r = setOwner(book, { session: "B", wt: "D:/w/T-1", transfer: true }, hours(3));
+  assert.equal(r.from.session, "A");
+  assert.equal(book.worktrees["d:/w/t-1"].chat, "c2");
+  assert.equal(book.worktrees["d:/w/t-1"].branch, "feat/T-1");
+  assert.equal(book.moved.A.to, "B");
+  assert.equal(book.claims["T-1"].session, "B");
+});
+
+test("strayWorktrees + worktreesHome: thư mục không còn là worktree, chủ im lâu không giữ việc", () => {
+  assert.equal(worktreesHome("D:/vuhieu/5ilence"), "D:/vuhieu/5ilence-worktrees");
+  const book = emptyBook();
+  book.worktrees = {
+    "d:/h/t-1": { path: "D:/h/T-1", chat: "c1", lastSeen: t0.toISOString() },
+    "d:/h/t-2": { path: "D:/h/T-2", chat: "c2", lastSeen: t0.toISOString() },
+  };
+  book.claims["T-2"] = { session: "x", worktree: "D:\\h\\T-2" };
+  const out = strayWorktrees({ dirs: ["D:/h/T-1", "D:/h/T-2", "D:/h/old"], listed: ["D:/h/T-1", "D:/h/T-2"], book, now: hours(3) });
+  assert.deepEqual(out.map((o) => o.path), ["D:/h/old", "D:/h/T-1"]);
+});
+
+test("claim: cùng chat mở lại nhận lại việc không cần takeover; takeover từ chat khác còn hoạt động bị từ chối trừ --force", () => {
+  const book = emptyBook();
+  book.sessions = { A: { chat: "c1" }, A2: { chat: "c1" }, B: { chat: "c2" } };
+  assert.ok(claim(book, "T-1", "A", { now: t0 }).ok);
+  const r = claim(book, "T-1", "A2", { now: hours(0.1) });
+  assert.ok(r.ok);
+  assert.match(r.msg, /cùng chat/);
+  assert.equal(book.claims["T-1"].session, "A2");
+  assert.equal(book.moved.A, undefined);
+  assert.equal(claim(book, "T-1", "B", { takeover: true, now: hours(1) }).ok, false);
+  assert.ok(claim(book, "T-1", "B", { takeover: true, force: true, now: hours(1) }).ok);
+  assert.equal(book.moved.A2.to, "B");
+  const b2 = emptyBook();
+  b2.sessions = { A: { chat: "c1" }, B: { chat: "c2" } };
+  claim(b2, "T-1", "A", { now: t0 });
+  assert.ok(claim(b2, "T-1", "B", { takeover: true, now: hours(3) }).ok);
+});
+
+import { handle, gitTargets } from "./todo-hook.mjs";
+
+test("hook: pre trả deny/ask đúng khuôn docs; post ghi chủ; sửa file không cướp chủ; stop = chờ user", () => {
+  const deps = {
+    mainRootOf: () => "D:/r/main",
+    toplevelOf: (d) => (String(d).replaceAll("\\", "/").startsWith("D:/r/wt/T-1") ? "D:/r/wt/T-1" : String(d).startsWith("D:/r/main") ? "D:/r/main" : null),
+    branchOf: () => "feat/T-1",
+  };
+  const book = emptyBook();
+  const tr = { A: '{"uuid":"c1"}', B: '{"uuid":"c2"}' };
+  const inp = (s, extra) => ({ session_id: s, transcript_path: s, cwd: "D:/r/main", ...extra });
+  book.sessions = { A: { chat: "c1" }, B: { chat: "c2" } };
+  // A commit trong worktree → thành chủ
+  handle("post", inp("A", { tool_name: "Bash", tool_input: { command: "cd D:/r/wt/T-1 && git commit -m x" } }), book, deps, t0);
+  assert.equal(book.worktrees["d:/r/wt/t-1"].chat, "c1");
+  // B định switch trong đó → deny, khuôn hookSpecificOutput
+  const pre = handle("pre", inp("B", { tool_name: "Bash", tool_input: { command: "git -C D:/r/wt/T-1 switch main" } }), book, deps, hours(0.5));
+  assert.deepEqual(Object.keys(pre.output.hookSpecificOutput).sort(), ["hookEventName", "permissionDecision", "permissionDecisionReason"]);
+  assert.equal(pre.output.hookSpecificOutput.permissionDecision, "deny");
+  // lệnh git trong thư mục chính / lệnh đọc → không ra gì
+  assert.equal(handle("pre", inp("B", { tool_name: "Bash", tool_input: { command: "git commit -m y" } }), book, deps, hours(0.5)).output, undefined);
+  assert.equal(handle("pre", inp("B", { tool_name: "Bash", tool_input: { command: "git -C D:/r/wt/T-1 log" } }), book, deps, hours(0.5)).output, undefined);
+  // B sửa file trong worktree của A → không cướp chủ
+  handle("post", inp("B", { tool_name: "Edit", tool_input: { file_path: "D:\r\wt\T-1\a.ts" } }), book, deps, hours(0.6));
+  assert.equal(book.worktrees["d:/r/wt/t-1"].chat, "c1");
+  // A trả lời xong → chờ user
+  handle("stop", inp("A", {}), book, deps, hours(0.7));
+  assert.equal(book.worktrees["d:/r/wt/t-1"].state, "waiting");
+  // 3 giờ sau B được user cho phép (ask) → post chuyển chủ
+  assert.equal(handle("pre", inp("B", { tool_name: "Bash", tool_input: { command: "git -C D:/r/wt/T-1 switch main" } }), book, deps, hours(4)).output.hookSpecificOutput.permissionDecision, "ask");
+  handle("post", inp("B", { tool_name: "Bash", tool_input: { command: "git -C D:/r/wt/T-1 switch main" } }), book, deps, hours(4));
+  assert.equal(book.worktrees["d:/r/wt/t-1"].chat, "c2");
+  assert.equal(book.moved.A.to, "B");
+  assert.deepEqual(gitTargets("git worktree remove D:/r/wt/T-1", "D:/r/main", deps), [{ op: "worktree remove", wt: "D:/r/wt/T-1" }]);
+  void tr;
+});
+
+test("hook: JSON hỏng / thiếu session → exit 0, không in gì", async () => {
+  const { spawnSync } = await import("node:child_process");
+  for (const stdin of ["{hỏng", "", '{"tool_name":"Bash"}']) {
+    const r = spawnSync(process.execPath, ["scripts/todo-hook.mjs", "pre"], { input: stdin, encoding: "utf8" });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, "");
+  }
+});
+
+import { strayLine } from "./todo-brief.mjs";
+
+test("strayLine: một dòng hỏi user, không có thì im", () => {
+  assert.equal(strayLine([]), null);
+  assert.match(strayLine([{ path: "D:/h/old", why: "không còn là worktree" }]), /old \(không còn là worktree\).*không tự xoá/);
+});

@@ -26,8 +26,9 @@ Việc không có `T-xxx` (user nhờ trong chat): tạo việc qua skill `todo`
 
 ## Worktree
 - Không đổi nhánh, pull hay stash ở thư mục chính của repo; nơi đó là của user.
-- Dùng worktree riêng có `git status` sạch; worktree đang có thay đổi lạ là của phiên khác → không đụng, tạo worktree mới (`git worktree add -b <nhánh> <thư-mục> origin/main`, rồi `npm install` nếu cần).
-- Nhánh `<type>/T-xxx-slug` từ `origin/main` (`git fetch` trước).
+- **Mỗi việc một worktree mới**, tạo bằng `node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <type>/<T-xxx-slug> --session <id>`: nằm ở thư mục chung `<repo chính>-worktrees\<tên>` (vd `D:\vuhieu\5ilence-worktrees\T-020`), từ `origin/main` mới fetch, không theo dõi `main`, chat này thành chủ. Rồi `npm install` nếu cần. Không dùng lại worktree có sẵn, không tự đặt chỗ khác.
+- Chủ worktree tính theo **chat** (T-020, ADR 0006). Hook chặn `commit`/`push`/`switch`/`checkout`/`reset`/`rebase`/`merge`/`stash`/`pull`/`worktree remove` trong worktree của chat khác còn hoạt động (< 2 giờ), và hỏi user khi chat đó im ≥ 2 giờ. Bị chặn → tạo worktree riêng; **không lách** (đổi thư mục, gọi git kiểu khác). Lệnh chỉ đọc không bị chặn.
+- Xong việc (sau merge): `git worktree remove <thư-mục>` rồi xoá nhánh cục bộ. Đầu phiên có dòng "Thư mục worktree có thể dọn" → hỏi user từng cái, không tự xoá.
 
 ## Commit
 1. `git diff --stat`: chỉ file thuộc việc; không `.env`/secrets/`node_modules`.

@@ -77,7 +77,7 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|compact",
+        "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
           {
             "type": "command",
@@ -93,6 +93,53 @@
           {
             "type": "command",
             "command": "node scripts/todo-claims.mjs heartbeat",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/todo-hook.mjs\" pre",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/todo-hook.mjs\" post",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/todo-hook.mjs\" stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/todo-hook.mjs\" notify",
             "timeout": 10
           }
         ]

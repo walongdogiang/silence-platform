@@ -15,6 +15,7 @@
 //   node scripts/todo-claims.mjs feed [--hours 24] [--limit 20]
 //   node scripts/todo-claims.mjs master [--session <id> | --clear]
 //   node scripts/todo-claims.mjs reserve-id --session <id>   giữ chỗ mã T-xxx mới (không trùng với phiên khác)
+//   node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <nhánh> --session <id>   tạo worktree ở <repo>-worktrees/<tên> (T-020)
 // Hook cũng quét origin/main (ref đã fetch, không gọi mạng): PR merge bằng đường nào cũng thành sự kiện `merged`.
 // Hook (đọc JSON của Claude Code ở stdin):
 //   node scripts/todo-claims.mjs heartbeat          UserPromptSubmit: cập nhật lastSeen, cảnh báo nếu việc đã chuyển đi,
@@ -34,6 +35,7 @@ import {
   mergeEventsFromCommits,
   nextTaskId,
 } from "./todo-events.mjs";
+import { chatOf, isIdle, toplevelOf, mainRootOf, setOwner, ensureChat, wtKey, worktreesHome, normPath } from "./todo-owner.mjs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +57,7 @@ export function claimsPath(cwd = root) {
 }
 
 export function emptyBook() {
-  return { claims: {}, sessions: {}, moved: {}, master: null };
+  return { claims: {}, sessions: {}, moved: {}, master: null, worktrees: {} };
 }
 
 export function load(file) {
@@ -80,7 +82,11 @@ export function touchSession(book, { session, transcript, cwd }, now = new Date(
   book.sessions[session] = { ...prev, transcript: transcript ?? prev.transcript ?? null, cwd: cwd ?? prev.cwd ?? null, lastSeen: now.toISOString() };
   for (const c of Object.values(book.claims)) if (c.session === session) c.lastSeen = now.toISOString();
   // Bỏ phiên im quá SESSION_TTL_DAYS mà không giữ việc nào, để sổ không phình.
-  const held = new Set([...Object.values(book.claims).map((c) => c.session), book.master?.session]);
+  const held = new Set([
+    ...Object.values(book.claims).map((c) => c.session),
+    ...Object.values(book.worktrees ?? {}).map((o) => o.session),
+    book.master?.session,
+  ]);
   for (const [id, s] of Object.entries(book.sessions))
     if (!held.has(id) && (now - new Date(s.lastSeen)) / 864e5 > SESSION_TTL_DAYS) delete book.sessions[id];
   return book;
@@ -94,7 +100,7 @@ export function heldBy(book, session) {
  * Nhận việc. Trả { ok, msg }. Từ chối khi: việc do phiên khác giữ (trừ takeover), phiên này đang giữ việc khác,
  * hoặc đã đủ MAX_NOW việc.
  */
-export function claim(book, task, session, { takeover = false, worktree = null, branch = null, areas = null, now = new Date() } = {}) {
+export function claim(book, task, session, { takeover = false, force = false, worktree = null, branch = null, areas = null, now = new Date() } = {}) {
   if (!/^T-\d+$/.test(task)) return { ok: false, msg: `Mã việc không hợp lệ: ${task}` };
   if (!session) return { ok: false, msg: "Thiếu --session (dòng \"[todo] Phiên này:\" ở đầu phiên)." };
   const cur = book.claims[task];
@@ -104,12 +110,20 @@ export function claim(book, task, session, { takeover = false, worktree = null, 
   }
   const mine = heldBy(book, session);
   if (mine) return { ok: false, msg: `Phiên này đang giữ ${mine}. Mỗi phiên một việc: đóng hoặc release ${mine} trước.` };
-  if (cur && !takeover)
+  // Cùng một chat được app mở lại với mã phiên mới (T-020): nhận lại việc, không cần hỏi.
+  const me = chatOf(book, session);
+  const sameChat = !!cur && !!me && chatOf(book, cur.session) === me;
+  if (cur && !takeover && !sameChat)
     return { ok: false, msg: `${task} đang do phiên ${short(cur.session)} giữ (${cur.worktree ?? "?"}, hoạt động ${ago(cur.lastSeen, now)}). Hỏi user rồi dùng /todo resume ${task}.` };
+  if (cur && takeover && !sameChat && !force && !isIdle(cur, now))
+    return {
+      ok: false,
+      msg: `${task}: chat giữ việc (phiên ${short(cur.session)}) còn hoạt động ${ago(cur.lastSeen, now)}. Nhờ user đóng chat đó; user xác nhận đã đóng thì chạy lại với --takeover --force.`,
+    };
   if (!cur && Object.keys(book.claims).length >= MAX_NOW)
     return { ok: false, msg: `Đã có ${MAX_NOW} việc đang làm (${Object.keys(book.claims).join(", ")}). Làm xong hoặc release một việc trước.` };
   const sess = book.sessions[session] ?? {};
-  if (cur && takeover) book.moved[cur.session] = { task, to: session, at: now.toISOString() };
+  if (cur && !sameChat) book.moved[cur.session] = { task, to: session, at: now.toISOString() };
   book.claims[task] = {
     session,
     transcript: sess.transcript ?? null,
@@ -118,8 +132,9 @@ export function claim(book, task, session, { takeover = false, worktree = null, 
     areas: areas?.length ? list(areas) : cur?.areas ?? [],
     started: cur?.started ?? now.toISOString(),
     lastSeen: now.toISOString(),
-    ...(cur && takeover ? { from: cur.session } : {}),
+    ...(cur ? { from: cur.session } : {}),
   };
+  if (sameChat) return { ok: true, msg: `Nhận lại ${task}: cùng chat mở lại (phiên cũ ${short(cur.session)}).` };
   return { ok: true, msg: cur ? `Đã chuyển ${task} từ phiên ${short(cur.session)} sang phiên này.` : `Đã nhận ${task}.` };
 }
 
@@ -358,6 +373,7 @@ function main(argv) {
       const session = input.session_id;
       if (!session) return 0;
       touchSession(book, { session, transcript: input.transcript_path, cwd: input.cwd });
+      ensureChat(book, { session, transcript: input.transcript_path });
       const moved = book.moved[session];
       if (moved) {
         console.log(`[todo] ${moved.task} đã chuyển sang phiên ${short(moved.to)} (${ago(moved.at)}). Phiên này không sửa ${moved.task} nữa; báo user.`);
@@ -366,6 +382,33 @@ function main(argv) {
       syncMain(book, evFile);
       for (const l of pullEvents(book, readEvents(evFile), session)) console.log(l);
       save(file, book);
+      return 0;
+    }
+    case "worktree": {
+      // Tạo worktree cho một việc ở thư mục chung `<repo chính>-worktrees/<tên>` (T-020), từ origin/main mới nhất.
+      const session = arg(rest, "--session");
+      const branchName = arg(rest, "--branch");
+      const name = rest.find((a, i) => i > 0 ? !rest[i - 1].startsWith("--") && !a.startsWith("--") : !a.startsWith("--"));
+      if (!session || !branchName || !name || !/^[\w.-]+$/.test(name))
+        return console.log("Dùng: worktree <T-xxx|tên> --branch <type>/<T-xxx-slug> --session <id>"), 1;
+      const home = worktreesHome(mainRootOf(process.cwd()));
+      if (!home) return console.log("Không tìm thấy repo git."), 1;
+      const dest = `${home}/${name}`;
+      if (existsSync(dest)) return console.log(`${dest} đã có. Không dùng lại worktree có sẵn; hỏi user hoặc đặt tên khác.`), 1;
+      try {
+        execFileSync("git", ["fetch", "-q", "origin", "main"], { stdio: "ignore", timeout: 15000 });
+      } catch {
+        console.log("(không fetch được origin/main; dùng bản đã có)");
+      }
+      try {
+        execFileSync("git", ["worktree", "add", "-q", "--no-track", "-b", branchName, dest, "origin/main"], { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8" });
+      } catch (e) {
+        return console.log(`Không tạo được worktree: ${String(e.stderr ?? e.message).trim()}`), 1;
+      }
+      ensureChat(book, { session });
+      setOwner(book, { session, wt: dest, branch: branchName });
+      save(file, book);
+      console.log(`Đã tạo ${normPath(dest)} (nhánh ${branchName} từ origin/main), chat này là chủ. Chạy lệnh trong thư mục đó; cần thì npm install.`);
       return 0;
     }
     case "reserve-id": {
@@ -394,14 +437,22 @@ function main(argv) {
       const cwd = process.cwd();
       const areas = list(arg(rest, "--areas"));
       const prev = book.claims[task];
+      ensureChat(book, { session });
+      // Worktree thật (T-020): gốc git của thư mục đang chạy lệnh; thư mục chính là của user, không ghi làm worktree của việc.
+      const wt = toplevelOf(cwd);
+      const inMain = !wt || wtKey(wt) === wtKey(mainRootOf(cwd));
+      const branch = git(cwd, ["branch", "--show-current"]) || null;
       const r = claim(book, task, session, {
         takeover: rest.includes("--takeover"),
-        worktree: cwd,
-        branch: git(cwd, ["branch", "--show-current"]) || null,
+        force: rest.includes("--force"),
+        worktree: inMain ? null : wt,
+        branch: inMain ? null : branch,
         areas,
       });
       console.log(r.msg);
       if (!r.ok) return 1;
+      if (inMain) console.log(`Lưu ý: đang ở thư mục chính, chưa ghi worktree. Tạo worktree cho việc: node scripts/todo-claims.mjs worktree ${task} --branch <type>/${task}-slug --session <id>, rồi chạy lại claim trong đó.`);
+      else if (!setOwner(book, { session, wt, branch }).took) console.log(`Cảnh báo: ${wt} đang thuộc một chat khác (node scripts/todo-claims.mjs list). Báo user.`);
       for (const w of overlaps(book, task, book.claims[task].areas)) console.log(w);
       save(file, book);
       if (prev && prev.session !== session) recordEvent({ kind: "handoff", session, task }, file);
@@ -455,6 +506,10 @@ function main(argv) {
       for (const [t, c] of entries)
         console.log(`${t} · phiên ${short(c.session)} · ${c.worktree ?? "?"} · ${c.branch ?? "?"} · ${ago(c.lastSeen)}${isStale(c) ? " · im lâu" : ""}${c.areas?.length ? ` · vùng ${c.areas.join(", ")}` : ""}`);
       if (book.master) console.log(`Master: phiên ${short(book.master.session)}`);
+      const owners = Object.values(book.worktrees ?? {});
+      if (owners.length) console.log("Chủ worktree:");
+      for (const o of owners)
+        console.log(`  ${o.path} · chat ${short(o.chat ?? o.session)} · ${o.branch ?? "?"} · ${isIdle(o) ? "⚪ im" : o.state === "waiting" ? "🟡 chờ user" : "🟢 đang chạy"} · ${ago(o.lastSeen)}`);
       return 0;
     }
     case "handoff":
@@ -469,7 +524,7 @@ function main(argv) {
       return issues.length ? 1 : 0;
     }
     default:
-      console.log("Lệnh: claim | release | list | handoff | doctor | event | feed | master | reserve-id | heartbeat");
+      console.log("Lệnh: claim | release | list | handoff | doctor | event | feed | master | reserve-id | worktree | heartbeat");
       return 1;
   }
 }

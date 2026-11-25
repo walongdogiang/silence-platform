@@ -4,11 +4,31 @@
 // master hiện tại và ≤3 sự kiện mới liên quan từ sổ chung (scripts/todo-events.mjs).
 // Stdout được nạp vào ngữ cảnh đầu phiên. Không có todo/ hay lỗi đọc thì im lặng, exit 0.
 // Chạy: node scripts/todo-brief.mjs   (hook truyền JSON có session_id qua stdin)
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput, pullEvents, syncMain } from "./todo-claims.mjs";
 import { eventsPathFor, readEvents } from "./todo-events.mjs";
+import { ensureChat, mainRootOf, worktreesHome, strayWorktrees } from "./todo-owner.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** Dòng hỏi dọn thư mục worktree thừa (T-020). Không tự xoá. */
+export function strayLine(strays) {
+  if (!strays.length) return null;
+  const list = strays.slice(0, 4).map((s) => `${path.posix.basename(s.path)} (${s.why})`).join(", ");
+  return `[todo] Thư mục worktree có thể dọn: ${list}${strays.length > 4 ? ` +${strays.length - 4}` : ""}. Hỏi user từng cái; không tự xoá.`;
+}
+
+function findStrays(book) {
+  const home = worktreesHome(mainRootOf(root));
+  if (!home || !existsSync(home)) return [];
+  const dirs = readdirSync(home, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => `${home}/${d.name}`);
+  const listed = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("worktree "))
+    .map((l) => l.slice(9));
+  return strayWorktrees({ dirs, listed, book });
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const todoDir = path.join(root, "todo");
@@ -90,7 +110,7 @@ export function modelHint(taskMd) {
   return build === think ? think : `${think}, build ${build}`;
 }
 
-export function brief(md, readTask = () => null, { session = null, book = null, events = [], now = new Date() } = {}) {
+export function brief(md, readTask = () => null, { session = null, book = null, events = [], notes = [], now = new Date() } = {}) {
   const s = sections(md);
   const open = new Set(Object.values(s).flat().map((l) => parseItem(l).id));
   const claims = book?.claims ?? {};
@@ -120,6 +140,7 @@ export function brief(md, readTask = () => null, { session = null, book = null, 
   if (!now_.length && !ready) lines.push("[todo] Now và Next đều trống.");
   if (book?.master) lines.push(`[todo] Master: ${book.master.session === session ? "phiên này" : `phiên ${short(book.master.session)}`} (điều phối; báo bằng event note --to master).`);
   for (const l of events) lines.push(l.replace(/^\[todo\] /, "[todo] Từ lần trước — "));
+  for (const l of notes) if (l) lines.push(l);
   lines.push("[todo] Danh sách: todo/README.md · skill todo (/todo). Khi user hỏi làm gì tiếp / làm tiếp / việc tiếp theo thì dùng skill todo. Việc do phiên khác giữ thì không làm; hỏi user rồi /todo resume.");
   return lines.join("\n");
 }
@@ -136,13 +157,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const file = claimsPath(root);
       const book = file ? load(file) : null;
       let events = [];
+      const notes = [];
       if (book && input.session_id) {
         touchSession(book, { session: input.session_id, transcript: input.transcript_path, cwd: input.cwd });
+        ensureChat(book, { session: input.session_id, transcript: input.transcript_path, source: input.source });
+        try {
+          notes.push(strayLine(findStrays(book)));
+        } catch {
+          // không liệt kê được thì thôi
+        }
         syncMain(book, eventsPathFor(file), root);
         events = pullEvents(book, readEvents(eventsPathFor(file)), input.session_id);
         save(file, book);
       }
-      console.log(brief(readFileSync(readme, "utf8"), readTask, { session: input.session_id ?? null, book, events }));
+      console.log(brief(readFileSync(readme, "utf8"), readTask, { session: input.session_id ?? null, book, events, notes }));
     }
   } catch {
     // Hook đầu phiên không được làm hỏng phiên.
