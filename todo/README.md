@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-023
+Mã tiếp theo: T-024
 
 ## Now
 
@@ -27,7 +27,7 @@ Mã tiếp theo: T-023
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
-- T-020 Chống hai phiên dùng chung worktree (ghi chủ theo worktree, chặn commit sai chủ) · [chi tiết](tasks/T-020-worktree-per-task.md)
+- T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md) · blocked-by: T-020
 - T-003 1.12 Pane xem dev server / URL · [chi tiết](tasks/T-003-browser-preview.md)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 - T-005 Ngôn ngữ đợt 3: phần còn lại của `docs/` sang tiếng Anh, một PR · blocked-by: T-004

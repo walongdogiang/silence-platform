@@ -6,6 +6,8 @@ code:
   - scripts/todo-claims.mjs
   - scripts/todo-brief.mjs
   - scripts/pr-merge.mjs
+  - scripts/todo-owner.mjs
+  - scripts/todo-hook.mjs
   - .claude/skills/todo/SKILL.md
 ---
 # ADR 0006 — Điều phối nhiều phiên: sổ sự kiện chung, master tuỳ chọn
@@ -51,11 +53,19 @@ code:
 
 ## Giới hạn đã biết
 
-- **Vùng file do agent tự khai** (`claim --areas`) nên có thể quên. Tính vùng từ diff thật của nhánh cần biết đúng worktree của việc, mà sổ hiện ghi `cwd` của phiên (luôn là thư mục chính). Cả hai thuộc **T-020**, làm sau việc này.
+- **Vùng file do agent tự khai** (`claim --areas`) nên có thể quên. Nhật ký sửa file tự động và hỏi khi sửa trùng file: **T-023**.
 - **Master nhận tin thụ động:** `note --to master` chỉ hiện ở lượt kế user nhắn vào chat master; `SendMessage` của app chỉ tới được phiên do master mở.
 - **Ghi đồng thời:** `todo-claims.json` đọc–sửa–ghi đè, hai hook chạy cùng lúc có thể mất một cập nhật (có từ trước). Sổ sự kiện chỉ append nên không mất; con trỏ mất thì một sự kiện báo hai lần.
 - Merge thấy chậm tới khi có phiên `git fetch`; commit đẩy thẳng lên `main` (không có `(#n)`) không thành sự kiện — `main-guard.yml` lo.
 - Lâu dài: khi lõi TS ở khay có event log (ADR 0002, T-007/T-019), sổ này chuyển vào đó và Studio hiện bảng.
+
+## Chủ worktree theo chat (T-020)
+
+- **Chat ≠ phiên.** App mở lại chat thì tạo mã phiên mới nhưng chép lịch sử giữ nguyên `uuid` tin nhắn → mã chat = `uuid` tin đầu trong transcript (`scripts/todo-owner.mjs` → `chatIdFromTranscript`). Đây là định dạng nội bộ, docs không cam kết: đọc không được thì hook **hỏi** user. Fork chung lịch sử nhưng là chat mới: SessionStart `source: fork` → mã chat = mã phiên.
+- **Chủ worktree** `worktrees[<gốc>] = { chat, session, branch, lastSeen, state }`, ghi khi chat chạy lệnh git đổi trạng thái hoặc sửa file trong đó; thư mục chính không bao giờ có chủ.
+- **Hook PreToolUse(Bash|PowerShell)** với lệnh git đổi trạng thái trong worktree của chat khác: chủ hoạt động < 2 giờ → `deny`; im ≥ 2 giờ → `ask` (cho phép = chuyển chủ, chat cũ được báo). Lệnh chỉ đọc không bao giờ bị chặn. Hook đọc `.git` trên đĩa, không chạy `git`: ~200 ms/lần trên Windows (≈125 ms là khởi động Node). Lỗi hook → im lặng cho công cụ chạy.
+- **Worktree ở một chỗ:** `<repo chính>-worktrees/<tên>`, tạo bằng `todo-claims.mjs worktree`; SessionStart liệt kê thư mục thừa và hỏi user.
+- Giới hạn: chỉ kiểm lệnh của agent (lệnh user gõ ngoài Claude thì không); xác định thư mục lệnh từ `git -C` / `cd` / `Set-Location`, cách gọi git lạ hơn có thể lọt; docs không nói hook `ask` có còn hỏi ở chế độ Bypass permissions không (Auto thì có).
 
 ## Đã cân nhắc, bỏ
 
