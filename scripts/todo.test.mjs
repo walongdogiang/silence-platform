@@ -408,6 +408,12 @@ test("hook: pre trả deny/ask đúng khuôn docs; post ghi chủ; sửa file kh
   assert.equal(book.moved.A.to, "B");
   assert.deepEqual(gitTargets("git worktree remove D:/r/wt/T-1", "D:/r/main", deps), [{ op: "worktree remove", wt: "D:/r/wt/T-1" }]);
   void tr;
+  // Chủ ghi qua Write (không qua lệnh git) vẫn có nhánh
+  const b3 = emptyBook();
+  b3.sessions = { C: { chat: "c3" } };
+  handle("post", inp("C", { tool_name: "Write", tool_input: { file_path: "D:/r/wt/T-1/b.txt" } }), b3, deps, t0);
+  assert.equal(b3.worktrees["d:/r/wt/t-1"].chat, "c3");
+  assert.equal(b3.worktrees["d:/r/wt/t-1"].branch, "feat/T-1");
 });
 
 test("hook: JSON hỏng / thiếu session → exit 0, không in gì", async () => {

@@ -72,7 +72,7 @@ export function handle(kind, input, book, deps = realDeps, now = new Date()) {
     const file = input.tool_input?.file_path ?? input.tool_input?.notebook_path;
     if (!file) return { events };
     const wt = deps.toplevelOf(path.dirname(file));
-    if (wt && wtKey(wt) !== wtKey(deps.mainRootOf(wt))) setOwner(book, { session, wt }, now); // không cướp chủ: phần cảnh báo sửa trùng là việc sau
+    if (wt && wtKey(wt) !== wtKey(deps.mainRootOf(wt))) setOwner(book, { session, wt, branch: deps.branchOf(wt) }, now); // không cướp chủ: phần cảnh báo sửa trùng là việc sau
   }
   return { events };
 }
