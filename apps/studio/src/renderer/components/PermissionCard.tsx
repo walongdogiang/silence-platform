@@ -1,18 +1,31 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileCode2, FilePen, FilePlus2, Globe, Info, MessageSquare, Plug, SquareTerminal, Wrench, type LucideIcon } from "lucide-react";
+import type { ReactNode, RefObject } from "react";
 import { diffHunks, summarizeDiff } from "../diffSummary";
 import { useRiskText, useT, type T } from "../i18n";
 import type { Perm } from "../models";
-import { alwaysAllowText, permEscalation, permHosts, permKeyAction, permLayout, type PermScope, scopeHint, scopeLabels, tierBadge } from "../permissionUi";
-import { languageFor, useTokens } from "../syntax";
+import {
+  alwaysAllowText,
+  permEscalation,
+  permHosts,
+  permKeyAction,
+  permLayout,
+  permMarks,
+  scopeHint,
+  scopeLabels,
+  tierBadge,
+  type PermMark,
+  type PermScope,
+} from "../permissionUi";
+import { languageFor, useTokens, type Tok } from "../syntax";
 import type { FilePreview, PermAnswer, RiskLevel } from "../types";
 import { DiffTable, TokenLine } from "./CodeView";
 import { DiffStat, splitPath } from "./DiffCard";
 
 /**
  * Permission card docked above the composer (docs/frontend/chat.md "Card xin quyền"). TS core cards
- * (`risk.level`): full card (B) or one line (C, `permLayout`). Rust Engine cards keep the old layout
- * (tier badge, escalation, hosts, session/workspace scopes).
+ * (`risk.level`): full card (B) or one line (C, `permLayout`), dangerous pieces marked (`permMarks`).
+ * Rust Engine cards keep the old layout (tier badge, escalation, hosts, session/workspace scopes).
  */
 export function PermissionCard(props: {
   perm: Perm;
@@ -40,7 +53,7 @@ export const CMD_LINES = 6;
  * Real call text: the command, or the tool input as JSON. Approval is based on this, never on model
  * text. Long commands show `CMD_LINES` lines, then "Show all" (nothing is hidden for good).
  */
-function CallText(props: { perm: Perm }) {
+function CallText(props: { perm: Perm; markTitle?: (m: PermMark) => string }) {
   const t = useT();
   const c = command(props.perm);
   const isCmd = typeof c === "string";
@@ -48,6 +61,12 @@ function CallText(props: { perm: Perm }) {
   const lang = !isCmd ? "json" : /powershell|pwsh/i.test(props.perm.name) ? "powershell" : "shell";
   const tokens = useTokens(text, lang);
   const lines = text.split("\n");
+  const marks = isCmd && props.markTitle ? permMarks(text, props.perm.risk) : [];
+  const starts: number[] = [];
+  lines.reduce((pos, l) => {
+    starts.push(pos);
+    return pos + l.length + 1;
+  }, 0);
   const [all, setAll] = useState(false);
   const long = isCmd && (lines.length > CMD_LINES || text.length > CMD_LINES * 90);
   return (
@@ -57,7 +76,7 @@ function CallText(props: { perm: Perm }) {
           {isCmd ? <span className="perm-prompt">$ </span> : null}
           {lines.map((l, i) => (
             <Fragment key={i}>
-              <TokenLine text={l} tokens={tokens?.[i]} />
+              <MarkedLine text={l} tokens={tokens?.[i]} marks={lineMarks(marks, starts[i]!, l.length)} markTitle={props.markTitle ?? (() => "")} />
               {i < lines.length - 1 ? "\n" : null}
             </Fragment>
           ))}
@@ -69,6 +88,134 @@ function CallText(props: { perm: Perm }) {
         </button>
       ) : null}
     </>
+  );
+}
+
+/** Marks of one line, moved to the line's own offsets (a mark may span lines). */
+function lineMarks(marks: PermMark[], start: number, length: number): PermMark[] {
+  return marks
+    .filter((m) => m.end > start && m.start < start + length)
+    .map((m) => ({ ...m, start: Math.max(0, m.start - start), end: Math.min(length, m.end - start) }));
+}
+
+/** A line of the command with syntax colours, cut at mark edges; marked pieces sit in `<mark>`. */
+function MarkedLine(props: { text: string; tokens?: Tok[] | null; marks: PermMark[]; markTitle: (m: PermMark) => string }) {
+  if (!props.marks.length) return <TokenLine text={props.text} tokens={props.tokens} />;
+  const toks = props.tokens ?? [{ text: props.text, cls: "" }];
+  const out: ReactNode[] = [];
+  let pos = 0;
+  toks.forEach((tok, i) => {
+    const s = pos;
+    const e = pos + tok.text.length;
+    pos = e;
+    if (!tok.text) return;
+    const cuts = [s, e, ...props.marks.flatMap((m) => [m.start, m.end]).filter((x) => x > s && x < e)].sort((a, b) => a - b);
+    const parts: ReactNode[] = [];
+    for (let k = 0; k < cuts.length - 1; k++) {
+      const a = cuts[k]!;
+      const b = cuts[k + 1]!;
+      if (a === b) continue;
+      const piece = tok.text.slice(a - s, b - s);
+      const m = props.marks.find((x) => x.start <= a && b <= x.end);
+      parts.push(
+        m ? (
+          <mark key={k} className={`perm-mark perm-mark-${m.level}`} title={props.markTitle(m) || undefined}>
+            {piece}
+          </mark>
+        ) : (
+          piece
+        ),
+      );
+    }
+    out.push(
+      <span key={i} className={tok.cls || undefined}>
+        {parts}
+      </span>,
+    );
+  });
+  return <>{out}</>;
+}
+
+/**
+ * The card takes focus when it shows (not the Allow button, so a stray Enter in flight does nothing
+ * twice). Esc denies while focus is on the card or nowhere in particular, never while typing elsewhere.
+ */
+function useCardFocus(cardRef: RefObject<HTMLDivElement>, id: string, busy: boolean, onEscape: () => void) {
+  const esc = useRef(onEscape);
+  esc.current = onEscape;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  useEffect(() => {
+    cardRef.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || busyRef.current) return;
+      const at = document.activeElement;
+      if (at && at !== document.body && !cardRef.current?.contains(at)) return;
+      e.preventDefault();
+      esc.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [id, cardRef]);
+}
+
+/** Target of a key on the card: typing somewhere, or a focused button that handles its own Enter. */
+function keyTarget(e: React.KeyboardEvent) {
+  const el = e.target as HTMLElement;
+  return {
+    inText: Boolean(el.closest("input, textarea, [contenteditable='true']")),
+    onButton: el instanceof HTMLButtonElement,
+    mods: e.altKey || e.ctrlKey || e.metaKey,
+  };
+}
+
+/** Split Allow button: the label allows once, ▾ opens the scope menu (left-aligned, opens upward). */
+function AllowSplit(props: {
+  label: string;
+  enterHint: boolean;
+  busy: boolean;
+  onOnce: () => void;
+  menu: ReactNode | null;
+  open: boolean;
+  setOpen: (f: (v: boolean) => boolean) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="perm-split">
+      <button type="button" className="perm-btn perm-allow" disabled={props.busy} onClick={props.onOnce}>
+        {props.label}
+        {props.enterHint ? <kbd>Enter</kbd> : null}
+      </button>
+      {props.menu ? (
+        <button
+          type="button"
+          className="perm-btn perm-allow perm-caret"
+          disabled={props.busy}
+          aria-label={t("perm.scopeMenu")}
+          aria-haspopup="menu"
+          aria-expanded={props.open}
+          onClick={() => props.setOpen((v) => !v)}
+        >
+          <ChevronDown size={14} />
+        </button>
+      ) : null}
+      {props.open && props.menu ? (
+        <div className="perm-scope-menu" role="menu">
+          {props.menu}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One-line command for the compact card, with the same marks as the full card. */
+function CompactCmd(props: { perm: Perm; markTitle: (m: PermMark) => string }) {
+  const cmd = String(command(props.perm) ?? "");
+  const marks = permMarks(cmd, props.perm.risk);
+  return (
+    <code className="perm-cmd1" title={cmd}>
+      {marks.length ? <MarkedLine text={cmd} marks={marks} markTitle={props.markTitle} /> : cmd}
+    </code>
   );
 }
 
@@ -219,85 +366,51 @@ function CoreCard(props: {
   const [json, setJson] = useState(false);
   const [menu, setMenu] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
-  const answer = useRef(props.onAnswer);
-  answer.current = props.onAnswer;
-  const busy = useRef(props.busy);
-  busy.current = props.busy;
   const Icon = headIcon(props.perm);
   const title = props.perm.preview ? permHead(props.perm, t) : (first?.title ?? permHead(props.perm, t));
   const tool = risk.source && risk.source !== "agent" ? `${props.perm.name} · ${t(`perm.source.${risk.source}`)}` : props.perm.name;
   const more = shown.slice(1);
   const safer = shown.map((c) => reason(c).safer).filter((x): x is string => Boolean(x));
+  const markTitle = (m: PermMark) => m.codes.map((c) => reason(c).title).join(" · ");
 
-  // The card takes focus when it shows (not the Allow button, so a stray Enter in flight does nothing
-  // twice). Esc denies while focus is on the card or nowhere in particular, never while typing elsewhere.
-  useEffect(() => {
-    setMenu(false);
-    cardRef.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || busy.current) return;
-      const at = document.activeElement;
-      if (at && at !== document.body && !cardRef.current?.contains(at)) return;
-      e.preventDefault();
-      answer.current("deny");
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [props.perm.request_id]);
+  useEffect(() => setMenu(false), [props.perm.request_id]);
+  useCardFocus(cardRef, props.perm.request_id, props.busy, () => props.onAnswer("deny"));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") return; // the document listener above denies
-    const el = e.target as HTMLElement;
-    const a = permKeyAction(e.key, {
-      level: props.level,
-      hasRule: Boolean(risk.allow_rule),
-      inText: Boolean(el.closest("input, textarea, [contenteditable='true']")),
-      onButton: el instanceof HTMLButtonElement,
-      busy: busy.current,
-      mods: e.altKey || e.ctrlKey || e.metaKey,
-    });
+    if (e.key === "Escape") return; // useCardFocus denies
+    const a = permKeyAction(e.key, { level: props.level, hasRule: Boolean(risk.allow_rule), busy: props.busy, ...keyTarget(e) });
     if (!a) return;
     e.preventDefault();
     props.onAnswer(a);
   };
 
   const allow = (
-    <div className="perm-split">
-      <button type="button" className="perm-btn perm-allow" disabled={props.busy} onClick={() => props.onAnswer("allow_once")}>
-        {t("perm.allowOnce")}
-        {!red && !compact ? <kbd>Enter</kbd> : null}
-      </button>
-      {risk.allow_rule ? (
-        <button
-          type="button"
-          className="perm-btn perm-allow perm-caret"
-          disabled={props.busy}
-          aria-label={t("perm.scopeMenu")}
-          aria-haspopup="menu"
-          aria-expanded={menu}
-          onClick={() => setMenu((v) => !v)}
-        >
-          <ChevronDown size={14} />
-        </button>
-      ) : null}
-      {menu && risk.allow_rule ? (
-        <div className="perm-scope-menu" role="menu">
-          <button type="button" role="menuitem" onClick={() => props.onAnswer("allow_once")}>
-            {t("perm.scope.once")}
-            <kbd>1</kbd>
-          </button>
-          <button type="button" role="menuitem" title={risk.allow_rule} onClick={() => props.onAnswer("allow_always")}>
-            {alwaysAllowText(risk.allow_rule, t)}
-            <kbd>2</kbd>
-          </button>
-          <p className="perm-scope-hint">{scopeHint(risk, t)}</p>
-        </div>
-      ) : null}
-    </div>
+    <AllowSplit
+      label={t("perm.allowOnce")}
+      enterHint={!red && !compact}
+      busy={props.busy}
+      onOnce={() => props.onAnswer("allow_once")}
+      open={menu}
+      setOpen={setMenu}
+      menu={
+        risk.allow_rule ? (
+          <>
+            <button type="button" role="menuitem" onClick={() => props.onAnswer("allow_once")}>
+              {t("perm.scope.once")}
+              <kbd>1</kbd>
+            </button>
+            <button type="button" role="menuitem" title={risk.allow_rule} onClick={() => props.onAnswer("allow_always")}>
+              {alwaysAllowText(risk.allow_rule, t)}
+              <kbd>2</kbd>
+            </button>
+            <p className="perm-scope-hint">{scopeHint(risk, t)}</p>
+          </>
+        ) : null
+      }
+    />
   );
 
   if (compact) {
-    const cmd = String(command(props.perm) ?? "");
     return (
       <div
         ref={cardRef}
@@ -308,14 +421,12 @@ function CoreCard(props: {
         aria-label={t("perm.cardLabel")}
       >
         <Icon size={15} className="perm-icon" aria-hidden />
-        <code className="perm-cmd1" title={cmd}>
-          {cmd}
-        </code>
+        <CompactCmd perm={props.perm} markTitle={markTitle} />
         {first ? <span className="perm-why1">{first.title}</span> : null}
+        {allow}
         <button type="button" className="perm-btn perm-ghost" disabled={props.busy} title="Esc" onClick={() => props.onAnswer("deny")}>
           {t("perm.deny")}
         </button>
-        {allow}
         <button type="button" className="perm-btn perm-ghost perm-icon-btn" aria-label={t("perm.expand")} title={t("perm.expand")} onClick={() => setExpanded(true)}>
           <ChevronUp size={15} />
         </button>
@@ -350,7 +461,7 @@ function CoreCard(props: {
           ) : isMcp && !json ? (
             <ParamTable input={props.perm.input} />
           ) : (
-            <CallText perm={props.perm} />
+            <CallText perm={props.perm} markTitle={markTitle} />
           )}
         </div>
         {first ? (
@@ -390,23 +501,23 @@ function CoreCard(props: {
         <SendError show={props.error} />
       </div>
       <footer className="perm-foot">
+        {allow}
+        <button type="button" className="perm-btn perm-deny" disabled={props.busy} onClick={() => props.onAnswer("deny")}>
+          {t("perm.deny")}
+          <kbd>Esc</kbd>
+        </button>
         {props.onDenyNote ? (
           <button type="button" className="perm-btn perm-ghost" disabled={props.busy} onClick={props.onDenyNote}>
             <MessageSquare size={14} aria-hidden />
             {t("perm.denyNote")}
           </button>
         ) : null}
+        <span className="perm-spacer" />
         {isMcp ? (
           <button type="button" className="perm-btn perm-ghost" onClick={() => setJson((v) => !v)}>
             {json ? t("perm.table") : "JSON"}
           </button>
         ) : null}
-        <span className="perm-spacer" />
-        <button type="button" className="perm-btn perm-deny" disabled={props.busy} onClick={() => props.onAnswer("deny")}>
-          {t("perm.deny")}
-          <kbd>Esc</kbd>
-        </button>
-        {allow}
       </footer>
     </div>
   );

@@ -1506,7 +1506,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .perm-mode span { display: flex; flex-direction: column; gap: 2px; }
 .perm-mode strong { font-size: var(--font-size-base); }
 .perm-mode em { font-style: normal; font-size: var(--font-size-sm); color: var(--text-secondary); }
-/* Card xin quyền: badge tầng + hàng nút có thể xuống dòng khi nhãn dài. */
+/* Rust Engine permission card (old layout, Engine frozen): tier badge + a button row that may wrap. */
 .perm-card h4 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .perm-tier {
   flex: none;
@@ -1520,31 +1520,46 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .perm-tier.logged, .perm-tier.auto { background: var(--surface-2); color: var(--text-secondary); }
 .perm-tier.block { background: color-mix(in srgb, var(--error) 16%, transparent); color: var(--error); }
 .perm-actions { flex-wrap: wrap; }
-/* TS core permission card (docs/frontend/chat.md "Card xin quyền"): docked above the composer,
-   full card (B) or one line (C). Primary = inverted text colour (white on dark, near-black on light). */
+/* TS core permission card (docs/frontend/chat.md "Card xin quyền"): docked above the composer, full card (B)
+   or one line (C). The Rust Engine card gets the shared frame only. 3px left edge in the level colour
+   (`--perm-c`); primary = copper accent. */
 .perm-dock { flex: none; max-width: 760px; width: calc(100% - 24px); margin: 8px auto 0; }
 .perm-card {
+  --perm-c: var(--border-strong);
   position: relative;
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border: 1px solid var(--border-ui);
+  border-left: 3px solid var(--perm-c);
+  border-radius: 0 12px 12px 0;
   background: var(--surface-1);
   outline: none;
 }
-.perm-card.perm-level-caution { border-color: color-mix(in srgb, var(--warning) 40%, var(--border-subtle)); }
-.perm-card.perm-level-danger,
-.perm-card.perm-level-hard_block { border-color: color-mix(in srgb, var(--error) 50%, var(--border-subtle)); }
+.perm-level-safe { --perm-c: var(--success); }
+.perm-level-caution { --perm-c: var(--warning); }
+.perm-level-danger, .perm-level-hard_block { --perm-c: var(--error); }
 .perm-card:focus-visible { box-shadow: 0 0 0 1px var(--text-muted); }
-.perm-icon { flex: none; color: var(--text-secondary); }
-.perm-level-caution .perm-icon { color: var(--warning); }
-.perm-level-danger .perm-icon, .perm-level-hard_block .perm-icon { color: var(--error); }
-.perm-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border-subtle); border-radius: 12px 12px 0 0; }
+.perm-icon { flex: none; color: var(--perm-c); }
+.perm-level-safe .perm-icon { color: var(--text-secondary); }
+.perm-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border-subtle); border-radius: 0 12px 0 0; }
 .perm-card .perm-head h4 { margin: 0; flex: 1; min-width: 0; font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.perm-risk { flex: none; font-size: var(--font-size-sm); color: var(--text-muted); white-space: nowrap; }
-.perm-risk::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--success); }
-.perm-risk-caution { color: var(--warning); }
-.perm-risk-caution::before { background: var(--warning); }
-.perm-risk-danger, .perm-risk-hard_block { color: var(--error); }
-.perm-risk-danger::before, .perm-risk-hard_block::before { background: var(--error); }
+.perm-risk {
+  --risk-c: var(--success);
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--risk-c) 14%, transparent);
+  /* Status colours are the same in every theme: mix with the text colour so light themes stay legible. */
+  color: color-mix(in srgb, var(--risk-c) 70%, var(--text-primary));
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+.perm-risk-caution { --risk-c: var(--warning); }
+.perm-risk-danger, .perm-risk-hard_block { --risk-c: var(--error); }
+/* Pieces of the real command the core / Engine flagged (`permMarks`): segments and unknown hosts. */
+.perm-mark { --mark-c: var(--warning); border-radius: 3px; padding: 0 1px; background: color-mix(in srgb, var(--mark-c) 18%, transparent); color: color-mix(in srgb, var(--mark-c) 70%, var(--text-primary)); }
+.perm-mark-danger { --mark-c: var(--error); }
+.perm-mark-net { --mark-c: var(--info); }
+.perm-mark span, .perm-mark * { color: inherit; }
 .perm-tool { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--text-muted); }
 .perm-main { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 4px; }
 .perm-card .perm-countdown { margin: 0; }
@@ -1591,15 +1606,15 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .perm-btn:disabled { opacity: 0.45; cursor: default; }
 .perm-btn.perm-ghost { background: transparent; color: var(--text-secondary); }
 .perm-btn.perm-ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text-primary); }
-.perm-btn.perm-allow { background: var(--text-primary); color: var(--surface-1); font-weight: var(--font-weight-semibold); }
-.perm-btn.perm-allow:hover:not(:disabled) { background: color-mix(in srgb, var(--text-primary) 88%, var(--surface-1)); }
+.perm-btn.perm-allow { background: var(--accent); color: var(--on-accent); font-weight: var(--font-weight-semibold); }
+.perm-btn.perm-allow:hover:not(:disabled) { background: var(--accent-hover); }
 .perm-btn kbd { font: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 4px; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); opacity: 0.8; }
 .perm-split { position: relative; display: inline-flex; }
 .perm-split > .perm-allow:not(:only-of-type):first-child { border-radius: 8px 0 0 8px; }
-.perm-split > .perm-caret { border-radius: 0 8px 8px 0; padding: 0 7px; margin-left: 1px; }
+.perm-split > .perm-caret { border-radius: 0 8px 8px 0; padding: 0 7px; box-shadow: inset 1px 0 0 color-mix(in srgb, var(--on-accent) 30%, transparent); }
 .perm-scope-menu {
   position: absolute;
-  right: 0;
+  left: 0;
   bottom: calc(100% + 6px);
   z-index: 20;
   min-width: 320px;
@@ -1609,11 +1624,14 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   background: var(--surface-3);
   box-shadow: 0 10px 28px color-mix(in srgb, #000 40%, transparent);
 }
-.perm-scope-menu button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-primary); font-size: var(--font-size-base); text-align: left; cursor: pointer; }
+.perm-scope-menu { width: max-content; max-width: min(460px, calc(100vw - 32px)); }
+.perm-scope-menu button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 5px 10px; line-height: 1.35; border: 0; border-radius: 6px; background: transparent; color: var(--text-primary); font-size: var(--font-size-base); text-align: left; cursor: pointer; }
 .perm-scope-menu button:hover { background: var(--surface-hover); }
 .perm-scope-menu kbd { font: inherit; font-size: 11px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-ui); color: var(--text-muted); }
 .perm-scope-hint { margin: 2px 10px 4px; font-size: var(--font-size-sm); color: var(--text-muted); }
-.perm-compact { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 12px; border-radius: 10px; }
+.perm-compact { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 12px; border-radius: 0 10px 10px 0; }
+/* On the one-line card the split button sits near the right edge: open the menu from its right. */
+.perm-compact .perm-scope-menu { left: auto; right: 0; }
 .perm-cmd1 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12.5px var(--mono); color: var(--text-primary); }
 .perm-why1 { flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); color: var(--text-muted); }
 .perm-icon-btn { padding: 0 8px; }
