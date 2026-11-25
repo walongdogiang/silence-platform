@@ -8,7 +8,8 @@ name: ci
 # `ci-ok` gom kết quả: đỏ nếu job nào hỏng hoặc bị huỷ, xanh nếu còn lại là success/skipped.
 # `main-guard` coi `skipped` là đạt (scripts/main-guard.mjs).
 # Không dùng paths-ignore ở cấp workflow: PR chỉ đổi docs/*.md vẫn chạy để luôn có `ci-ok`
-# (scripts/pr-merge.mjs cần nó); job `studio` khi đó là skipped (bộ lọc `code`).
+# (scripts/pr-merge.mjs cần nó); job `studio` khi đó là skipped (bộ lọc `code`), trừ khi đụng
+# file docs mà test TS đọc (bộ lọc `studio_docs`).
 
 on:
   pull_request:
@@ -31,6 +32,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      studio_docs: ${{ steps.filter.outputs.studio_docs }}
       code: ${{ steps.code.outputs.code }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +51,10 @@ jobs:
               - "evals/**"
               - "docs/security/risk-catalog.md"
               - ".github/workflows/ci.yml"
+            # File trong docs/ hoặc *.md mà test TS đọc: bộ lọc `code` bỏ qua chúng nên phải liệt kê ở đây.
+            # risk-catalog.md: packages/core/src/risk/risk.test.ts.
+            studio_docs:
+              - "docs/security/risk-catalog.md"
       # `code`: có file nào ngoài docs/ và *.md không (every = file phải khớp mọi mẫu).
       - uses: dorny/paths-filter@v3
         id: code
@@ -76,7 +82,7 @@ jobs:
   studio:
     name: studio (core + tsc + vitest)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.studio_docs == 'true'
     runs-on: windows-latest
     env:
       # Không cần binary Electron để type-check và chạy vitest.
