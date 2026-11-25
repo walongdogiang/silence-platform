@@ -7,17 +7,13 @@ name: ci
 # Rust build hoặc test đọc (bộ lọc `rust` ở job `changes`). PR chỉ đổi TS/Studio thì `engine` = skipped.
 # `ci-ok` gom kết quả: đỏ nếu job nào hỏng hoặc bị huỷ, xanh nếu còn lại là success/skipped.
 # `main-guard` coi `skipped` là đạt (scripts/main-guard.mjs).
+# Không dùng paths-ignore ở cấp workflow: PR chỉ đổi docs/*.md vẫn chạy để luôn có `ci-ok`
+# (scripts/pr-merge.mjs cần nó); job `studio` khi đó là skipped (bộ lọc `code`).
 
 on:
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -35,6 +31,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      code: ${{ steps.code.outputs.code }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -52,6 +49,16 @@ jobs:
               - "evals/**"
               - "docs/security/risk-catalog.md"
               - ".github/workflows/ci.yml"
+      # `code`: có file nào ngoài docs/ và *.md không (every = file phải khớp mọi mẫu).
+      - uses: dorny/paths-filter@v3
+        id: code
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - "**"
+              - "!docs/**"
+              - "!**/*.md"
 
   engine:
     name: engine (cargo test)
@@ -68,6 +75,8 @@ jobs:
 
   studio:
     name: studio (core + tsc + vitest)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     env:
       # Không cần binary Electron để type-check và chạy vitest.
