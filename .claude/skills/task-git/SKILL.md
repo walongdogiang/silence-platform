@@ -22,13 +22,17 @@ Chính sách gốc: mục **Tự chủ** trong `AGENTS.md`. Ngưỡng và đư�
 | Mở PR | Ngay sau push đầu | Mở PR cho việc chưa xong |
 | Merge | `pr-merge.mjs` exit 0 | Gọi `gh pr merge` trực tiếp; bật auto-merge GitHub |
 
-Việc không có `T-xxx` (user nhờ trong chat): tạo việc qua skill `todo`, lấy cổng duyệt làm tiêu chí "xong". Không có cổng duyệt thì không tự commit.
+Việc không có `T-xxx` (user nhờ trong chat):
+- **Nhỏ** (trong ngưỡng `maxFilesAutoMerge` / `maxLinesAutoMerge`, không đụng `highRiskPaths`): câu nhờ của user = đồng ý. Xong và check xanh thì tự commit, push, PR, merge; báo bằng thẻ Báo xong.
+- **Lớn hoặc đụng `highRiskPaths`**: hỏi **một lần ở đầu** kèm phạm vi (hoặc tạo việc qua skill `todo`). Merge PR rủi ro cao vẫn cần user duyệt (exit 2).
+- Lỗi trong code chính chat này vừa merge: sửa luôn như việc nhỏ. Lỗi ở chỗ khác: đề xuất thêm vào Later, không tự sửa.
+- File do chính việc kéo theo (mục lục `docs/README.md`, `docs/codemap.md`, test của file vừa sửa) thuộc phạm vi việc, không cần hỏi.
 
 ## Worktree
 - Không đổi nhánh, pull hay stash ở thư mục chính của repo; nơi đó là của user.
 - **Mỗi việc một worktree mới**, tạo bằng `node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <type>/<T-xxx-slug> --session <id>`: nằm ở thư mục chung `<repo chính>-worktrees\<tên>` (vd `D:\vuhieu\5ilence-worktrees\T-020`), từ `origin/main` mới fetch, không theo dõi `main`, chat này thành chủ. Rồi `npm install` nếu cần. Không dùng lại worktree có sẵn, không tự đặt chỗ khác.
 - Chủ worktree tính theo **chat** (T-020, ADR 0006). Hook chặn `commit`/`push`/`switch`/`checkout`/`reset`/`rebase`/`merge`/`stash`/`pull`/`worktree remove` trong worktree của chat khác còn hoạt động (< 2 giờ), và hỏi user khi chat đó im ≥ 2 giờ. Bị chặn → tạo worktree riêng; **không lách** (đổi thư mục, gọi git kiểu khác). Lệnh chỉ đọc không bị chặn.
-- Xong việc (sau merge): `git worktree remove <thư-mục>` rồi xoá nhánh cục bộ. Đầu phiên có dòng "Thư mục worktree có thể dọn" → hỏi user từng cái, không tự xoá.
+- Xong việc (sau merge): `git worktree remove <thư-mục>` rồi xoá nhánh cục bộ. Đầu phiên có dòng "Thư mục worktree có thể dọn" → kiểm từng thư mục rồi hỏi một lần bằng thẻ **Dọn worktree** (skill `todo` → `cards.md` → 3), kèm đánh giá vì sao xoá/giữ; chỉ xoá đúng thư mục user chọn.
 
 ## Commit
 1. `git diff --stat`: chỉ file thuộc việc; không `.env`/secrets/`node_modules`.
@@ -40,7 +44,7 @@ Việc không có `T-xxx` (user nhờ trong chat): tạo việc qua skill `todo`
 - `gh pr create --base main` (mô tả qua `--body-file`): tiêu đề Conventional Commits; mô tả gồm `T-xxx`, tiêu chí đã đạt, cách đã kiểm (lệnh + kết quả), phần chưa chạy.
 - Sau khi mở: `mcp__ccd_pr__get_status`, chưa gắn thì `bind_pr`. Không tự poll CI.
 - Ghi vào sổ chung (ADR 0006): `node scripts/todo-claims.mjs event pr_opened --pr <n> --session <id>`.
-- Đề nghị user bật Auto-fix cho PR, để app đánh thức agent khi CI có kết quả. Không bật thì bước merge diễn ra ở lượt kế tiếp user nhắn; nói rõ điều đó trong tin cuối.
+- Không đề nghị bật Auto-fix: app chỉ đánh thức agent khi CI đỏ / xung đột / review comment, không khi CI xanh. Báo một dòng: "PR #n đang chờ CI; lần tới bạn nhắn, mình merge." User tự bật Auto-fix khi muốn agent tự sửa CI đỏ.
 
 ## CI đỏ
 - Đọc log job hỏng, sửa trong phạm vi việc, commit + push cùng nhánh. Tối đa `maxCiFixAttempts` lần, quá thì **hỏi user** và ghi `event ci_red --pr <n>`.
@@ -55,6 +59,11 @@ Chỉ bằng `node scripts/pr-merge.mjs <số-PR> --session <id>` (thêm `--dry-
 ## Sau merge
 - Worktree về `git switch --detach origin/main` (sau `git fetch`), xoá nhánh cục bộ.
 - `node scripts/todo-claims.mjs release T-xxx` (việc đã đóng trong PR, không sửa `todo/` sau merge).
+
+## Khi nào nhắc user về git/GitHub
+Một việc, tối đa một lần hỏi: user đồng ý việc (cổng duyệt, hoặc câu nhờ cho việc nhỏ) = đồng ý cả commit, push, PR, sửa CI, merge.
+- Được nhắc (một dòng mỗi chuyện): việc chỉ user làm được (pull thư mục chính khi hook/settings/skill vừa đổi; kiểm tay tiêu chí `(user)`; đóng chat giữ worktree); exit 2; CI đỏ quá `maxCiFixAttempts`; xung đột khó; phải đổi phạm vi.
+- Không bao giờ: gợi ý commit giữa chừng hay "lưu tạm"; hỏi "commit / mở PR nhé?" cho việc đã được đồng ý; hỏi lại câu user đã bỏ qua; nhắc pull sau merge code thường; đề nghị bật Auto-fix.
 
 ## Luôn hỏi / không bao giờ
 - Hỏi: amend/force-push commit đã push, tag, release, xung đột merge không tầm thường, nghi ngờ phạm vi, đụng thư mục chính.

@@ -39,7 +39,8 @@ Dạng dòng trong mục lục:
 - Không tự xếp lại Next, không tự chuyển việc giữa các nhóm, không tự thêm/đóng việc khi user chưa nói: đề xuất kèm lý do rồi chờ user chọn rõ (AGENTS.md → Tự chủ).
 - Mã `T-xxx` cố định, không dùng lại. Thứ tự ưu tiên là **vị trí** trong Next.
 - File task link tới docs/ADR/backlog, không chép lại nội dung.
-- Sửa `todo/` theo quy trình Git của repo. Thay đổi `todo/` của một việc (chuyển sang Now, tick, đóng) đi **trong PR của chính việc đó**; chỉ thêm/xếp việc mà không làm thì mới cần PR `chore/todo-…` riêng.
+- Sửa `todo/` theo quy trình Git của repo. Thay đổi `todo/` của một việc (chuyển sang Now, tick, đóng) đi **trong PR của chính việc đó**; chỉ thêm/xếp việc (không làm ngay): chat đang làm một việc → gom vào PR của việc đó; chat không làm việc nào → PR `chore/todo-…` riêng, tự merge khi CI xanh, báo một dòng.
+- Trình bày cho user (việc tiếp theo, review đóng việc, dọn worktree, báo xong) theo **thẻ** trong [`cards.md`](cards.md): cùng khung, cùng thứ tự mục.
 
 ## Bảng
 
@@ -62,7 +63,7 @@ LATER 13 việc · IDEAS 1
 
 1. Phiên này đang giữ một việc (hook ghi "phiên này đang giữ") → đó là việc đang dở: mở file, đọc **Nhật ký** (mục mới nhất trước), **Kế hoạch**, **Tiêu chí xong**; nói đang ở đâu và bước kế, rồi làm tiếp.
 2. Việc ở Now do phiên khác giữ → chỉ báo (chat nào, hoạt động lúc nào), không đụng.
-3. Còn chỗ ở Now → việc **đầu tiên trong Next** không bị `blocked-by` mã còn trong mục lục. Tóm tắt mục tiêu, cỡ việc và model gợi ý. Hỏi user có bắt đầu không.
+3. Còn chỗ ở Now → việc **đầu tiên trong Next** không bị `blocked-by` mã còn trong mục lục. Trình bày bằng **Thẻ việc** (`cards.md` → 1) rồi hỏi user có bắt đầu không; chưa có "bắt đầu" thì không làm.
 4. Next trống → đề xuất 1–3 việc từ Later kèm lý do; không tự chuyển.
 
 ## Bắt đầu việc
@@ -205,20 +206,22 @@ Thêm vào cuối **Nhật ký**, cập nhật `updated`. Chỉ ghi điều mà 
 
 1. Lấy mã bằng `node scripts/todo-claims.mjs reserve-id --session <id>` (chạy trong worktree của nhánh; giữ chỗ trong sổ chung nên hai phiên không trùng mã), rồi ghi bộ đếm `Mã tiếp theo` như script in ra. Không tự đọc bộ đếm trong README: thư mục có thể đang sau `main`.
 2. Việc cần hơn ~5 dòng → tạo `todo/tasks/T-xxx-slug.md` từ mẫu, chỉ điền frontmatter + Mục tiêu + Phạm vi; slug ngắn, tiếng Anh không dấu. Việc nhỏ → chỉ một dòng.
-3. Mặc định thêm vào **Later**. Thấy nên vào **Next** → đề xuất vị trí và lý do; chỉ chuyển khi user đồng ý. Ý tưởng chưa chắc → **Ideas**.
+3. Mặc định thêm vào **Later**. Thấy nên vào **Next** → một dòng gợi ý vị trí và lý do, không đặt câu hỏi; chỉ chuyển khi user nói. Ý tưởng chưa chắc → **Ideas**.
 4. Ghi `blocked-by:` (trong dòng) và `depends:` (trong file) nếu phụ thuộc việc khác. Điền `model:` (mục **Model**).
 5. Mục lấy từ backlog theo mảng (`docs/security/backlog.md`, …) thì link ngược về mục đó.
 
 ## Đóng việc
+
+User nói "xong" / "đóng" → trước tiên trình bày thẻ **Review đóng việc** (`cards.md` → 2): tiêu chí, còn dở, rủi ro nếu đóng, Phát sinh, kết luận nên/chưa nên đóng. Chỉ đóng khi user chọn. Luồng tự động sau cổng duyệt (mọi tiêu chí đã tick) không dừng hỏi; review gộp vào thẻ Báo xong.
 
 Làm **trong PR của việc**, trước khi merge, khi mọi tiêu chí (trừ `(user)`) đã tick:
 
 1. Xoá dòng khỏi `todo/README.md`.
 2. Thêm lên đầu `todo/DONE.md`: `YYYY-MM-DD · T-xxx Tên việc · PR #n · [chi tiết](tasks/archive/…)`.
 3. Đặt `status: done`, chuyển file vào `todo/tasks/archive/`.
-4. **Phát sinh** có mục → đề xuất thêm vào Later (cần user đồng ý; đồng ý thì thêm ngay trong PR này).
+4. **Phát sinh** có mục → đề xuất thêm vào Later, chờ user chọn (không tự thêm). User đã chọn trước merge → thêm ngay trong PR này; chọn sau merge → theo luật thêm/xếp việc ở **Nguyên tắc**.
 5. Commit, push, PR, merge theo skill `task-git` (merge chỉ qua `scripts/pr-merge.mjs`); rồi `node scripts/todo-claims.mjs release T-xxx`.
-6. Tin cuối: PR đã merge, danh sách kiểm `(user)` còn lại, việc vừa hết bị chặn, **Bảng** mới.
+6. Tin cuối: thẻ **Báo xong** (`cards.md` → 4) — PR đã merge, việc user cần làm (kiểm `(user)`, pull thư mục chính khi hook/settings/skill đổi), việc vừa hết bị chặn, Phát sinh chờ chọn. **Bảng** chỉ khi user hỏi.
 
 Việc không có PR (user nói xong) → bước 1–3 qua một PR `chore/todo-…`, rồi release.
 
