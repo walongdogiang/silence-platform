@@ -27,6 +27,7 @@ Mã tiếp theo: T-021
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
+- T-020 Quy tắc worktree: mỗi việc một worktree mới, không dùng lại worktree có sẵn · [chi tiết](tasks/T-020-worktree-per-task.md)
 - T-003 1.12 Pane xem dev server / URL · [chi tiết](tasks/T-003-browser-preview.md)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 - T-005 Ngôn ngữ đợt 3: phần còn lại của `docs/` sang tiếng Anh, một PR · blocked-by: T-004
@@ -49,7 +50,6 @@ Mã tiếp theo: T-021
 - T-016 4.3 Thông báo đẩy, duyệt lệnh rủi ro từ xa
 - T-017 4.4 Hướng dẫn `tailscale serve`
 - T-019 Bảng "Việc" trong Studio đọc `todo/` (Now/Next, tiến độ tiêu chí, PR/CI) — thay bảng chữ của `/todo`
-- T-020 Quy tắc worktree: mỗi việc một worktree mới, không dùng lại worktree có sẵn · [chi tiết](tasks/T-020-worktree-per-task.md)
 
 ## Ideas
 
