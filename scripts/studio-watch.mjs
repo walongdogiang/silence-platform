@@ -15,10 +15,20 @@ const exe = path.join(root, "target", "debug", isWin ? "silence-engine.exe" : "s
 const tag = "\x1b[36m[studio:watch]\x1b[0m";
 const log = (...a) => console.log(tag, ...a);
 
-function buildArgs() {
+/**
+ * Cargo/rustc can saturate every core for minutes; at normal priority that starves Electron and
+ * the Vite dev server and the window stays blank until the build ends. So the build runs at
+ * below-normal priority. On Windows only a process *created* with that class passes it on to its
+ * children (lowering our own priority or the child's afterwards does not reach cargo/rustc), hence
+ * `start /BELOWNORMAL`. `start /WAIT` only leaves the build's exit code in ERRORLEVEL, so
+ * `if errorlevel 1 exit 1` turns a failed build into a non-zero exit of the shell.
+ * Elsewhere `nice` does the same.
+ */
+function buildCommand() {
+  const bat = path.join(root, "scripts", "cargo-msvc.bat");
   return isWin
-    ? { cmd: path.join(root, "scripts", "cargo-msvc.bat"), args: ["build", "-p", "silence-engine"] }
-    : { cmd: "cargo", args: ["build", "-p", "silence-engine"] };
+    ? `start "" /BELOWNORMAL /B /WAIT cmd /d /c ""${bat}" build -p silence-engine" & if errorlevel 1 exit 1`
+    : "nice -n 10 cargo build -p silence-engine";
 }
 
 function touchStamp() {
@@ -28,8 +38,7 @@ function touchStamp() {
 
 function buildEngine() {
   return new Promise((resolve) => {
-    const { cmd, args } = buildArgs();
-    const p = spawn(cmd, args, { cwd: root, stdio: "inherit", shell: isWin });
+    const p = spawn(buildCommand(), { cwd: root, stdio: "inherit", shell: true });
     p.on("exit", (code) => resolve(code === 0));
     p.on("error", (err) => {
       console.error(tag, err);

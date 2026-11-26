@@ -35,6 +35,7 @@ npm run studio:watch
 - Sửa `crates/**`, `Cargo.toml`/`Cargo.lock`: `scripts/studio-watch.mjs` build lại Engine, xong thì Studio khởi động lại Engine (không đóng cửa sổ). Session đang chạy bị cắt; lượt gửi sau tự tạo session mới, lịch sử chat giữ nguyên. Build lỗi thì Engine cũ vẫn chạy.
 - Sửa `config/*.yaml`: chỉ khởi động lại Engine.
 - Watch mode chạy bản copy `target/debug/silence-engine.live.exe`, nên cargo ghi đè được exe gốc trong lúc app đang mở.
+- Lúc bật, Studio mở ngay bằng Engine build trước, còn cargo kiểm/build lại ở nền với độ ưu tiên thấp (Windows: below normal; nơi khác: `nice`) để không giành CPU của UI. Sau khi pull nhiều thay đổi Rust, lần build đầu vẫn mất vài phút, nhưng giao diện lên trước.
 
 Lệnh tắt `run studio watch` (gõ ở thư mục nào cũng được): thêm dòng sau vào `$PROFILE` (`notepad $PROFILE`):
 
