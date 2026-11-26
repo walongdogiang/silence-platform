@@ -20,7 +20,7 @@ Studio dùng lõi TS mặc định; đường Engine chỉ còn để so sánh t
 
 ## Phạm vi
 
-**Làm:** đổi mặc định ở `core.ts`/`coreRoute.ts`, bỏ `toEngineMode`/đường dự phòng khi dùng thử đạt. **Cổng:** user dùng thử vài ngày cho mọi việc (tiêu chí `(user, chặn)`).
+**Làm:** đổi mặc định ở `core.ts`/`coreRoute.ts`, bỏ `toEngineMode`/đường dự phòng khi dùng thử đạt. **Cổng:** điều kiện xong giai đoạn 1 của [lộ trình](../../docs/adapters/migration.md): user dùng Studio 2 tuần cho mọi việc (trừ theo dõi PR và việc theo lịch), số liệu trên trang Số liệu so với Claude trần không xấu hơn (tiêu chí `(user, chặn)`).
 
 ## Bối cảnh
 
