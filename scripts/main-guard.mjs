@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Lớp 4 bảo vệ main (docs/adr/0003-pr-watch.md): sau mỗi lần push vào main, kiểm từng commit mới
-// có đi qua một PR đã merge với CI xanh không. Không chặn được (repo không có branch protection),
-// nhưng không để lọt im lặng: vi phạm → mở issue nhãn `main-guard` + job đỏ.
+// có đi qua một PR đã merge với CI xanh không. Ruleset của main chặn phía GitHub; script này bắt các
+// trường hợp lọt qua (bypass, ruleset bị tắt) để không lọt im lặng: vi phạm → mở issue nhãn `main-guard` + job đỏ.
 //
 // Chạy trong .github/workflows/main-guard.yml. Chạy tay để thử (không mở issue):
 //   DRY_RUN=1 REPO=owner/name BEFORE=<sha> AFTER=<sha> node scripts/main-guard.mjs
@@ -119,7 +119,7 @@ if (!open.some((i) => i.title === title)) {
     "",
     `Run: ${env.RUN_URL || "(chạy tay)"}`,
     "",
-    "Repo không có branch protection nên GitHub không chặn được việc này; workflow `main-guard` chỉ phát hiện sau khi đã xảy ra (docs/adr/0003-pr-watch.md, lớp 4).",
+    "Ruleset của `main` lẽ ra phải chặn việc này: kiểm xem ruleset có bị tắt hay có ai được bypass không. Workflow `main-guard` chỉ phát hiện sau khi đã xảy ra (docs/adr/0003-pr-watch.md, lớp 4).",
     "Việc cần làm: xem lại các commit trên, chạy CI cho `main`, revert nếu cần, rồi đóng issue.",
   ].join("\n");
   api(`repos/${repo}/issues`, "-f", `title=${title}`, "-f", `body=${body}`, "-f", "labels[]=main-guard");

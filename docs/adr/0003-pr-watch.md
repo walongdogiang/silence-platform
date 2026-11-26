@@ -19,6 +19,7 @@ Kiểu hỏng chính là **đứng yên**: PR đỏ nằm đó, không ai sửa,
 - `git commit` và `git push` là `ask` (`GIT_COMMIT`, `GIT_NETWORK`). Tự sửa khi không có người ngồi đó mâu thuẫn với chế độ Cân bằng.
 - CI chạy `windows-latest` (Engine dùng ConPTY và Job Object), nên lượt sửa trên cloud cũng phải dùng Windows runner. Repo private tính phút Windows gấp đôi.
 - Repo private trên gói Free: không có branch protection hay ruleset (API trả 403). GitHub không chặn merge khi CI đỏ, cũng không chặn push thẳng `main`.
+  - **Cập nhật 2026-11-26 (T-027):** repo chuyển public, có ruleset cho `main` (bắt PR, bắt `ci-ok`, chặn force-push và xoá). Lớp 4 (`main-guard`) giữ lại làm lưới phát hiện.
 
 ## Tham khảo (11/2026)
 

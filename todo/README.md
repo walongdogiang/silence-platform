@@ -31,7 +31,6 @@ Mã tiếp theo: T-028
 - T-003 1.12 Pane xem dev server / URL · [chi tiết](tasks/T-003-browser-preview.md)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 - T-005 Ngôn ngữ đợt 3: phần còn lại của `docs/` sang tiếng Anh, một PR · blocked-by: T-004
-- T-027 Chuẩn bị chuyển repo sang public (CI không giới hạn phút, branch protection) · [chi tiết](tasks/T-027-go-public.md)
 
 ## Later
 

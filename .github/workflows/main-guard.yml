@@ -1,7 +1,8 @@
 name: main-guard
 
-# Lớp 4 bảo vệ main (docs/adr/0003-pr-watch.md). Repo private gói Free không có branch protection,
-# nên GitHub không chặn được push thẳng main hay merge khi CI đỏ. Workflow này chạy sau mỗi lần
+# Lớp 4 bảo vệ main (docs/adr/0003-pr-watch.md). Từ 2026-11-26 repo public có ruleset cho main
+# (bắt PR, bắt `ci-ok`, chặn force-push); workflow này là lưới phát hiện khi ruleset bị vượt (bypass)
+# hoặc bị tắt. Workflow chạy sau mỗi lần
 # push vào main: commit nào không đi qua PR đã merge với CI xanh thì mở issue nhãn `main-guard`
 # và job đỏ. Chỉ phát hiện, không revert. Logic ở scripts/main-guard.mjs (chạy tay được, DRY_RUN=1).
 
