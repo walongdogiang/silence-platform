@@ -29,6 +29,11 @@ export default defineConfig({
     root: resolve(__dirname, "src/renderer"),
     plugins: [react()],
     define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+    // Dev cold start: transform the module graph as soon as the server is up (instead of when
+    // Electron first requests the page), and pre-bundle Monaco up front. Monaco is only reached
+    // via dynamic import, so without `include` Vite discovers it late, re-optimizes and reloads.
+    server: { warmup: { clientFiles: ["./main.tsx", "./App.tsx"] } },
+    optimizeDeps: { include: ["monaco-editor", "@monaco-editor/react"] },
     build: {
       rollupOptions: {
         input: resolve(__dirname, "src/renderer/index.html"),
