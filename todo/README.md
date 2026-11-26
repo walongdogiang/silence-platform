@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-028
+Mã tiếp theo: T-031
 
 ## Now
 
@@ -53,6 +53,9 @@ Mã tiếp theo: T-028
 - T-024 Lời báo hook chủ worktree: chat chủ đang làm T-xxx nào + tên chat dễ nhận ra · [chi tiết](tasks/T-024-owner-msg-context.md)
 - T-025 Phiên con dùng đúng mã phiên của chính nó · [chi tiết](tasks/T-025-side-session-id.md)
 - T-026 Sổ chủ worktree tự bỏ mục của worktree đã bị xoá · [chi tiết](tasks/T-026-stale-worktree-owner.md)
+- T-028 Bật Dependabot alerts (báo lỗ hổng thư viện npm/cargo; user bật trong Settings → Advanced Security)
+- T-029 Ghim GitHub Actions theo SHA thay vì tag (`actions/checkout@v4`, `dorny/paths-filter@v3`, `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache@v2`) — repo public dễ bị nhắm
+- T-030 `cache-cleanup.yml` bỏ qua PR từ fork (token chỉ đọc nên job đỏ)
 
 ## Ideas
 
