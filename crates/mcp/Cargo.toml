@@ -2,7 +2,7 @@
 name = "silence-mcp"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true

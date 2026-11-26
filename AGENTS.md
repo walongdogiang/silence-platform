@@ -60,5 +60,5 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
   - `cache-cleanup.yml`: PR đóng thì xoá cache của PR đó.
   - `docs-check.yml`: rule `.claude/rules` hợp lệ, frontmatter docs hợp lệ.
   - Không còn workflow eval trên CI (ADR 0004).
-  - `main-guard.yml` chạy sau mỗi lần push `main`: commit không đi qua PR đã merge với CI xanh (hoặc force-push) thì mở issue nhãn `main-guard` và job đỏ. Repo không có branch protection, nên đây là lưới phát hiện, không chặn.
+  - `main-guard.yml` chạy sau mỗi lần push `main`: commit không đi qua PR đã merge với CI xanh (hoặc force-push) thì mở issue nhãn `main-guard` và job đỏ. Repo public có ruleset cho `main` (bắt PR, bắt check `ci-ok`, chặn force-push và xoá, không ai bypass) nên GitHub chặn ở phía server; `main-guard` là lưới phát hiện khi ruleset bị tắt hoặc bị vượt.
 - Test RED chờ plan sau phải có `#[ignore = "RED until Plan …"]` kèm lý do; bỏ `#[ignore]` khi làm plan đó. Không để CI đỏ kéo dài.
