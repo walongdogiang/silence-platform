@@ -7,11 +7,11 @@ phase:
 area: [agent-kit]
 size: M
 model: opus
-depends: [T-020]
+depends: []
 branch:
 pr:
 created: 2026-11-25
-updated: 2026-11-25
+updated: 2026-11-26
 ---
 
 ## Mục tiêu

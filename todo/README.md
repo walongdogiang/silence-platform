@@ -27,9 +27,9 @@ Mã tiếp theo: T-036
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
-- T-006 2.1a Kiểm kê RPC còn qua Engine Rust, quyết định mang sang lõi hay bỏ · [chi tiết](tasks/T-006-remove-rust-engine.md)
-- T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md) · blocked-by: T-020
 - T-003 1.12 Pane xem dev server / URL · [chi tiết](tasks/T-003-browser-preview.md)
+- T-006 2.1a Kiểm kê RPC còn qua Engine Rust, quyết định mang sang lõi hay bỏ · [chi tiết](tasks/T-006-remove-rust-engine.md)
+- T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 
 ## Later
@@ -59,7 +59,7 @@ Mã tiếp theo: T-036
 - T-025 Phiên con dùng đúng mã phiên của chính nó · [chi tiết](tasks/T-025-side-session-id.md)
 - T-026 Sổ chủ worktree tự bỏ mục của worktree đã bị xoá · [chi tiết](tasks/T-026-stale-worktree-owner.md)
 - T-028 Bật Dependabot alerts (báo lỗ hổng thư viện npm/cargo; user bật trong Settings → Advanced Security)
-- T-029 Ghim GitHub Actions theo SHA thay vì tag (`actions/checkout@v4`, `dorny/paths-filter@v3`, `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache@v2`) — repo public dễ bị nhắm
+- T-029 Ghim GitHub Actions theo SHA thay vì tag (`actions/checkout@v4`, `dorny/paths-filter@v3`, `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache@v2`) — repo public dễ bị nhắm; bỏ qua `dtolnay/rust-toolchain`, `Swatinem/rust-cache` nếu T-035 (xoá Rust) làm trước
 - T-030 `cache-cleanup.yml` bỏ qua PR từ fork (token chỉ đọc nên job đỏ)
 
 ## Ideas
