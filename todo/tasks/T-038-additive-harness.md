@@ -16,7 +16,7 @@ updated: 2026-11-27
 
 ## Mục tiêu
 
-Chốt lại mục đích và nguyên tắc kiến trúc trong ADR 0004 theo đúng cách user làm việc: user dùng **Claude CLI trong terminal**, không dùng Claude desktop app. Bối cảnh hiện tại của ADR ghi sai điểm này. `model: opus` vì đây là quyết định kiến trúc, không phải sửa chữ.
+Chốt lại mục đích và nguyên tắc kiến trúc trong ADR 0004 theo đúng hướng user chốt: hiện user dùng Claude desktop app (tab Code), đích là 5ilence nối Claude CLI và **thay hẳn** desktop app (user trả lời 2026-11-28). Vì vậy thiết kế coi user là người dùng CLI: 5ilence bù chỗ CLI yếu hơn app, có đủ tính năng app có (kể cả theo dõi PR, lịch, điều khiển từ điện thoại) và thêm chỗ app còn thiếu. Bối cảnh hiện tại của ADR ghi sai điểm này. `model: opus` vì đây là quyết định kiến trúc, không phải sửa chữ.
 
 Mục đích user chốt (2026-11-27):
 1. 5ilence bù những chỗ CLI yếu hơn desktop app.
@@ -27,7 +27,7 @@ Mục đích user chốt (2026-11-27):
 
 **Làm (pha design → cổng duyệt):**
 - Sửa ADR 0004:
-  - Bối cảnh: user dùng CLI, không dùng desktop app.
+  - Bối cảnh: hiện dùng desktop app; đích là 5ilence trên Claude CLI thay hẳn desktop app.
   - Mục đích: ba ý trên, thay câu "không đuổi tính năng Claude Code".
 - Ghi 4 cách hoà giải các điểm mâu thuẫn với nguyên tắc cũ:
   - "Không đuổi tính năng" → vẫn clone, nhưng xếp ưu tiên theo điểm bất tiện user gặp; tính năng chưa dùng vào Later.

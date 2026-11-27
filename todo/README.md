@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-073
+Mã tiếp theo: T-074
 
 ## Now
 
@@ -31,13 +31,14 @@ Mã tiếp theo: T-073
 - T-031 2.1b Lõi nhận fs.* và terminal (node-pty) · [chi tiết](tasks/T-031-core-fs-terminal.md) · blocked-by: T-006
 - T-032 2.1c Lõi nhận lịch sử chat, session.context, rewind, fork · [chi tiết](tasks/T-032-core-history-context.md) · blocked-by: T-006
 - T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038
-- T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
-- T-071 Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
 
 ## Later
 
 <!-- Không xếp thứ tự. Việc mới mặc định vào đây. -->
 
+- T-023 [kit] Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
+- T-071 [kit] Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
+- T-073 [kit] Làm gọn kit sau đóng băng: tách `todo/SKILL.md` thành lõi + file tham chiếu, chuyển phần CI/git của `AGENTS.md` sang skill `task-git`; đo trước bằng `/context`
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 - T-001 Thử bước Apply của 1.9 (commit + push `~/.silence` thật — cần user đồng ý trước)
 - T-034 2.1e Xoá UI chỉ phục vụ Engine cũ · [chi tiết](tasks/T-034-remove-engine-ui.md) · blocked-by: T-033
@@ -55,10 +56,10 @@ Mã tiếp theo: T-073
 - T-016 4.3 Thông báo đẩy, duyệt lệnh rủi ro từ xa
 - T-017 4.4 Hướng dẫn `tailscale serve`
 - T-019 Bảng "Việc" trong Studio đọc `todo/` (Now/Next, tiến độ tiêu chí, PR/CI) — thay bảng chữ của `/todo`
-- T-024 Lời báo hook chủ worktree: chat chủ đang làm T-xxx nào + tên chat dễ nhận ra · [chi tiết](tasks/T-024-owner-msg-context.md)
-- T-025 Phiên con dùng đúng mã phiên của chính nó · [chi tiết](tasks/T-025-side-session-id.md)
-- T-026 Sổ chủ worktree tự bỏ mục của worktree đã bị xoá · [chi tiết](tasks/T-026-stale-worktree-owner.md)
-- T-036 Chat mở lại (đổi model, mã phiên mới) vẫn được nhận là cùng chat chủ worktree · [chi tiết](tasks/T-036-chat-reopen-identity.md)
+- T-024 [kit] Lời báo hook chủ worktree: chat chủ đang làm T-xxx nào + tên chat dễ nhận ra · [chi tiết](tasks/T-024-owner-msg-context.md)
+- T-025 [kit] Phiên con dùng đúng mã phiên của chính nó · [chi tiết](tasks/T-025-side-session-id.md)
+- T-026 [kit] Sổ chủ worktree tự bỏ mục của worktree đã bị xoá · [chi tiết](tasks/T-026-stale-worktree-owner.md)
+- T-036 [kit] Chat mở lại (đổi model, mã phiên mới) vẫn được nhận là cùng chat chủ worktree · [chi tiết](tasks/T-036-chat-reopen-identity.md)
 - T-028 Bật Dependabot alerts (báo lỗ hổng thư viện npm/cargo; user bật trong Settings → Advanced Security)
 - T-029 Ghim GitHub Actions theo SHA thay vì tag (`actions/checkout@v4`, `dorny/paths-filter@v3`, `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache@v2`) — repo public dễ bị nhắm; bỏ qua `dtolnay/rust-toolchain`, `Swatinem/rust-cache` nếu T-035 (xoá Rust) làm trước
 - T-030 `cache-cleanup.yml` bỏ qua PR từ fork (token chỉ đọc nên job đỏ)

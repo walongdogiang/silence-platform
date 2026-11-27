@@ -3,6 +3,7 @@
 # Ghi chú riêng cho Claude Code
 
 - Việc cần làm: `todo/README.md`. User hỏi việc tiếp theo, thêm việc/tính năng, báo xong việc, hay muốn làm tiếp việc dở ở chat khác → dùng skill `todo`. Mỗi chat một việc; việc do chat khác giữ thì không đụng.
+- **Kit đang đóng băng tới khi T-033 xong** (user chốt 2026-11-28, để dồn sức cho sản phẩm). Không sửa `CLAUDE.md`, `AGENTS.md`, `.claude/skills/`, `scripts/todo-*.mjs`, `scripts/pr-merge.mjs`. Ý tưởng kit mới → một dòng ở Later của `todo/` gắn `[kit]`, không làm ngay. Ngoại lệ: kit hỏng chặn việc, hoặc một lỗi lặp lần thứ hai gây tốn thật; ghi lý do trong PR. Hết hạn thì gom các mục `[kit]` vào một PR.
 - Rule theo đường dẫn nằm ở `.claude/rules/` (tự nạp khi đụng file khớp `paths:`).
 - Tìm tài liệu: đọc `docs/README.md`, rồi chỉ mở 1–2 file liên quan. Không đọc cả `docs/` nếu task không cần. `rg -m1 "^description:" docs` cho biết file nào là gì mà không phải mở.
 - File lớn như `agent/mod.rs`: grep tên hàm rồi đọc theo khoảng dòng.
