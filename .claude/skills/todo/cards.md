@@ -11,7 +11,7 @@ Dùng khi agent trình bày việc, review đóng việc, hỏi dọn worktree, 
 - **Không bịa**: thiếu thông tin thì ghi "chưa rõ"; mục không có nội dung thì bỏ hẳn.
 - **Từ thường trước, mã sau**: tên file, lệnh chỉ khi user cần dùng.
 - **Câu hỏi cuối có lựa chọn đánh số**, để user trả lời một chữ. Thẻ không chờ quyết định thì không có câu hỏi.
-- **Icon chú ý** theo `CLAUDE.md` → **Icon chú ý**: `⚠️ **Lưu ý**`, `👉 **Bạn làm**`, `❓ **Bạn chọn:**`. Biểu tượng ở tiêu đề thẻ (📋 ✅ 🧹 🏁) giữ nguyên.
+- **Icon chú ý** theo `CLAUDE.md` → **Icon chú ý**: `⚠️ **Lưu ý**`, `👉 **Bạn làm**`, `➡️ **Tiếp:**`, `❓ **Bạn chọn:**`. Biểu tượng ở tiêu đề thẻ (📋 ✅ 🧹 🏁) giữ nguyên.
 - Viết bằng Markdown thật (in đậm, gạch đầu dòng, bảng), không bọc trong khối code.
 
 ## Khung chung
@@ -133,8 +133,10 @@ Một dòng ở cuối tin; tin có dòng ❓ **Bạn chọn** thì đặt dòng
 
 ```
 🏁 Đã xong T-072: PR #97 đã merge.
+➡️ **Tiếp:** mở chat mới cho T-039, chọn `/model opus` trước (việc thiết kế).
 ⏳ Đang dở T-072: 2/3 tiêu chí · bước kế: chờ CI của PR #97 rồi merge.
 ⛔ Chờ bạn T-072: duyệt merge PR #97 (đụng CLAUDE.md)?
 ```
 
+- Dòng `➡️ **Tiếp:**` luôn tách riêng, ngay sau 🏁, và chỉ có khi mang thông tin (`CLAUDE.md` → **Kết thúc lượt**).
 - `n/m` đếm ô đã tick trong **Tiêu chí xong** của file việc, không ước lượng.
