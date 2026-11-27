@@ -22,7 +22,6 @@ Mã tiếp theo: T-037
 
 <!-- Tối đa 2 việc đang làm, mỗi việc do đúng một chat giữ (scripts/todo-claims.mjs). -->
 
-- T-003 1.12 Pane xem dev server / URL · [chi tiết](tasks/T-003-browser-preview.md)
 
 ## Next
 

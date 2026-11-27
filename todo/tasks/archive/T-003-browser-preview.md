@@ -2,13 +2,13 @@
 id: T-003
 title: 1.12 Pane xem dev server / URL
 type: feature
-status: in-progress
+status: done
 phase: verify
 area: [studio]
 size: L
 depends: []
 branch: feat/T-003-browser-preview
-pr:
+pr: 91
 model: opus
 model-build: sonnet
 created: 2026-11-23
@@ -89,9 +89,9 @@ Studio có pane xem dev server / URL (Electron `WebContentsView`), để xem app
 - [x] Link localhost trong chat mở vào Xem trước, Ctrl+click và link không loopback ra ngoài — kiểm: `npm test --workspace @silence/studio -- MarkdownMessage` → 21 pass
 - [x] Type và toàn bộ vitest Studio xanh — kiểm: `npx tsc --noEmit -p apps/studio` và `npm test --workspace @silence/studio` → tsc sạch, 59 file / 385 test pass
 - [x] Docs và rule hợp lệ — kiểm: `npm run check:docs` và `npm run check:rules` → OK 26 docs, OK 6 rule
-- [ ] (user, chặn) Cột pane ngoài cùng bên phải, Ctrl+J bật/tắt, kéo rộng được và nhớ, phóng to/đóng, terminal gõ được và vừa khung — kiểm: `npm run studio`
-- [ ] (user, chặn) Xem trước mở dev server localhost, ← → ⟳ chạy, gõ URL ngoài bị từ chối, link ngoài trong trang ra trình duyệt ngoài, mở Settings/menu thì trang không đè lên — kiểm: `npm run studio`, mở `npm run studio:watch` hoặc dev server bất kỳ
-- [ ] (user) Ctrl+J / Ctrl+Shift+B vẫn chạy khi đang focus trong trang xem trước — kiểm: `npm run studio`
+- [x] (user, chặn) Cột pane ngoài cùng bên phải, Ctrl+J bật/tắt, kéo rộng được và nhớ, phóng to/đóng, terminal gõ được và vừa khung — kiểm: `npm run studio`
+- [x] (user, chặn) Xem trước mở dev server localhost, ← → ⟳ chạy, gõ URL ngoài bị từ chối, link ngoài trong trang ra trình duyệt ngoài, mở Settings/menu thì trang không đè lên — kiểm: `npm run studio`, mở `npm run studio:watch` hoặc dev server bất kỳ
+- [x] (user) Ctrl+J / Ctrl+Shift+B vẫn chạy khi đang focus trong trang xem trước — kiểm: `npm run studio`
 
 ## Phát sinh
 
@@ -105,3 +105,4 @@ Studio có pane xem dev server / URL (Electron `WebContentsView`), để xem app
 - Quyết định: tay kéo đổi bề rộng nằm **ngoài** mép cột (left -7px) vì trang native đè lên mọi thứ bên phải mép; trong lúc kéo ẩn trang (`body[data-pane-drag]`) để trang không nuốt chuột.
 - Phát hiện: gõ địa chỉ ngoài loopback khi đang có trang thì dòng từ chối bị trang che → ẩn trang khi có `notLocal`.
 - Đã chạy thử bản build (`electron-vite preview`, không có Engine): mở `localhost:8765`, link loopback + Lùi, Settings đè trang → ảnh mờ, Ctrl+J từ trong trang, phóng to/thu nhỏ, kéo rộng/hẹp, nhớ tab + bề rộng sau khi mở lại. Chưa thử: Terminal (cần Engine), link ngoài trong trang mở trình duyệt ngoài, xin camera bị từ chối.
+- 2026-11-27: user xác nhận ("ok") sau khi kiểm tay; đóng việc trong PR #91. Chat được app mở lại với mã phiên mới (611be935) nên `claim --takeover` từ 612c36e3 (cùng chat, đúng trường hợp T-036).
