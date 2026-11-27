@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-037
+Mã tiếp theo: T-039
 
 ## Now
 
@@ -27,7 +27,11 @@ Mã tiếp theo: T-037
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
+- T-038 Harness chỉ cộng thêm trên Claude CLI, mục đích clone desktop app (sửa ADR 0004) · [chi tiết](tasks/T-038-additive-harness.md)
 - T-006 2.1a Kiểm kê RPC còn qua Engine Rust, quyết định mang sang lõi hay bỏ · [chi tiết](tasks/T-006-remove-rust-engine.md)
+- T-031 2.1b Lõi nhận fs.* và terminal (node-pty) · [chi tiết](tasks/T-031-core-fs-terminal.md) · blocked-by: T-006
+- T-032 2.1c Lõi nhận lịch sử chat, session.context, rewind, fork · [chi tiết](tasks/T-032-core-history-context.md) · blocked-by: T-006
+- T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038
 - T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 
@@ -36,9 +40,6 @@ Mã tiếp theo: T-037
 <!-- Không xếp thứ tự. Việc mới mặc định vào đây. -->
 
 - T-001 Thử bước Apply của 1.9 (commit + push `~/.silence` thật — cần user đồng ý trước)
-- T-031 2.1b Lõi nhận fs.* và terminal (node-pty) · [chi tiết](tasks/T-031-core-fs-terminal.md) · blocked-by: T-006
-- T-032 2.1c Lõi nhận lịch sử chat, session.context, rewind, fork · [chi tiết](tasks/T-032-core-history-context.md) · blocked-by: T-006
-- T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032
 - T-034 2.1e Xoá UI chỉ phục vụ Engine cũ · [chi tiết](tasks/T-034-remove-engine-ui.md) · blocked-by: T-033
 - T-035 2.1f Xoá crates/, Cargo, job Rust trong CI, sửa docs · [chi tiết](tasks/T-035-remove-rust-crates.md) · blocked-by: T-034
 - T-005 Ngôn ngữ đợt 3: phần còn lại của `docs/` sang tiếng Anh, một PR · blocked-by: T-004, T-035

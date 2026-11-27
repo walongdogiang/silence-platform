@@ -7,11 +7,11 @@ phase:
 area: [core, studio]
 size: S
 model: sonnet
-depends: [T-031, T-032]
+depends: [T-031, T-032, T-038]
 branch:
 pr:
 created: 2026-11-26
-updated: 2026-11-26
+updated: 2026-11-27
 ---
 
 ## Mục tiêu
