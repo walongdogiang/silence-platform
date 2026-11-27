@@ -29,8 +29,30 @@ export const KINDS = {
   note: { required: ["to", "text"], optional: ["task"] },
 };
 
-const TASK = /^T-\d+$/;
-const TO = /^(T-\d+|all|master)$/;
+/**
+ * Mã việc (T-039): cha `T-070` hoặc con `T-070.2` — đúng 2 cấp, số con từ 1, không đệm 0.
+ * `TASK_ID` để tìm trong chuỗi (nhánh, tiêu đề): không nhận `T-070.0`, `T-070.01`, `T-070.1.1`; dấu chấm cuối câu không sao.
+ * `TASK_ID_FULL` để kiểm cả chuỗi (đối số CLI, trường sự kiện).
+ */
+export const TASK_ID = /T-\d+(?:\.[1-9]\d*)?(?!\.?\d)/;
+export const TASK_ID_FULL = /^T-\d+(?:\.[1-9]\d*)?$/;
+
+/** Mã việc đầu tiên trong một chuỗi, không có → undefined. */
+export function taskIdIn(text) {
+  return String(text ?? "").match(TASK_ID)?.[0];
+}
+
+/** Mọi mã việc trong một chuỗi. */
+export function taskIdsIn(text) {
+  return [...String(text ?? "").matchAll(new RegExp(TASK_ID.source, "g"))].map((m) => m[0]);
+}
+
+export const isChildId = (id) => String(id ?? "").includes(".");
+/** `T-070.2` → `T-070`; mã cha → chính nó. */
+export const parentOf = (id) => String(id ?? "").split(".")[0];
+
+const TASK = TASK_ID_FULL;
+const TO = new RegExp(`^(${TASK_ID_FULL.source.slice(1, -1)}|all|master)$`);
 
 export function eventsPathFor(claimsFile) {
   return claimsFile ? path.join(path.dirname(claimsFile), "todo-events.jsonl") : null;
@@ -191,7 +213,7 @@ export function mergeEventsFromCommits(commits, events, now = new Date()) {
     const pr = Number(c.subject.match(/\(#(\d+)\)\s*$/)?.[1]);
     if (!pr || seenPr.has(pr) || seenSha.has(c.sha)) continue;
     const r = makeEvent(
-      { kind: "merged", session: null, pr, sha: c.sha, task: c.subject.match(/T-\d+/)?.[0], files: c.files, text: c.subject.slice(0, TEXT_MAX) },
+      { kind: "merged", session: null, pr, sha: c.sha, task: taskIdIn(c.subject), files: c.files, text: c.subject.slice(0, TEXT_MAX) },
       now,
     );
     if (r.ok) {
@@ -241,7 +263,8 @@ export function relevantFor(events, me, since) {
     }
     if (me.session && ev.session === me.session) continue;
     if (me.task && ev.task === me.task && ev.kind !== "note" && ev.kind !== "blocked") continue;
-    const toMe = ev.to && (ev.to === "all" || ev.to === me.task || (ev.to === "master" && me.isMaster));
+    // `--to T-070` tới cả phiên giữ việc con T-070.k (T-039).
+    const toMe = ev.to && (ev.to === "all" || ev.to === me.task || (me.task && isChildId(me.task) && ev.to === parentOf(me.task)) || (ev.to === "master" && me.isMaster));
     let prio = 0;
     let why = "";
     if ((ev.kind === "note" || ev.kind === "blocked" || ev.kind === "handoff") && toMe) [prio, why] = [3, "gửi bạn"];

@@ -8,6 +8,7 @@ argument-hint: "[add <mô tả> | done | log | resume T-xxx | release | doctor]"
 
 - `todo/README.md` — mục lục, nhóm **Now** (≤2 việc đang làm) / **Next** (có thứ tự, 3–7) / **Later** / **Ideas**, mỗi việc một dòng. Dòng `Mã tiếp theo: T-xxx` là bộ đếm mã.
 - `todo/tasks/T-xxx-slug.md` — chi tiết việc (mẫu: `todo/tasks/_template.md`). Việc ở Later/Next cần hơn ~5 dòng mô tả mới có file; việc vào **Now** thì luôn có file.
+- `todo/tasks/T-xxx-slug/` — thư mục **việc cha**: `README.md` (mẫu `_template-parent.md`) và các file việc con `T-xxx.k-slug.md`. Xem **Việc cha / việc con**.
 - `todo/DONE.md` — nhật ký việc đã xong, mới nhất ở trên. `todo/tasks/archive/` — file của việc đã xong.
 - **Sổ giữ việc** `scripts/todo-claims.mjs` (file `todo-claims.json` trong thư mục git chung, mọi worktree dùng chung, không commit): phiên nào đang giữ việc nào.
 - Hook SessionStart (`scripts/todo-brief.mjs`) nạp sẵn: `[todo] Phiên này: <id>`, việc ở Now và ai giữ, việc tiếp theo kèm gợi ý model. Hook UserPromptSubmit cập nhật lần hoạt động cuối và báo khi việc của phiên này đã bị chuyển sang chat khác.
@@ -18,6 +19,7 @@ Dạng dòng trong mục lục:
 - T-014 Theo dõi PR ở khay · [chi tiết](tasks/T-014-pr-watch-tray.md)
 - T-016 Mục 1.12 · blocked-by: T-014
 - T-017 Sửa focus composer khi đổi tab
+- T-070 Xoá Engine Rust · [chi tiết](tasks/T-070-remove-engine/README.md)
 ```
 
 ## Lệnh
@@ -63,7 +65,7 @@ LATER 13 việc · IDEAS 1
 
 1. Phiên này đang giữ một việc (hook ghi "phiên này đang giữ") → đó là việc đang dở: mở file, đọc **Nhật ký** (mục mới nhất trước), **Kế hoạch**, **Tiêu chí xong**; nói đang ở đâu và bước kế, rồi làm tiếp.
 2. Việc ở Now do phiên khác giữ → chỉ báo (chat nào, hoạt động lúc nào), không đụng.
-3. Còn chỗ ở Now → việc **đầu tiên trong Next** không bị `blocked-by` mã còn trong mục lục. Trình bày bằng **Thẻ việc** (`cards.md` → 1) rồi hỏi user có bắt đầu không; chưa có "bắt đầu" thì không làm.
+3. Còn chỗ ở Now → việc **đầu tiên trong Next** không bị `blocked-by` mã còn mở (dòng còn trong mục lục; mã con: dòng con chưa tick). Việc đó là việc cha → việc con kế tiếp (hook in sẵn `con k/n · tiếp: T-xxx.k`). Trình bày bằng **Thẻ việc** (`cards.md` → 1) rồi hỏi user có bắt đầu không; chưa có "bắt đầu" thì không làm.
 4. Next trống → đề xuất 1–3 việc từ Later kèm lý do; không tự chuyển.
 
 ## Bắt đầu việc
@@ -73,6 +75,7 @@ LATER 13 việc · IDEAS 1
 3. Worktree mới cho việc: `node scripts/todo-claims.mjs worktree T-xxx --branch <type>/T-xxx-slug --session <id>` (skill `task-git` → Worktree), rồi chạy lại `claim` **trong** worktree đó để sổ ghi đúng worktree.
 4. Chưa có file → tạo từ mẫu. Chuyển dòng sang **Now**; trong file đặt `status: in-progress`, `branch`, `updated`, `phase: design` (hoặc `plan` khi không có gì để thiết kế: chore/docs đơn giản, fix đã rõ nguyên nhân).
 5. **Tự kiểm model** (mục **Model**) trước khi bắt tay vào `design`/`plan`.
+6. Việc `size: L` không vào Now khi chưa tách con: bắt đầu nó = chuyển sang dạng việc cha, pha design ra danh sách con (**Việc cha / việc con**).
 
 ## Vòng đời và cổng duyệt
 
@@ -225,4 +228,32 @@ Làm **trong PR của việc**, trước khi merge, khi mọi tiêu chí (trừ 
 
 Việc không có PR (user nói xong) → bước 1–3 qua một PR `chore/todo-…`, rồi release.
 
+Việc con và việc cha đóng khác: **Việc cha / việc con** → Đóng.
+
 **Bỏ việc** (user quyết không làm): `status: dropped`, lý do vào Nhật ký, xoá khỏi mục lục, `DONE.md` dòng `YYYY-MM-DD · T-xxx Tên việc · bỏ: <lý do>`, chuyển file vào `archive/`, release.
+
+## Việc cha / việc con
+
+Việc lớn chia thành việc con, mỗi con một PR, xong trong 1–2 phiên, tối đa ~7 tiêu chí.
+
+- **Mã:** cha `T-070`, con `T-070.1`, `T-070.2`… (số con từ 1, không đệm 0). Chỉ 2 cấp, không có `T-070.1.1`. Gạch nối chỉ ngăn mã với tên: file `T-070.2-core-fs.md`, nhánh `feat/T-070.2-core-fs`, worktree `T-070.2`.
+- **File:** thư mục `todo/tasks/T-070-slug/`: `README.md` của cha (mẫu `_template-parent.md`) và các file con (mẫu `_template.md`, `id: T-070.2`).
+- **Việc cha:** không có PR riêng, không ai `claim`. Giữ mục tiêu, thiết kế chung, mục `## Việc con` và tiêu chí chung (có thể có dòng `(user)`).
+- **`## Việc con`** trong README cha là nơi duy nhất ghi tiến độ:
+  `- [ ] T-070.2 Lõi nhận fs · [chi tiết](T-070.2-core-fs.md) · blocked-by: T-070.1`.
+  Tiến độ = số dòng tick / tổng. Con kế tiếp = dòng chưa tick đầu tiên không bị chặn. Dòng mục lục của cha không ghi tiến độ.
+- **Mục lục:** chỉ có dòng cha. Chưa con nào đang làm → cha ở Next. Có con đang làm → dòng cha lên **Now** (một dòng, kể cả hai con chạy song song). `blocked-by: T-070` chờ cả việc cha; `blocked-by: T-070.2` chờ một con.
+
+**Tách** (pha design của việc cha, hoặc việc `size: L` sắp vào Now):
+1. Chuyển file việc thành thư mục: `git mv todo/tasks/T-070-slug.md todo/tasks/T-070-slug/README.md`, bổ sung theo `_template-parent.md`, sửa link ở mục lục.
+2. Mỗi con: `node scripts/todo-claims.mjs reserve-id --parent T-070 --session <id>` → thêm dòng vào `## Việc con`, tạo file con (frontmatter + Mục tiêu + Phạm vi). Mỗi con một vùng file (`area`); con có vùng không chồng nhau chạy song song được.
+3. User duyệt danh sách con ở cổng duyệt của việc cha (thay cho Kế hoạch). Không đánh số lại việc cũ.
+
+**Làm một con:** như **Bắt đầu việc** với mã con (`claim T-070.2`, worktree `T-070.2`, nhánh `<type>/T-070.2-slug`), cổng duyệt riêng cho con. Bước 4 (chuyển sang Now) là chuyển dòng **cha**; `status: in-progress` đặt ở cả file con và README cha.
+
+**Đóng** (trong PR của việc con):
+1. Con: tick dòng của nó trong `## Việc con`, `status: done` trong file con (file **ở lại** thư mục cha), thêm `DONE.md` một dòng cho con.
+2. Không còn con nào đang làm → dòng cha về Next (đầu Next, giữ vị trí ưu tiên), `status: todo` trong README cha.
+3. Con cuối cùng xong và tiêu chí chung của cha đã tick (trừ `(user)`) → trong cùng PR đóng cha: xoá dòng mục lục, `DONE.md` một dòng cho cha, `status: done`, chuyển cả thư mục vào `archive/`. Tiêu chí chung chưa đạt → `⛔ Chờ bạn`, cha giữ nguyên.
+
+`/todo doctor` bắt: việc con mồ côi (file không có trong `## Việc con` hoặc nằm ngoài thư mục cha), con sai cha, mã con trùng, cha đã đóng còn con chưa tick, việc `size: L` ở Now chưa tách.

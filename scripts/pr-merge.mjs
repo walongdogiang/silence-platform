@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordEvent } from "./todo-claims.mjs";
+import { taskIdIn } from "./todo-events.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -88,7 +89,7 @@ function main() {
 
 /** Sự kiện `merged` cho sổ chung (ADR 0006): mã việc lấy từ tên nhánh, không có thì từ tiêu đề. */
 export function mergedEvent(pr, session = null) {
-  const task = (pr.headRefName ?? "").match(/T-\d+/)?.[0] ?? (pr.title ?? "").match(/T-\d+/)?.[0];
+  const task = taskIdIn(pr.headRefName) ?? taskIdIn(pr.title);
   return {
     kind: "merged",
     session,

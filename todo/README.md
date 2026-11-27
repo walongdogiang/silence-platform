@@ -22,12 +22,10 @@ Mã tiếp theo: T-073
 
 <!-- Tối đa 2 việc đang làm, mỗi việc do đúng một chat giữ (scripts/todo-claims.mjs). -->
 
-
 ## Next
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
-- T-039 Việc cha / việc con với mã dấu chấm (T-070.1) · [chi tiết](tasks/T-039-subtask-ids.md)
 - T-038 Harness chỉ cộng thêm trên Claude CLI, mục đích clone desktop app (sửa ADR 0004) · [chi tiết](tasks/T-038-additive-harness.md)
 - T-006 2.1a Kiểm kê RPC còn qua Engine Rust, quyết định mang sang lõi hay bỏ · [chi tiết](tasks/T-006-remove-rust-engine.md)
 - T-031 2.1b Lõi nhận fs.* và terminal (node-pty) · [chi tiết](tasks/T-031-core-fs-terminal.md) · blocked-by: T-006

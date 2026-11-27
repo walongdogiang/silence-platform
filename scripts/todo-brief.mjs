@@ -6,8 +6,8 @@
 // Chạy: node scripts/todo-brief.mjs   (hook truyền JSON có session_id qua stdin)
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput, pullEvents, syncMain } from "./todo-claims.mjs";
-import { eventsPathFor, readEvents } from "./todo-events.mjs";
+import { claimsPath, load, save, touchSession, short, ago, isStale, readHookInput, pullEvents, syncMain, children, nextChild, childPath } from "./todo-claims.mjs";
+import { eventsPathFor, readEvents, TASK_ID, taskIdsIn, isChildId, parentOf } from "./todo-events.mjs";
 import { ensureChat, mainRootOf, worktreesHome, strayWorktrees } from "./todo-owner.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,10 +49,10 @@ export function sections(md) {
 
 /** Mã việc, tên ngắn (bỏ link/ghi chú sau " · "), link file chi tiết, các mã chặn. */
 export function parseItem(line) {
-  const id = line.match(/^(T-\d+)/)[1];
+  const id = line.match(new RegExp(`^${TASK_ID.source}`))[0];
   const parts = line.split(" · ");
   const link = line.match(/\]\((tasks\/[^)]+)\)/)?.[1] ?? null;
-  const blockedBy = [...(line.match(/blocked-by:\s*([T\-\d,\s]+)/)?.[1] ?? "").matchAll(/T-\d+/g)].map((m) => m[0]);
+  const blockedBy = taskIdsIn(line.match(/blocked-by:\s*([T\-\d.,\s]+)/)?.[1] ?? "");
   return { id, title: parts[0], link, blockedBy };
 }
 
@@ -112,22 +112,33 @@ export function modelHint(taskMd) {
 
 export function brief(md, readTask = () => null, { session = null, book = null, events = [], notes = [], now = new Date() } = {}) {
   const s = sections(md);
-  const open = new Set(Object.values(s).flat().map((l) => parseItem(l).id));
+  const items = new Map(Object.values(s).flat().map((l) => parseItem(l)).map((it) => [it.id, it]));
+  const kidsOf = (it) => (it?.link ? children(readTask(it.link) ?? "") : []);
+  // Còn mở: dòng còn trong mục lục; việc con (T-039): việc cha còn đó và dòng con chưa tick.
+  const isOpen = (id) =>
+    isChildId(id) ? items.has(parentOf(id)) && kidsOf(items.get(parentOf(id))).some((k) => k.id === id && !k.done) : items.has(id);
   const claims = book?.claims ?? {};
   const describe = (it, { withModel = false, inNow = false } = {}) => {
     const task = it.link ? readTask(it.link) ?? "" : "";
     const parts = [];
+    const kids = children(task);
+    const nx = kids.length ? nextChild(kids, isOpen) : null;
+    const nxTask = nx ? readTask(childPath(it.link, nx.link)) ?? "" : "";
     const phase = field(task, "phase");
     if (phase) parts.push(`pha ${phase}`);
     const c = criteria(task);
     if (c) parts.push(`tiêu chí ${c.done}/${c.total}`);
+    if (kids.length) parts.push(`con ${kids.filter((k) => k.done).length}/${kids.length}${nx ? ` · tiếp: ${nx.id} ${nx.title}` : ""}`);
     const pr = field(task, "pr");
     if (pr) parts.push(`PR #${pr.replace(/^#/, "")}`);
     const cl = claims[it.id];
     if (cl) parts.push(cl.session === session ? "phiên này đang giữ" : `phiên ${short(cl.session)} đang giữ, ${ago(cl.lastSeen, now)}${isStale(cl, now) ? " (im lâu)" : ""}`);
-    else if (book && inNow) parts.push("chưa phiên nào giữ");
-    if (withModel) parts.push(`model: ${modelHint(task)}`);
-    else if (inNow && task) parts.push(`model: ${modelFor(task, phase)}`);
+    const kidClaims = Object.entries(claims).filter(([t]) => isChildId(t) && parentOf(t) === it.id);
+    for (const [t, kc] of kidClaims) parts.push(`${t} ${kc.session === session ? "phiên này đang giữ" : `phiên ${short(kc.session)} đang giữ, ${ago(kc.lastSeen, now)}${isStale(kc, now) ? " (im lâu)" : ""}`}`);
+    if (!cl && !kidClaims.length && book && inNow) parts.push("chưa phiên nào giữ");
+    // Việc cha: model theo việc con kế tiếp (đó là việc sắp làm).
+    if (withModel) parts.push(`model: ${modelHint(nxTask || task)}`);
+    else if (inNow && (nxTask || task)) parts.push(`model: ${nxTask ? modelHint(nxTask) : modelFor(task, phase)}`);
     return parts.length ? `${it.title} (${parts.join(" · ")})` : it.title;
   };
   const lines = [];
@@ -135,7 +146,7 @@ export function brief(md, readTask = () => null, { session = null, book = null, 
   const now_ = (s.Now ?? []).map(parseItem);
   const next = (s.Next ?? []).map(parseItem);
   if (now_.length) lines.push(`[todo] Đang làm (Now): ${now_.map((it) => describe(it, { inNow: true })).join("; ")}`);
-  const ready = next.find((it) => !it.blockedBy.some((b) => open.has(b)));
+  const ready = next.find((it) => !it.blockedBy.some(isOpen));
   if (ready) lines.push(`[todo] ${now_.length ? "Sau đó" : "Now trống. Việc tiếp theo"}: ${describe(ready, { withModel: true })}`);
   if (!now_.length && !ready) lines.push("[todo] Now và Next đều trống.");
   if (book?.master) lines.push(`[todo] Master: ${book.master.session === session ? "phiên này" : `phiên ${short(book.master.session)}`} (điều phối; báo bằng event note --to master).`);

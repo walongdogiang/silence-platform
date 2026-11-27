@@ -14,7 +14,7 @@
 //   node scripts/todo-claims.mjs event <kind> [T-xxx] --session <id> [--pr n] [--areas a,b] [--to T-xxx|all|master] [--text "…"]
 //   node scripts/todo-claims.mjs feed [--hours 24] [--limit 20]
 //   node scripts/todo-claims.mjs master [--session <id> | --clear]
-//   node scripts/todo-claims.mjs reserve-id --session <id>   giữ chỗ mã T-xxx mới (không trùng với phiên khác)
+//   node scripts/todo-claims.mjs reserve-id --session <id> [--parent T-xxx]   giữ chỗ mã T-xxx (hoặc T-xxx.k) mới, không trùng phiên khác
 //   node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <nhánh> --session <id>   tạo worktree ở <repo>-worktrees/<tên> (T-020)
 // Hook cũng quét origin/main (ref đã fetch, không gọi mạng): PR merge bằng đường nào cũng thành sự kiện `merged`.
 // Hook (đọc JSON của Claude Code ở stdin):
@@ -34,6 +34,11 @@ import {
   list,
   mergeEventsFromCommits,
   nextTaskId,
+  TASK_ID_FULL,
+  taskIdIn,
+  taskIdsIn,
+  isChildId,
+  parentOf,
 } from "./todo-events.mjs";
 import { chatOf, isIdle, toplevelOf, mainRootOf, setOwner, ensureChat, wtKey, worktreesHome, normPath } from "./todo-owner.mjs";
 import { execFileSync } from "node:child_process";
@@ -97,11 +102,21 @@ export function heldBy(book, session) {
 }
 
 /** Dòng nhắc mỗi tin nhắn (T-072): phiên đang giữ việc nào, tên lấy từ mục lục; không giữ việc → null. */
-export function holdingLine(book, session, readme = "") {
+export function holdingLine(book, session, readme = "", readTask = () => null) {
   const task = heldBy(book, session);
   if (!task) return null;
-  const row = readme.split(/\r?\n/).find((l) => l.startsWith(`- ${task} `));
-  const name = row ? row.slice(task.length + 3).split(" · ")[0].trim() : "";
+  const rowName = (id) => {
+    const row = readme.split(/\r?\n/).find((l) => l.startsWith(`- ${id} `));
+    return { row, name: row ? row.slice(id.length + 3).split(" · ")[0].trim() : "" };
+  };
+  let { name } = rowName(task);
+  if (isChildId(task)) {
+    // Việc con không có dòng trong mục lục: tên lấy từ danh sách con của cha (T-039).
+    const p = rowName(parentOf(task));
+    const link = p.row?.match(/\]\((tasks\/[^)]+)\)/)?.[1];
+    const kid = link ? children(readTask(link)).find((k) => k.id === task) : null;
+    name = [kid?.title, p.name ? `con của ${parentOf(task)} ${p.name}` : `con của ${parentOf(task)}`].filter(Boolean).join(" — ");
+  }
   return `[todo] Phiên này đang giữ ${task}${name ? `: ${name}` : ""}. Cuối lượt: dòng 🏁/⏳/⛔ (CLAUDE.md → Kết thúc lượt).`;
 }
 
@@ -110,11 +125,14 @@ export function holdingLine(book, session, readme = "") {
  * hoặc đã đủ MAX_NOW việc.
  */
 export function claim(book, task, session, { takeover = false, force = false, worktree = null, branch = null, areas = null, now = new Date() } = {}) {
-  if (!/^T-\d+$/.test(task)) return { ok: false, msg: `Mã việc không hợp lệ: ${task}` };
+  if (!TASK_ID_FULL.test(task ?? "")) return { ok: false, msg: `Mã việc không hợp lệ: ${task} (dạng T-070 hoặc T-070.2)` };
   if (!session) return { ok: false, msg: "Thiếu --session (dòng \"[todo] Phiên này:\" ở đầu phiên)." };
   const cur = book.claims[task];
   if (cur && cur.session === session) {
     if (areas?.length) cur.areas = list(areas);
+    // Claim lại trong worktree vừa tạo: ghi worktree + nhánh mới (trước đây trả sớm, sổ giữ thư mục chính).
+    if (worktree) cur.worktree = worktree;
+    if (branch) cur.branch = branch;
     return { ok: true, msg: `Phiên này đã giữ ${task}.` };
   }
   const mine = heldBy(book, session);
@@ -255,17 +273,68 @@ export function handoff(book, task, todoDir = path.join(root, "todo")) {
   return lines.join("\n");
 }
 
+/**
+ * File của một việc trong `tasks/` hoặc `tasks/archive/` (T-039):
+ * việc thường `T-012-slug.md`; việc cha `T-070-slug/README.md`; việc con `T-070-slug/T-070.2-slug.md`.
+ */
 export function findTaskFile(todoDir, task) {
+  const parent = parentOf(task);
   for (const dir of [path.join(todoDir, "tasks"), path.join(todoDir, "tasks", "archive")]) {
     if (!existsSync(dir)) continue;
-    const f = readdirSync(dir).find((n) => n.startsWith(`${task}-`) && n.endsWith(".md"));
-    if (f) return path.join(dir, f);
+    const entries = readdirSync(dir, { withFileTypes: true });
+    const folder = entries.find((e) => e.isDirectory() && e.name.startsWith(`${parent}-`));
+    if (isChildId(task)) {
+      if (!folder) continue;
+      const f = readdirSync(path.join(dir, folder.name)).find((n) => n.startsWith(`${task}-`) && n.endsWith(".md"));
+      if (f) return path.join(dir, folder.name, f);
+      continue;
+    }
+    if (folder && existsSync(path.join(dir, folder.name, "README.md"))) return path.join(dir, folder.name, "README.md");
+    const f = entries.find((e) => e.isFile() && e.name.startsWith(`${task}-`) && e.name.endsWith(".md"));
+    if (f) return path.join(dir, f.name);
   }
   return null;
 }
 
-/** Kiểm mục lục ↔ file task ↔ sổ giữ việc. Trả danh sách vấn đề (chuỗi). */
-export function doctor(readme, book, readTask, now = new Date()) {
+/**
+ * Danh sách việc con trong mục `## Việc con` của README việc cha (T-039) — nguồn sự thật của tiến độ.
+ * Dòng: `- [ ] T-070.2 Tên · [chi tiết](T-070.2-slug.md) · blocked-by: T-070.1`. Trả [{ id, title, done, link, blockedBy }].
+ */
+export function children(parentMd) {
+  const m = String(parentMd ?? "").match(/##\s+Việc con\s*\n([\s\S]*?)(\n##\s|$)/);
+  if (!m) return [];
+  const out = [];
+  for (const line of m[1].split(/\r?\n/)) {
+    const r = line.match(/^\s*-\s+\[([ xX])\]\s+(T-\S+)\s*(.*)$/);
+    if (!r) continue;
+    const parts = r[3].split(" · ");
+    out.push({
+      id: r[2],
+      title: parts[0].trim(),
+      done: r[1].toLowerCase() === "x",
+      link: r[3].match(/\]\(([^)]+)\)/)?.[1] ?? null,
+      blockedBy: taskIdsIn(r[3].match(/blocked-by:\s*([T\-\d.,\s]+)/)?.[1] ?? ""),
+    });
+  }
+  return out;
+}
+
+/** Việc con kế tiếp: dòng chưa tick đầu tiên không bị chặn bởi con chưa xong hay mã còn mở (`isOpen`). */
+export function nextChild(kids, isOpen = () => false) {
+  const pending = new Set(kids.filter((k) => !k.done).map((k) => k.id));
+  return kids.find((k) => !k.done && !k.blockedBy.some((b) => pending.has(b) || (!b.startsWith(`${parentOf(k.id)}.`) && isOpen(b)))) ?? null;
+}
+
+/** Đường dẫn file con tính từ link trong README cha (`tasks/T-070-x/README.md` + `T-070.2-y.md`). */
+export function childPath(parentLink, childLink) {
+  return childLink ? path.posix.join(path.posix.dirname(parentLink), childLink) : null;
+}
+
+/**
+ * Kiểm mục lục ↔ file task ↔ sổ giữ việc. Trả danh sách vấn đề (chuỗi).
+ * `listDir(rel)` → [{ name, dir }] hoặc null: dùng để kiểm thư mục việc cha và việc con (T-039); không truyền thì bỏ qua phần đó.
+ */
+export function doctor(readme, book, readTask, now = new Date(), listDir = () => null) {
   const issues = [];
   const sec = {};
   let cur = null;
@@ -275,12 +344,14 @@ export function doctor(readme, book, readTask, now = new Date()) {
     else if (cur && /^-\s+T-\d+/.test(line)) cur.push(line);
   }
   const ids = new Map();
+  const links = new Map();
   for (const [name, items] of Object.entries(sec))
     for (const l of items) {
-      const id = l.match(/T-\d+/)[0];
+      const id = taskIdIn(l);
       if (ids.has(id)) issues.push(`${id} nằm ở cả ${ids.get(id)} và ${name}.`);
       ids.set(id, name);
       const link = l.match(/\]\((tasks\/[^)]+)\)/)?.[1];
+      if (link) links.set(id, link);
       if (link && readTask(link) == null) issues.push(`${id}: link ${link} không tồn tại.`);
       const status = link ? readTask(link)?.match(/^status:\s*(\S+)/m)?.[1] : null;
       if (name === "Now" && status && status !== "in-progress" && status !== "blocked") issues.push(`${id} ở Now nhưng status: ${status}.`);
@@ -288,16 +359,57 @@ export function doctor(readme, book, readTask, now = new Date()) {
     }
   const now_ = sec.Now ?? [];
   if (now_.length > MAX_NOW) issues.push(`Now có ${now_.length} việc (tối đa ${MAX_NOW}).`);
-  const max = Math.max(0, ...[...ids.keys()].map((i) => Number(i.slice(2))));
+  const max = Math.max(0, ...[...ids.keys()].map((i) => Number(parentOf(i).slice(2))));
   const next = Number(readme.match(/Mã tiếp theo:\s*T-(\d+)/)?.[1] ?? 0);
   if (next && next <= max) issues.push(`Mã tiếp theo T-${String(next).padStart(3, "0")} không lớn hơn mã lớn nhất T-${String(max).padStart(3, "0")}.`);
   for (const [task, c] of Object.entries(book.claims)) {
-    if (ids.get(task) !== "Now") issues.push(`${task} đang được phiên ${short(c.session)} giữ nhưng không ở Now.`);
+    // Việc con không có dòng riêng: dòng cha phải ở Now.
+    if (ids.get(parentOf(task)) !== "Now") issues.push(`${task} đang được phiên ${short(c.session)} giữ nhưng ${isChildId(task) ? `việc cha ${parentOf(task)} ` : ""}không ở Now.`);
     if (isStale(c, now)) issues.push(`${task}: phiên ${short(c.session)} im ${ago(c.lastSeen, now)} — hỏi user: làm tiếp (/todo resume) hay release.`);
   }
   for (const l of now_) {
-    const id = l.match(/T-\d+/)[0];
-    if (!book.claims[id]) issues.push(`${id} ở Now nhưng không phiên nào giữ — /todo resume ${id} để nhận.`);
+    const id = taskIdIn(l);
+    const held = book.claims[id] || Object.keys(book.claims).some((t) => isChildId(t) && parentOf(t) === id);
+    if (!held) issues.push(`${id} ở Now nhưng không phiên nào giữ — /todo resume ${id} để nhận.`);
+    const md = links.has(id) ? readTask(links.get(id)) : null;
+    if (md && /^size:\s*L\b/m.test(md) && !children(md).length) issues.push(`${id} cỡ L ở Now nhưng chưa tách việc con (## Việc con).`);
+  }
+  // Thư mục việc cha và việc con (T-039).
+  const seen = new Map();
+  for (const base of ["tasks", "tasks/archive"]) {
+    for (const e of listDir(base) ?? []) {
+      if (!e.dir) {
+        if (/^T-\d+\.\d+-.*\.md$/.test(e.name)) issues.push(`${base}/${e.name}: việc con nằm ngoài thư mục việc cha (mồ côi).`);
+        continue;
+      }
+      const pid = e.name.match(/^(T-\d+)-/)?.[1];
+      if (!pid) continue;
+      const dir = `${base}/${e.name}`;
+      const md = readTask(`${dir}/README.md`);
+      if (md == null) {
+        issues.push(`${dir}: thiếu README.md của việc cha.`);
+        continue;
+      }
+      const kids = children(md);
+      const files = (listDir(dir) ?? []).filter((f) => !f.dir && f.name !== "README.md" && f.name.endsWith(".md"));
+      for (const k of kids) {
+        if (seen.has(k.id)) issues.push(`Mã con ${k.id} trùng (${seen.get(k.id)} và ${dir}).`);
+        seen.set(k.id, dir);
+        if (!isChildId(k.id) || parentOf(k.id) !== pid) issues.push(`${k.id} nằm trong danh sách con của ${pid}: sai mã hoặc sai cha.`);
+        else if (k.link && !files.some((f) => f.name === k.link)) issues.push(`${k.id}: link ${k.link} không tồn tại trong ${dir}.`);
+      }
+      const fileIds = new Set();
+      for (const f of files) {
+        const fid = f.name.match(/^(T-\d+\.\d+)-/)?.[1];
+        if (!fid) continue;
+        if (fileIds.has(fid)) issues.push(`Mã con ${fid} trùng: hai file trong ${dir}.`);
+        fileIds.add(fid);
+        if (parentOf(fid) !== pid) issues.push(`${dir}/${f.name}: việc con của ${parentOf(fid)} nằm trong thư mục của ${pid}.`);
+        else if (!kids.some((k) => k.id === fid)) issues.push(`${fid}: file ${f.name} không có trong ## Việc con của ${pid} (mồ côi).`);
+      }
+      const open = kids.filter((k) => !k.done).map((k) => k.id);
+      if (/^status:\s*done\b/m.test(md) && open.length) issues.push(`${pid} đã đóng nhưng còn việc con chưa xong: ${open.join(", ")}.`);
+    }
   }
   return issues;
 }
@@ -361,6 +473,24 @@ export function reserveId(book, session, sources, now = new Date()) {
   return id;
 }
 
+/**
+ * Giữ chỗ mã việc con `T-070.k` (T-039): k lớn hơn mọi số con thấy ở danh sách con (local + origin/main),
+ * tên nhánh, và chỗ đã giữ trong sổ chung. Không đụng bộ đếm `Mã tiếp theo`.
+ */
+export function reserveChildId(book, session, parent, { parentLocal = "", parentMain = "", refNames = "" } = {}, now = new Date()) {
+  const re = new RegExp(`${parent.replace("-", "\\-")}\\.(\\d+)(?!\\d)`, "g");
+  let k = book.childHigh?.[parent] ?? 0;
+  for (const t of [parentLocal, parentMain, refNames, Object.keys(book.reserved ?? {}).join(" ")])
+    for (const m of String(t ?? "").matchAll(re)) k = Math.max(k, Number(m[1]));
+  const id = `${parent}.${k + 1}`;
+  book.childHigh = { ...(book.childHigh ?? {}), [parent]: k + 1 };
+  book.reserved = Object.fromEntries(
+    Object.entries(book.reserved ?? {}).filter(([, r]) => (now - new Date(r.at)) / 864e5 <= SESSION_TTL_DAYS),
+  );
+  book.reserved[id] = { session, at: now.toISOString() };
+  return id;
+}
+
 /** Ghi một sự kiện vào sổ chung; lỗi schema → trả msg. Dùng chung cho CLI và script khác (pr-merge). */
 export function recordEvent(input, claimsFile = claimsPath()) {
   const r = makeEvent(input);
@@ -374,7 +504,7 @@ function main(argv) {
   const file = claimsPath();
   if (!file) return 0;
   const book = load(file);
-  const task = rest.find((a) => /^T-\d+$/.test(a));
+  const task = rest.find((a) => TASK_ID_FULL.test(a));
   const evFile = eventsPathFor(file);
   switch (cmd) {
     case "heartbeat": {
@@ -389,8 +519,10 @@ function main(argv) {
         delete book.moved[session];
       }
       syncMain(book, evFile);
-      const readmeAt = path.join(input.cwd || root, "todo", "README.md");
-      const hold = holdingLine(book, session, existsSync(readmeAt) ? readFileSync(readmeAt, "utf8") : "");
+      const todoAt = path.join(input.cwd || root, "todo");
+      const readmeAt = path.join(todoAt, "README.md");
+      const readAt = (rel) => (existsSync(path.join(todoAt, rel)) ? readFileSync(path.join(todoAt, rel), "utf8") : null);
+      const hold = holdingLine(book, session, existsSync(readmeAt) ? readFileSync(readmeAt, "utf8") : "", readAt);
       if (hold) console.log(hold);
       for (const l of pullEvents(book, readEvents(evFile), session)) console.log(l);
       save(file, book);
@@ -432,6 +564,22 @@ function main(argv) {
         execFileSync("git", ["fetch", "-q", "origin", "main"], { cwd, stdio: "ignore", timeout: 15000 });
       } catch {
         console.log("(không fetch được origin/main; dùng bản đã có)");
+      }
+      const parent = arg(rest, "--parent");
+      if (parent) {
+        if (!TASK_ID_FULL.test(parent) || isChildId(parent)) return console.log(`--parent phải là mã việc cha (T-070), nhận: ${parent}`), 1;
+        const local = findTaskFile(path.join(cwd, "todo"), parent);
+        if (!local?.endsWith("README.md")) return console.log(`${parent} chưa có thư mục việc cha (todo/tasks/${parent}-slug/README.md). Tạo từ todo/tasks/_template-parent.md trước.`), 1;
+        const rel = path.relative(cwd, local).replaceAll("\\", "/");
+        const id = reserveChildId(book, session, parent, {
+          parentLocal: readFileSync(local, "utf8"),
+          parentMain: git(cwd, ["show", `refs/remotes/origin/main:${rel}`]),
+          refNames: git(cwd, ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin", "refs/heads"]),
+        });
+        save(file, book);
+        recordEvent({ kind: "id_reserved", session, task: id }, file);
+        console.log(`${id} — đã giữ chỗ. Thêm dòng "- [ ] ${id} <tên> · [chi tiết](${id}-slug.md)" vào ## Việc con của ${rel}.`);
+        return 0;
       }
       const readmeAt = path.join(cwd, "todo", "README.md");
       const id = reserveId(book, session, {
@@ -531,7 +679,11 @@ function main(argv) {
     case "doctor": {
       const todoDir = path.join(root, "todo");
       const readTask = (rel) => (existsSync(path.join(todoDir, rel)) ? readFileSync(path.join(todoDir, rel), "utf8") : null);
-      const issues = doctor(readFileSync(path.join(todoDir, "README.md"), "utf8"), book, readTask);
+      const listDir = (rel) => {
+        const p = path.join(todoDir, rel);
+        return existsSync(p) ? readdirSync(p, { withFileTypes: true }).map((e) => ({ name: e.name, dir: e.isDirectory() })) : null;
+      };
+      const issues = doctor(readFileSync(path.join(todoDir, "README.md"), "utf8"), book, readTask, new Date(), listDir);
       console.log(issues.length ? issues.map((i) => `- ${i}`).join("\n") : "Không thấy gì lệch.");
       return issues.length ? 1 : 0;
     }
