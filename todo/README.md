@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-072
+Mã tiếp theo: T-073
 
 ## Now
 
@@ -35,6 +35,7 @@ Mã tiếp theo: T-072
 - T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038
 - T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
 - T-071 Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
+- T-072 Mỗi lượt kết thúc bằng một dòng trạng thái (🏁 xong / ⏳ dở / ⛔ chờ bạn), hook Stop bắt khi thiếu · [chi tiết](tasks/T-072-turn-status-line.md) · blocked-by: T-071
 
 ## Later
 
