@@ -58,6 +58,16 @@ Hỏi user trước khi một chat sửa file mà chat khác đang sửa dở.
 ❓ **Bạn chọn:** 1) Bắt đầu 2) Để sau 3) Xem việc khác
 ```
 
+Việc tiếp theo là **việc cha** (SKILL → **Việc cha / việc con**): tiêu đề thẻ ghi mã con kế tiếp (`T-070.3`), các mục nội dung nói về việc con đó; thêm một mục **Việc con** ngay sau Tóm tắt:
+
+```
+**Việc con**
+- Tiến độ 2/5; kế tiếp T-070.3 Bật lõi mặc định (Sonnet).
+- Còn lại: T-070.4, T-070.5 (chờ T-070.3).
+```
+
+"Bắt đầu" = bắt đầu việc con kế tiếp. Việc cha chưa có danh sách con → thẻ việc như thường, **Agent sẽ làm** bước 1 là tách con (pha design của việc cha).
+
 ## 2. Review đóng việc — khi user nói "xong" / "đóng"
 
 Kiểm trước khi viết: tiêu chí đã tick kèm kết quả; bước Kế hoạch chưa tick; thay đổi chưa commit; PR chưa merge; mục Phát sinh. Dòng tóm tắt là kết luận "Nên đóng" hoặc "Chưa nên đóng" kèm lý do chính.

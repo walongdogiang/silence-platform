@@ -441,3 +441,184 @@ test("holdingLine: nhắc việc phiên đang giữ kèm tên từ mục lục; 
   assert.match(holdingLine(book, "s1", ""), /^\[todo\] Phiên này đang giữ T-072\. /);
   assert.equal(holdingLine(book, "s2", readme), null);
 });
+
+// ── Việc cha / việc con (T-039) ──
+import { TASK_ID_FULL, taskIdIn, parentOf, mergeEventsFromCommits as mergeEv } from "./todo-events.mjs";
+import { children, nextChild, findTaskFile, reserveChildId } from "./todo-claims.mjs";
+import { parseItem } from "./todo-brief.mjs";
+import { mkdtempSync, mkdirSync, writeFileSync as wf } from "node:fs";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
+
+test("mã con: nhận T-070.2 ở claim, event, note --to, merged; từ chối T-070.0 / T-070.01 / T-070.1.1", () => {
+  for (const ok of ["T-070", "T-070.1", "T-070.12"]) assert.ok(TASK_ID_FULL.test(ok), ok);
+  for (const bad of ["T-070.0", "T-070.01", "T-070.1.1", "T-070.", "T070.1"]) assert.equal(TASK_ID_FULL.test(bad), false, bad);
+  assert.equal(taskIdIn("feat/T-070.2-core-fs"), "T-070.2");
+  assert.equal(taskIdIn("xong T-070."), "T-070");
+  assert.equal(taskIdIn("T-070.1.1"), undefined);
+  assert.equal(parentOf("T-070.2"), "T-070");
+  const b = emptyBook();
+  assert.ok(claim(b, "T-070.2", "s1", { now: t0 }).ok);
+  assert.equal(claim(b, "T-070.0", "s2", { now: t0 }).ok, false);
+  assert.ok(release(b, "T-070.2", "s1").ok);
+  assert.ok(makeEvent({ kind: "claim", session: "s", task: "T-070.2" }).ok);
+  assert.equal(makeEvent({ kind: "claim", session: "s", task: "T-070.1.1" }).ok, false);
+  assert.ok(makeEvent({ kind: "note", session: "s", to: "T-070.2", text: "x" }).ok);
+  assert.equal(mergedEvent({ number: 5, headRefName: "feat/T-070.2-core-fs", title: "feat: x" }).task, "T-070.2");
+  assert.equal(mergedEvent({ number: 5, headRefName: "fix/x", title: "feat: x (T-070.3) (#5)" }).task, "T-070.3");
+  assert.equal(mergeEv([{ sha: "a".repeat(40), subject: "feat: x (T-070.2) (#7)", files: [] }], [], t0)[0].task, "T-070.2");
+  assert.deepEqual(parseItem("T-033 Bật lõi · blocked-by: T-070.2, T-038").blockedBy, ["T-070.2", "T-038"]);
+});
+
+test("note --to T-070 tới phiên giữ việc con T-070.k; --to T-070.2 chỉ tới con đó", () => {
+  const n = (to) => ev({ kind: "note", session: "other", to, text: "x" }, hours(1));
+  const me = (task) => ({ session: "me", task, areas: [] });
+  assert.equal(relevantFor([n("T-070")], me("T-070.2"), t0.toISOString()).items.length, 1);
+  assert.equal(relevantFor([n("T-070.2")], me("T-070.2"), t0.toISOString()).items.length, 1);
+  assert.equal(relevantFor([n("T-070.2")], me("T-070.3"), t0.toISOString()).items.length, 0);
+  assert.equal(relevantFor([n("T-070")], me("T-0701"), t0.toISOString()).items.length, 0);
+});
+
+const parentMd = (
+  status = "in-progress",
+  list = "- [x] T-070.1 Kiểm kê · [chi tiết](T-070.1-inventory.md)\n- [ ] T-070.2 Lõi nhận fs · [chi tiết](T-070.2-core-fs.md) · blocked-by: T-070.1\n- [ ] T-070.3 Bật mặc định · [chi tiết](T-070.3-on.md) · blocked-by: T-070.2, T-038\n",
+) => task(`status: ${status}\nsize: L`, `## Mục tiêu\n\nx\n\n## Việc con\n\n${list}\n## Tiêu chí xong\n\n- [ ] chung\n`);
+
+test("children / nextChild: đọc ## Việc con, con kế tiếp bỏ qua con bị chặn", () => {
+  const kids = children(parentMd());
+  assert.deepEqual(
+    kids.map((k) => [k.id, k.done, k.link]),
+    [["T-070.1", true, "T-070.1-inventory.md"], ["T-070.2", false, "T-070.2-core-fs.md"], ["T-070.3", false, "T-070.3-on.md"]],
+  );
+  assert.deepEqual(kids[2].blockedBy, ["T-070.2", "T-038"]);
+  assert.equal(nextChild(kids).id, "T-070.2");
+  const k2 = kids.map((k) => (k.id === "T-070.2" ? { ...k, done: true } : k));
+  assert.equal(nextChild(k2, (id) => id === "T-038"), null, "T-070.3 chờ T-038 còn mở");
+  assert.equal(nextChild(k2, () => false).id, "T-070.3");
+  assert.deepEqual(children(task("status: todo")), []);
+});
+
+test("brief: việc cha hiện con k/n, con kế tiếp, model của con kế, con đang giữ; blocked-by mã con", () => {
+  const row = "- T-070 Xoá Engine Rust · [chi tiết](tasks/T-070-remove-engine/README.md)";
+  const md = ["Mã tiếp theo: T-080", "## Now", row, "## Next", "- T-033 Bật lõi · blocked-by: T-070.2", "- T-071 Việc khác"].join("\n");
+  const files = {
+    "tasks/T-070-remove-engine/README.md": parentMd(),
+    "tasks/T-070-remove-engine/T-070.2-core-fs.md": task("type: chore"),
+  };
+  const book = emptyBook();
+  claim(book, "T-070.2", "other-session", { now: t0 });
+  const out = brief(md, (p) => files[p] ?? null, { session: "me", book, now: hours(1) });
+  assert.match(
+    out,
+    /Đang làm \(Now\): T-070 Xoá Engine Rust \(tiêu chí 0\/1 · con 1\/3 · tiếp: T-070\.2 Lõi nhận fs · T-070\.2 phiên other-se đang giữ, 1 giờ trước · model: Sonnet\)/,
+  );
+  assert.match(out, /Sau đó: T-071 Việc khác/, "T-033 còn bị chặn vì T-070.2 chưa tick");
+  const md2 = ["## Now", "## Next", row].join("\n");
+  assert.match(brief(md2, (p) => files[p] ?? null, {}), /Việc tiếp theo: T-070 Xoá Engine Rust \(tiêu chí 0\/1 · con 1\/3 · tiếp: T-070\.2 Lõi nhận fs · model: Sonnet\)/);
+});
+
+test("holdingLine: việc con lấy tên từ danh sách con của cha", () => {
+  const book = emptyBook();
+  claim(book, "T-070.2", "s1", { now: t0 });
+  const readme = "## Now\n\n- T-070 Xoá Engine Rust · [chi tiết](tasks/T-070-x/README.md)\n";
+  const read = (p) => (p === "tasks/T-070-x/README.md" ? parentMd() : null);
+  assert.match(holdingLine(book, "s1", readme, read), /đang giữ T-070\.2: Lõi nhận fs — con của T-070 Xoá Engine Rust\./);
+  assert.match(holdingLine(book, "s1", "", () => null), /đang giữ T-070\.2: con của T-070\./);
+});
+
+test("reserveChildId: không trùng danh sách con (local + main), nhánh, chỗ phiên khác đã giữ", () => {
+  const book = emptyBook();
+  assert.equal(reserveChildId(book, "s1", "T-070", { parentLocal: parentMd() }, t0), "T-070.4");
+  assert.equal(reserveChildId(book, "s2", "T-070", { parentLocal: parentMd() }, t0), "T-070.5", "phiên kế không trùng chỗ vừa giữ");
+  assert.equal(reserveChildId(book, "s1", "T-070", { parentMain: "- [ ] T-070.9 x", refNames: "origin/feat/T-070.11-y" }, t0), "T-070.12");
+  assert.equal(reserveChildId(emptyBook(), "s1", "T-07", { parentLocal: parentMd() }, t0), "T-07.1", "T-070.x không phải con của T-07");
+  assert.equal(reserveChildId(emptyBook(), "s1", "T-080", {}, t0), "T-080.1");
+});
+
+test("findTaskFile: việc thường, việc cha (thư mục/README.md), việc con, cả trong archive", () => {
+  const dir = mkdtempSync(nodePath.join(tmpdir(), "todo-"));
+  const t = nodePath.join(dir, "tasks");
+  mkdirSync(nodePath.join(t, "T-070-remove-engine"), { recursive: true });
+  mkdirSync(nodePath.join(t, "archive", "T-060-old"), { recursive: true });
+  for (const f of ["T-012-x.md", "T-0700-y.md", "T-070-remove-engine/README.md", "T-070-remove-engine/T-070.1-a.md", "T-070-remove-engine/T-070.10-b.md", "archive/T-060-old/README.md", "archive/T-060-old/T-060.1-c.md"])
+    wf(nodePath.join(t, f), "");
+  const rel = (id) => {
+    const f = findTaskFile(dir, id);
+    return f && nodePath.relative(t, f).replaceAll("\\", "/");
+  };
+  assert.equal(rel("T-012"), "T-012-x.md");
+  assert.equal(rel("T-070"), "T-070-remove-engine/README.md");
+  assert.equal(rel("T-070.1"), "T-070-remove-engine/T-070.1-a.md");
+  assert.equal(rel("T-070.10"), "T-070-remove-engine/T-070.10-b.md");
+  assert.equal(rel("T-070.2"), null);
+  assert.equal(rel("T-0700"), "T-0700-y.md");
+  assert.equal(rel("T-060.1"), "archive/T-060-old/T-060.1-c.md");
+});
+
+test("doctor: con mồ côi, con sai thư mục, mã con trùng, cha đóng còn con mở, việc L ở Now chưa tách; con đang giữ cần cha ở Now", () => {
+  const md = [
+    "Mã tiếp theo: T-090",
+    "## Now",
+    "- T-070 Xoá Engine · [chi tiết](tasks/T-070-x/README.md)",
+    "- T-080 Việc to · [chi tiết](tasks/T-080-big.md)",
+    "## Next",
+    "- T-075 Cha khác · [chi tiết](tasks/T-075-y/README.md)",
+  ].join("\n");
+  const files = {
+    "tasks/T-070-x/README.md": parentMd(),
+    "tasks/T-080-big.md": task("status: in-progress\nsize: L"),
+    "tasks/T-075-y/README.md": task("status: todo", "## Việc con\n\n- [ ] T-070.2 lặp · [chi tiết](T-075.2-z.md)\n"),
+    "tasks/archive/T-060-old/README.md": task("status: done", "## Việc con\n\n- [x] T-060.1 a\n- [ ] T-060.2 b\n"),
+  };
+  const dirs = {
+    tasks: [
+      { name: "T-070-x", dir: true },
+      { name: "T-075-y", dir: true },
+      { name: "T-080-big.md", dir: false },
+      { name: "T-070.9-lac.md", dir: false },
+      { name: "archive", dir: true },
+    ],
+    "tasks/T-070-x": ["README.md", "T-070.1-inventory.md", "T-070.2-core-fs.md", "T-070.3-on.md", "T-070.4-thua.md", "T-071.1-sai.md"].map((name) => ({ name })),
+    "tasks/T-075-y": [{ name: "README.md" }],
+    "tasks/archive": [{ name: "T-060-old", dir: true }],
+    "tasks/archive/T-060-old": [{ name: "README.md" }],
+  };
+  const book = emptyBook();
+  claim(book, "T-070.2", "s1", { now: t0 });
+  claim(book, "T-075.1", "s2", { now: t0 });
+  const issues = doctor(md, book, (p) => files[p] ?? null, hours(1), (p) => dirs[p] ?? null).join("\n");
+  assert.match(issues, /tasks\/T-070\.9-lac\.md: việc con nằm ngoài thư mục việc cha/);
+  assert.match(issues, /T-070\.4: file T-070\.4-thua\.md không có trong ## Việc con của T-070 \(mồ côi\)/);
+  assert.match(issues, /T-071\.1-sai\.md: việc con của T-071 nằm trong thư mục của T-070/);
+  assert.match(issues, /Mã con T-070\.2 trùng/);
+  assert.match(issues, /T-070\.2 nằm trong danh sách con của T-075: sai mã hoặc sai cha/);
+  assert.match(issues, /T-060 đã đóng nhưng còn việc con chưa xong: T-060\.2/);
+  assert.match(issues, /T-080 cỡ L ở Now nhưng chưa tách việc con/);
+  assert.doesNotMatch(issues, /T-070 cỡ L/, "T-070 đã có việc con");
+  assert.match(issues, /T-075\.1 đang được phiên s2 giữ nhưng việc cha T-075 không ở Now/);
+  assert.doesNotMatch(issues, /T-070\.2 đang được/);
+  assert.doesNotMatch(issues, /T-070 ở Now nhưng không phiên nào giữ/, "con đang giữ = cha có người giữ");
+  assert.match(issues, /T-080 ở Now nhưng không phiên nào giữ/);
+});
+
+test("claim lần hai trong worktree ghi lại worktree và nhánh (trước đây giữ thư mục chính)", () => {
+  const b = emptyBook();
+  assert.ok(claim(b, "T-039", "s1", { now: t0 }).ok);
+  assert.equal(b.claims["T-039"].worktree, null);
+  const r = claim(b, "T-039", "s1", { now: hours(1), worktree: "D:/wt/T-039", branch: "feat/T-039-x" });
+  assert.match(r.msg, /đã giữ T-039/);
+  assert.deepEqual([b.claims["T-039"].worktree, b.claims["T-039"].branch], ["D:/wt/T-039", "feat/T-039-x"]);
+  claim(b, "T-039", "s1", { now: hours(2) });
+  assert.equal(b.claims["T-039"].worktree, "D:/wt/T-039", "claim không kèm worktree thì giữ nguyên");
+});
+
+test("ví dụ trong skill todo và mẫu việc cha khớp với script (T-039)", async () => {
+  const { readFileSync: rf } = await import("node:fs");
+  const skill = rf(new URL("../.claude/skills/todo/SKILL.md", import.meta.url), "utf8");
+  const line = skill.match(/^\s*`(- \[ \] T-070\.2 [^`]+)`/m)?.[1];
+  assert.ok(line, "skill có dòng ví dụ ## Việc con");
+  assert.deepEqual(children(`## Việc con\n\n${line}\n`).map((k) => [k.id, k.link, k.blockedBy]), [["T-070.2", "T-070.2-core-fs.md", ["T-070.1"]]]);
+  assert.equal(taskIdIn("feat/T-070.2-core-fs"), "T-070.2");
+  const tpl = rf(new URL("../todo/tasks/_template-parent.md", import.meta.url), "utf8");
+  assert.deepEqual(children(tpl).map((k) => [k.id, k.blockedBy]), [["T-000.1", []], ["T-000.2", ["T-000.1"]]]);
+});

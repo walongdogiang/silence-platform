@@ -30,7 +30,7 @@ Việc không có `T-xxx` (user nhờ trong chat):
 
 ## Worktree
 - Không đổi nhánh, pull hay stash ở thư mục chính của repo; nơi đó là của user.
-- **Mỗi việc một worktree mới**, tạo bằng `node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <type>/<T-xxx-slug> --session <id>`: nằm ở thư mục chung `<repo chính>-worktrees\<tên>` (vd `D:\vuhieu\5ilence-worktrees\T-020`), từ `origin/main` mới fetch, không theo dõi `main`, chat này thành chủ. Rồi `npm install` nếu cần. Không dùng lại worktree có sẵn, không tự đặt chỗ khác.
+- **Mỗi việc một worktree mới**, tạo bằng `node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <type>/<T-xxx-slug> --session <id>` (việc con: tên `T-070.2`, nhánh `<type>/T-070.2-slug`): nằm ở thư mục chung `<repo chính>-worktrees\<tên>` (vd `D:\vuhieu\5ilence-worktrees\T-020`), từ `origin/main` mới fetch, không theo dõi `main`, chat này thành chủ. Rồi `npm install` nếu cần. Không dùng lại worktree có sẵn, không tự đặt chỗ khác.
 - Chủ worktree tính theo **chat** (T-020, ADR 0006). Hook chặn `commit`/`push`/`switch`/`checkout`/`reset`/`rebase`/`merge`/`stash`/`pull`/`worktree remove` trong worktree của chat khác còn hoạt động (< 2 giờ), và hỏi user khi chat đó im ≥ 2 giờ. Bị chặn → tạo worktree riêng; **không lách** (đổi thư mục, gọi git kiểu khác). Lệnh chỉ đọc không bị chặn.
 - Xong việc (sau merge): `git worktree remove <thư-mục>` rồi xoá nhánh cục bộ. Đầu phiên có dòng "Thư mục worktree có thể dọn" → kiểm từng thư mục rồi hỏi một lần bằng thẻ **Dọn worktree** (skill `todo` → `cards.md` → 3), kèm đánh giá vì sao xoá/giữ; chỉ xoá đúng thư mục user chọn.
 
