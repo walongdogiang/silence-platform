@@ -3,6 +3,7 @@
 Mới nhất ở trên. Mỗi dòng: `YYYY-MM-DD · T-xxx Tên việc · PR #n` (kèm link `tasks/archive/…` nếu việc có file chi tiết).
 Không cần đọc file này khi bắt đầu phiên; chỉ mở khi cần tra lại.
 
+2026-11-28 · T-038 Harness chỉ cộng thêm trên Claude CLI, mục đích clone desktop app (sửa ADR 0004) · PR #104 · [chi tiết](tasks/archive/T-038-additive-harness.md)
 2026-11-28 · T-039 Việc cha / việc con với mã dấu chấm (T-070.1) · PR #102 · [chi tiết](tasks/archive/T-039-subtask-ids.md)
 2026-11-27 · T-072 Dòng trạng thái cuối lượt (🏁 xong / ⏳ dở / ⛔ chờ bạn) + dòng nhắc việc đang giữ · PR #97 · [chi tiết](tasks/archive/T-072-turn-status-line.md)
 2026-11-27 · T-003 1.12 Cột pane bên phải + tab Xem trước (dev server localhost) · PR #91 · [chi tiết](tasks/archive/T-003-browser-preview.md)

@@ -16,7 +16,7 @@ Số `x.y` trong tên việc là mốc trong [lộ trình chuyển sang harness]
 
 Mỗi chat làm một việc; Now tối đa 2 việc. Việc nào đang ở chat nào: `node scripts/todo-claims.mjs list`.
 
-Mã tiếp theo: T-074
+Mã tiếp theo: T-075
 
 ## Now
 
@@ -26,11 +26,11 @@ Mã tiếp theo: T-074
 
 <!-- Có thứ tự, 3–7 việc. Việc tiếp theo = việc đầu tiên không bị blocked-by. -->
 
-- T-038 Harness chỉ cộng thêm trên Claude CLI, mục đích clone desktop app (sửa ADR 0004) · [chi tiết](tasks/T-038-additive-harness.md)
 - T-006 2.1a Kiểm kê RPC còn qua Engine Rust, quyết định mang sang lõi hay bỏ · [chi tiết](tasks/T-006-remove-rust-engine.md)
 - T-031 2.1b Lõi nhận fs.* và terminal (node-pty) · [chi tiết](tasks/T-031-core-fs-terminal.md) · blocked-by: T-006
 - T-032 2.1c Lõi nhận lịch sử chat, session.context, rewind, fork · [chi tiết](tasks/T-032-core-history-context.md) · blocked-by: T-006
-- T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038
+- T-074 Adapter Claude chạy như Claude trong terminal (4 chỗ lệch) · [chi tiết](tasks/T-074-adapter-cli-parity.md) · blocked-by: T-038
+- T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038, T-074
 
 ## Later
 

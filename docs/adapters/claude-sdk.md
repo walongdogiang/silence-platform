@@ -23,7 +23,7 @@ Nguồn: tài liệu Agent SDK TypeScript tại `code.claude.com/docs/en/agent-s
 | Interface `Backend` | Agent SDK |
 | --- | --- |
 | `start` | `query({ prompt: AsyncIterable<SDKUserMessage>, options })`, **streaming input** (bắt buộc cho `interrupt`, `setPermissionMode`, `setModel`) |
-| `options` cố định | `settingSources: ['project']` · `permissionMode: 'default'` · `tools: { type: 'preset', preset: 'claude_code' }` · `systemPrompt: { type: 'preset', preset: 'claude_code', append: <hồ sơ cá nhân> }` · `plugins: [{ type: 'local', path: '~/.silence/plugin' }]` · `includePartialMessages: true` · `hooks.PreToolUse` · `canUseTool` · `cwd` · `env` (mục Xác thực) |
+| `options` cố định | `settingSources: ['user', 'project', 'local']` · `permissionMode: 'default'` · `tools: { type: 'preset', preset: 'claude_code' }` + `disallowedTools` (mục Cấu hình như terminal) · `systemPrompt: { type: 'preset', preset: 'claude_code', append: <hồ sơ cá nhân> }` · `plugins: [{ type: 'local', path: '~/.silence/plugin' }]` · `includePartialMessages: true` · `hooks.PreToolUse` · `canUseTool` · `cwd` · `env` (mục Xác thực) |
 | `resume` / `fork` | `resume: backendSessionId`, `forkSession: true`, `resumeSessionAt: atMessageId` |
 | `limits` | `maxTurns`, `maxBudgetUsd` (chi phí do client ước tính) |
 | `send` | đẩy `SDKUserMessage` vào hàng đợi input của `query` |
@@ -33,6 +33,19 @@ Nguồn: tài liệu Agent SDK TypeScript tại `code.claude.com/docs/en/agent-s
 | `close` | kết thúc iterable input, rồi `query.close()` |
 
 Không bao giờ dùng `acceptEdits`, `bypassPermissions`, `dontAsk`, `auto`: các mode này cho phép ở bước 4 của thứ tự đánh giá, bỏ qua `canUseTool`.
+
+## Cấu hình như terminal (đích, ADR 0004 Decision 6)
+
+Quyết định 2026-11-28 (T-038): Claude trong 5ilence chạy như Claude trong terminal, harness chỉ cộng thêm. **Code chưa đổi**: adapter hiện vẫn dùng `settingSources: ['project']`, danh sách 15 tool (`toolMap.ts`) và `env` theo danh sách giữ (`env.ts`); sửa ở T-074.
+
+| Chỗ | Đích | Ràng buộc |
+| --- | --- | --- |
+| `settingSources` | `['user', 'project', 'local']`; từ chối duyệt cấu hình repo → `['user']` | Duyệt cấu hình repo giữ nguyên cho `project`, `local`, `.mcp.json`. Kiểm `apiKeySource` giữ nguyên (chặn `apiKeyHelper` ở bất kỳ file nào) |
+| Luật quyền | Risk Engine đọc thêm luật trong file settings của Claude ([permissions.md](../security/permissions.md)) | Luật allow của Claude bỏ qua `canUseTool` nhưng không bỏ qua hook, nên Risk Engine vẫn quyết mọi lệnh gọi |
+| `tools` | preset `claude_code`; `disallowedTools` chỉ cho tool đi vòng qua harness hoặc cần cloud (vd `RemoteTrigger`, `PushNotification`, tool `Artifact…`, connector `mcp__claude_ai_*`), mỗi tên một lý do trong `toolMap.ts` | Bộ đủ tốn thêm token tạo cache mỗi session (spike: ~40k với bộ rút gọn); đo lại ở T-074. Tool lạ vẫn qua hook → `ask` |
+| `env` | giữ toàn bộ `process.env`, bỏ `AUTH_VARS` và biến của app chủ (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SSE_PORT`, `ELECTRON_*`…; danh sách chốt bằng test) | Lệnh shell của agent cần đủ biến như terminal. Test: `system/init.tools` không có tool của app chủ |
+
+`AskUserQuestion` tới host qua `canUseTool`, host trả `{ behavior: 'allow', updatedInput: { questions, answers } }` (trang user-input). Spike #6: hook trả `allow` thì **không** gọi `canUseTool`. Vì vậy với `AskUserQuestion`, hook phải chờ câu trả lời của người dùng rồi trả `allow` kèm `updatedInput` có `answers` **[chưa xác minh, spike ở T-074]**. `EnterPlanMode` đi đường nào: chưa xác minh.
 
 ## Duyệt tool call
 
@@ -68,8 +81,8 @@ SDK `0.3.327` (kèm Claude Code `2.1.327`), Windows 10, phiên đăng nhập Cla
 | 10 | Đăng nhập | `apiKeySource: "none"` khi dùng phiên Pro, không cần biến môi trường nào |
 
 **Phát hiện cần xử lý trong adapter:**
-- **Môi trường kế thừa làm lọt tool của app chủ.** Chạy từ trong app Claude desktop, session SDK thấy thêm tool `Artifact…` của app đó. Dựng `env` từ **danh sách cho phép** (PATH, SystemRoot, USERPROFILE, APPDATA, LOCALAPPDATA, TEMP…), không copy cả `process.env`.
-- **Tool theo tài khoản vẫn có dù chỉ nạp `project`:** connector claude.ai (`mcp__claude_ai_*`), `CronCreate`, `RemoteTrigger`, `SendToProject`, `PushNotification`… Truyền `tools` là danh sách rõ ràng (Read, Write, Edit, Bash, PowerShell, Glob, Grep, WebSearch, Task, Skill, TodoWrite, ExitPlanMode, các MCP của project) để vừa an toàn vừa bớt token.
+- **Môi trường kế thừa làm lọt tool của app chủ.** Chạy từ trong app Claude desktop, session SDK thấy thêm tool `Artifact…` của app đó. Cách xử lý lúc spike: dựng `env` từ **danh sách cho phép**. Từ 2026-11-28 đổi sang giữ toàn bộ, chỉ bỏ biến của app chủ (mục Cấu hình như terminal).
+- **Tool theo tài khoản vẫn có dù chỉ nạp `project`:** connector claude.ai (`mcp__claude_ai_*`), `CronCreate`, `RemoteTrigger`, `SendToProject`, `PushNotification`… Cách xử lý lúc spike: truyền `tools` là danh sách rõ ràng. Từ 2026-11-28 đổi sang preset + `disallowedTools` cho đúng các tool này (mục Cấu hình như terminal).
 - **Mỗi session mới tốn khoảng 40k token tạo cache** (system prompt + định nghĩa tool). Thu gọn danh sách tool giảm con số này; tái dùng session (resume) rẻ hơn mở mới.
 - **Kiểu message mới** ngoài tài liệu: `system/task_summary`, `system/thinking_tokens`, `system/post_turn_summary`, `system/background_tasks_changed`, `system/task_started|progress|updated|notification`; `system/init` xuất hiện lại khi có subagent. Adapter bỏ qua kiểu không biết, không lỗi.
 - **`electron.exe` trên Windows** là app giao diện nên không in ra console; lõi chạy dưới Electron phải giao tiếp qua pipe/MessagePort, không dựa vào stdout của console.
@@ -84,7 +97,7 @@ Hook dạng lệnh trong `.claude/settings.json` và server trong `.mcp.json` ch
 
 - **Mục được liệt kê:** trong `.claude/settings.json` có `hooks` (từng lệnh/URL), từng biến `env`, `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `otelHeadersHelper`, `statusLine`, `fileSuggestion`, `enabledPlugins`, `extraKnownMarketplaces`, `enableAllProjectMcpServers`, `enabledMcpjsonServers`, `mcpServers`. Trong `.mcp.json` có từng server (lệnh + tên biến env). Trong `.claude/commands/**/*.md` và `.claude/skills/**/*.md` có mỗi `` !`lệnh` ``. File JSON hỏng được liệt kê dạng `invalid`.
 - **Hash:** sha256 của danh sách mục, nên sửa vô hại (quyền, model, định dạng) không làm hỏi lại. Bản duyệt lưu theo workspace ở `<dataDir>/repo-config-approvals.jsonl`; `repo_config.approve` chỉ nhận hash khớp với nội dung trên đĩa lúc đó.
-- **`session.create`:** chưa duyệt thì trả lỗi JSON-RPC `-32010` (`REPO_CONFIG_REVIEW`) kèm `data.review`. Client duyệt (`repo_config.approve`) rồi gọi lại, hoặc gọi lại với `repo_config: "ignore"`: khi đó adapter dùng `settingSources: []`, không nạp `CLAUDE.md`, skill, hook, MCP của repo. Không người trông thì tự chạy kiểu `ignore` và ghi audit.
+- **`session.create`:** chưa duyệt thì trả lỗi JSON-RPC `-32010` (`REPO_CONFIG_REVIEW`) kèm `data.review`. Client duyệt (`repo_config.approve`) rồi gọi lại, hoặc gọi lại với `repo_config: "ignore"`: khi đó adapter dùng `settingSources: []` (đích: `['user']`, T-074), không nạp `CLAUDE.md`, skill, hook, MCP của repo. Không người trông thì tự chạy kiểu `ignore` và ghi audit.
 - **Mỗi lượt:** lõi quét lại; cấu hình đổi sang nội dung chưa duyệt thì `session.prompt` trả `-32010`, lượt không chạy.
 - **Studio:** main hiện hộp thoại native liệt kê các mục (`apps/studio/src/main/repoReview.ts`) với Cho phép / Chạy không dùng cấu hình repo / Huỷ; giữa session chỉ có Cho phép / Huỷ.
 
@@ -113,7 +126,7 @@ Danh sách tool thật lấy từ `system/init.tools` mỗi session. Spike thấ
 
 ## Xác thực, usage, quota
 
-- `env` của SDK **thay thế** môi trường tiến trình con chứ không gộp. Adapter dựng `env` từ môi trường hiện có, **bỏ** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`. Ở chế độ không tương tác, API key luôn được ưu tiên nếu có.
+- `env` của SDK **thay thế** môi trường tiến trình con chứ không gộp. Adapter dựng `env` từ môi trường hiện có (đích: toàn bộ, trừ biến của app chủ), **bỏ** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`. Ở chế độ không tương tác, API key luôn được ưu tiên nếu có.
 - `.claude/settings.json` của project có thể đặt `apiKeyHelper` hay `env`. Lõi kiểm `apiKeySource` trong `system/init`: phiên đăng nhập Pro cho `"none"` (đã xác minh); khác giá trị đó thì đóng session với `auth_required`.
 - `usage`: lấy từ `result.usage` và `total_cost_usd`. Tài liệu ghi rõ đây là **ước tính phía client** → `usd_kind: 'estimate'`. Với gói Pro, con số này chỉ để tham khảo.
 - `quota`: từ `rate_limit_event.rate_limit_info` và `SDKAssistantMessage.error` (`rate_limit`, `billing_error`, `overloaded`, `authentication_failed`). Hình dạng thấy trong spike: `{ status: "allowed" | "allowed_warning" | "rejected", resetsAt (giây epoch), rateLimitType: "five_hour" | "seven_day", utilization (0–1), surpassedThreshold, unifiedWindows: { five_hour: { utilization, resetsAt, status }, seven_day: { … } }, overageStatus, isUsingOverage }`. Lõi lấy cửa sổ có `utilization` cao nhất làm trạng thái quota. `SDKAPIRetryMessage` chưa gặp.

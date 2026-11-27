@@ -1,5 +1,5 @@
 ---
-description: Lộ trình chuyển 5ilence từ Engine Rust sang lõi TS và adapter Claude — giữ/mang sang/xoá, các giai đoạn tới khi bỏ được Claude desktop và điều khiển từ điện thoại.
+description: Lộ trình chuyển 5ilence từ Engine Rust sang lõi TS và adapter Claude — giữ/mang sang/xoá, các giai đoạn tới khi ngang tính năng Claude desktop app (danh mục clone) và điều khiển từ điện thoại.
 type: roadmap
 status: draft
 code:
@@ -11,7 +11,7 @@ code:
 ---
 # Lộ trình chuyển sang harness
 
-Quyết định: [ADR 0004](../adr/0004-backend-adapters.md). API lõi: [protocol.md](protocol.md). Adapter Claude: [claude-sdk.md](claude-sdk.md).
+Quyết định: [ADR 0004](../adr/0004-backend-adapters.md). API lõi: [protocol.md](protocol.md). Adapter Claude: [claude-sdk.md](claude-sdk.md). Tính năng desktop app cần có: [desktop-parity.md](desktop-parity.md).
 
 Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc một PR nhỏ từ `origin/main`. Engine Rust đóng băng: chỉ sửa lỗi chặn việc dùng hằng ngày, không thêm tính năng, không dọn từng phần.
 
@@ -71,12 +71,13 @@ Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc 
 | # | Nhánh | Nội dung |
 | --- | --- | --- |
 | 2.1 | `chore/remove-rust-engine` (có thể chia) | Theo dòng "Giai đoạn 2" ở bảng Xoá |
+| 2.1x | `feat/T-074-adapter-cli-parity` | Adapter Claude chạy như terminal (ADR 0004 Decision 6): `settingSources` đủ ba nguồn, luật quyền chung với Claude, tool preset, env đầy đủ, thẻ `AskUserQuestion`. Làm trước 2.1d (bật lõi mặc định) |
 | 2.2 | `feat/tray` | Lõi sống ở khay khi đóng cửa sổ; tự chạy cùng hệ điều hành (tuỳ chọn) |
 | 2.3 | `feat/job-queue` | Hàng đợi, giới hạn chạy cùng lúc theo quota, dừng việc nền khi gần hết quota |
 
 **Xong khi:** repo không còn Rust, CI xanh, đóng cửa sổ thì việc vẫn chạy.
 
-## Giai đoạn 3 — Bỏ hẳn Claude desktop
+## Giai đoạn 3 — Ngang tính năng Claude desktop app
 
 | # | Nhánh | Nội dung |
 | --- | --- | --- |
@@ -86,7 +87,9 @@ Nguyên tắc: xong giai đoạn này mới sang giai đoạn sau. Mỗi việc 
 | 3.4 | `feat/workflows` | Quy trình khai báo (plan → làm → kiểm → PR) |
 | 3.5 | `feat/model-per-step` | `setModel` theo bước, cảnh báo quota |
 
-**Xong khi:** 2 tuần không mở Claude desktop.
+Các mục trên là phần lớn của dòng `Next` trong [danh mục clone](desktop-parity.md); dòng `Next` khác của danh mục (tách session, câu hỏi cuối có nút…) thành việc riêng khi người dùng chọn.
+
+**Xong khi:** mọi dòng `Now` và `Next` của danh mục clone là `có`, và 2 tuần không mở Claude desktop app.
 
 ## Giai đoạn 4 — Điều khiển từ điện thoại
 

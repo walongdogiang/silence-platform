@@ -12,7 +12,7 @@ type: prd
 
 5ilence là **harness cá nhân cho lĩnh vực lập trình** (code, database, app, website, hệ thống). Các app AI coding có sẵn (Claude Code, Codex, Cursor…) phục vụ mọi người nên phải "cân bằng". 5ilence **chuyên môn hoá** chúng cho riêng người dùng qua tám trụ: hồ sơ cá nhân, tri thức project, kỹ năng, quy trình, kiểm chứng, vòng học, đo lường, kiểm soát và kinh tế quota.
 
-Hướng bắc: **không tự xây vòng agent, không đuổi theo tính năng của Cursor hay Claude Code.** Vòng agent là của app có sẵn (Claude Code trước, qua Agent SDK). 5ilence giữ phần làm nên khác biệt: Risk Engine, audit, hồ sơ và skill của người dùng, kiểm chứng, số liệu, và Studio làm nơi làm việc hằng ngày. Không fork VS Code; 5ilence Studio (Electron) + 5ilence Engine (sidecar Rust).
+Hướng bắc ([ADR 0004 → Mục đích](adr/0004-backend-adapters.md)): **bám Claude CLI, harness chỉ cộng thêm, thay hẳn Claude desktop app.** Vòng agent, tool, system prompt là của Claude Code (qua Agent SDK); 5ilence không làm sai lệch cách Claude chạy. 5ilence bù chỗ CLI yếu hơn desktop app, có bản tương đương cho tính năng của app theo thứ tự ưu tiên ([danh mục clone](adapters/desktop-parity.md)), và giữ phần làm nên khác biệt: Risk Engine, audit, hồ sơ và skill của người dùng, kiểm chứng, số liệu, và Studio làm nơi làm việc hằng ngày. Không fork VS Code; 5ilence Studio (Electron) + 5ilence Engine (sidecar Rust).
 
 ## Persona
 

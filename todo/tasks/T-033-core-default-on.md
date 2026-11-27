@@ -7,7 +7,7 @@ phase:
 area: [core, studio]
 size: S
 model: sonnet
-depends: [T-031, T-032, T-038]
+depends: [T-031, T-032, T-038, T-074]
 branch:
 pr:
 created: 2026-11-26

@@ -62,6 +62,7 @@ Họ crate phụ vẫn `silence-*` (protocol, tools, …). Không đổi sang t�
 | [adapters/protocol.md](adapters/protocol.md) | API lõi (MessagePort/WebSocket) và interface Backend: ToolCall, decide, sự kiện, vòng đời, kiểm chứng, hàng đợi, quota | Code `packages/core`, adapter, hàng đợi job |
 | [adapters/claude-sdk.md](adapters/claude-sdk.md) | Adapter Claude ánh xạ sang Agent SDK, thứ tự hook/permission, test cần xác minh; ánh xạ Codex/Cursor/agy/ACP | Code adapter Claude hoặc thêm backend mới |
 | [adapters/migration.md](adapters/migration.md) | Mang gì từ Rust sang TS, xoá gì và khi nào, lộ trình 6 giai đoạn | Chọn việc tiếp theo, chia PR |
+| [adapters/desktop-parity.md](adapters/desktop-parity.md) | Danh mục clone Claude desktop app: tính năng → bản 5ilence → hiện trạng → ưu tiên → việc | Chọn việc ngang tính năng desktop, thêm tính năng mới |
 | [pr-watch.md](pr-watch.md) | Spec Watch/Incident/Run/Lease, vòng đời, monitor `gh`, lượt sửa, commit status, RPC `watch.*`, UX Đang chạy | Khi code Engine/protocol/Studio cho theo dõi PR |
 | [threat-model.md](threat-model.md) | Tài sản, trust boundary, giảm thiểu đe dọa local agent | Đổi permission, sandbox, MCP, mạng |
 | [security/permissions.md](security/permissions.md) | 4 tầng rủi ro, chế độ Thận trọng/Cân bằng/Tự chủ, Risk Engine, taint, card hỏi, nạp hướng dẫn cho AI | Đổi permission, `ask_perm`, Risk Engine, chế độ quyền |

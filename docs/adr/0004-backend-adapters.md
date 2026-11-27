@@ -1,5 +1,5 @@
 ---
-description: 5ilence là harness cá nhân chuyên môn hoá app AI coding có sẵn; tám trụ, lõi TS chạy ở khay, Claude qua Agent SDK, adapter cho backend sau, điều khiển từ xa qua Tailscale.
+description: 5ilence là harness cá nhân chỉ cộng thêm trên Claude CLI để thay hẳn Claude desktop app; mục đích, hoà giải nguyên tắc cũ, tám trụ, lõi TS ở khay, Agent SDK, Tailscale.
 type: adr
 status: draft
 code:
@@ -10,7 +10,7 @@ code:
 ---
 # ADR 0004 — Harness chuyên môn hoá trên các app AI coding có sẵn
 
-**Status:** Proposed · **Date:** 2026-11-19
+**Status:** Proposed · **Date:** 2026-11-19 · **Sửa:** 2026-11-28 (mục đích, hoà giải, Decision 6 — T-038)
 **Spec:** [../adapters/protocol.md](../adapters/protocol.md) (API lõi và adapter), [../adapters/claude-sdk.md](../adapters/claude-sdk.md) (adapter Claude, backend sau), [../adapters/migration.md](../adapters/migration.md) (lộ trình).
 **Thay thế:** phần Engine Rust của [ADR 0001](0001-architecture.md) và vòng agent tự viết của [ADR 0002](0002-harness-architecture.md).
 
@@ -21,8 +21,25 @@ code:
 - Hiện trạng: Engine Rust (khoảng 28k dòng) tự viết vòng agent, tool, router, gateway, compact, sandbox Windows, eval. Đường chat duy nhất chạy `claude -p --tools ""` qua MCP bridge, nên mất phần tốt nhất của Claude Code.
 - Tài khoản: gói **Claude Pro**, không API key; quota là giới hạn thật. Không cần gọi API model trực tiếp. Sau này có thể thêm Codex CLI, Antigravity CLI.
 - Một máy; Windows/PowerShell là chính, có thể macOS/Linux. Trả lời theo ngôn ngữ người hỏi.
-- Người dùng dùng app Claude desktop hằng tuần cho: session song song, theo dõi PR/Auto-fix, việc theo lịch, browser preview. Muốn bỏ Claude desktop thì phải có đủ bốn thứ này. Muốn điều khiển từ điện thoại.
+- Người dùng đang làm việc hằng ngày trong Claude desktop app (tab Code). Đích là 5ilence nối Claude CLI và **thay hẳn** desktop app, nên thiết kế coi người dùng là người dùng CLI. Thứ dùng hằng tuần: session song song, theo dõi PR/Auto-fix, việc theo lịch, browser preview; muốn điều khiển từ điện thoại.
 - Người dùng không còn dùng Cursor.
+
+## Mục đích
+
+1. **Bù chỗ CLI yếu hơn desktop app.** Người dùng dùng Claude CLI qua 5ilence; cái gì app làm tốt hơn terminal thì 5ilence làm.
+2. **Bám Claude CLI, harness chỉ cộng thêm.** Vòng agent, tool, system prompt là của Claude Code (qua Agent SDK). 5ilence không thay, không bớt, không làm sai lệch cách Claude suy luận và chạy flow; Claude trong 5ilence chạy như Claude trong terminal, cộng thêm phần của 5ilence.
+3. **Ngang tính năng desktop app.** Desktop app có gì thì 5ilence có bản tương đương, làm theo thứ tự ưu tiên trong [danh mục clone](../adapters/desktop-parity.md); thêm chỗ app còn thiếu (Risk Engine, kiểm chứng, vòng học, số liệu).
+
+### Hoà giải với nguyên tắc cũ
+
+| Nguyên tắc cũ / mâu thuẫn | Cách xử lý |
+| --- | --- |
+| "Không đuổi theo tính năng của Claude Code" (PRD cũ) | Bỏ. Vẫn clone, nhưng xếp ưu tiên theo điểm bất tiện người dùng gặp hằng tuần; tính năng chưa dùng vào Later |
+| Harness riêng của desktop app (danh sách task, câu hỏi cuối có nút, tách session, chapter) | Clone bằng cơ chế cộng thêm (`systemPrompt.append`, MCP của lõi, hook). Có test đồng nhất: cùng prompt chạy trong terminal và trong 5ilence, khác biệt chỉ ở phần cộng thêm |
+| Tính năng cần cloud hoặc tài khoản Anthropic (session cloud, Remote Control, artifact, connector, lịch chạy trên cloud) | Chỉ làm bản cục bộ tương đương (Tailscale + PWA, lịch ở lõi, trang HTML cục bộ) |
+| Computer use, điều khiển Chrome | Làm sau cùng; người dùng tự bật trong Settings; có Risk Engine và audit riêng |
+
+**Thứ tự cơ chế khi thêm tính năng** (rẻ và ít lệch Claude nhất trước): `CLAUDE.md`/hồ sơ → skill/plugin → hook của Claude → MCP của lõi → xử lý luồng sự kiện trong app. Chỉ xuống bậc sau khi bậc trước không làm được; ghi lý do trong việc đó.
 
 ## Decision
 
@@ -61,7 +78,12 @@ Studio (Electron: main + renderer)          Điện thoại (PWA)
 3. **Adapter là module TS trong lõi** cài interface `Backend` ([protocol.md](../adapters/protocol.md)). Adapter tự khởi chạy tiến trình của hãng. Không còn sidecar hay giao thức stdio riêng giữa lõi và adapter.
 4. **Backend đầu tiên: Claude Code qua Claude Agent SDK.** Không gọi thẳng `claude -p`. SDK chạy binary Claude Code kèm theo, **không có** `ANTHROPIC_API_KEY` hay biến xác thực khác, dùng phiên đăng nhập Pro.
 5. **Duyệt từng tool call:** cổng Risk Engine ở hook `PreToolUse` (theo tài liệu SDK, hook chạy trước mọi permission rule); `canUseTool` là lưới an toàn; `permissionMode` luôn `default`.
-6. **Cấu hình Claude:** `settingSources: ['project']`. Hồ sơ qua `systemPrompt.append`; skill/subagent/lệnh cá nhân qua `plugins: [{ type: 'local', path: '~/.silence/plugin' }]`.
+6. **Cấu hình Claude như terminal** (đích; code ở T-074, chi tiết [claude-sdk.md](../adapters/claude-sdk.md)):
+   - `settingSources: ['user', 'project', 'local']` như CLI. Từ chối duyệt cấu hình repo (mục 7) thì chỉ `['user']`. `~/.claude/settings.json` là của người dùng, tin như terminal.
+   - Luật quyền: Risk Engine đọc thêm luật trong file settings của Claude; "Luôn cho phép" ghi vào `.claude/settings.local.json` để terminal cũng dùng được; kho `~/.silence/*permissions.yaml` giữ cho luật riêng 5ilence ([permissions.md](../security/permissions.md)).
+   - Tool: `tools` preset `claude_code`; `disallowedTools` chỉ cho tool đi vòng qua harness hoặc cần cloud, mỗi tên một lý do.
+   - `env`: giữ toàn bộ môi trường, chỉ bỏ biến khoá API/nhà cung cấp và biến của app chủ.
+   - Hồ sơ qua `systemPrompt.append`; skill/subagent/lệnh cá nhân qua `plugins: [{ type: 'local', path: '~/.silence/plugin' }]`.
 7. **Duyệt cấu hình repo:** hook, `env`, `apiKeyHelper` trong `.claude/settings.json`, server trong `.mcp.json`, lệnh slash của project chạy ngoài tool call hoặc đổi môi trường. Lõi đọc trước khi mở session và hỏi người dùng một lần cho mỗi nội dung (theo hash).
 8. **Không tự dựng sandbox.** Tương tác: Risk Engine + sandbox của hãng khi có (Claude: option `sandbox`, `failIfUnavailable: true`, chỉ macOS/Linux/WSL2) + snapshot git theo lượt. Không người trông: mỗi job một **container** (mẫu Dev Container + firewall), dùng chung cho mọi backend. Hệ quả: trên Windows native, khi tương tác **không có sandbox**.
 9. **Chạy nền:** lịch và theo dõi PR chạy khi lõi đang chạy (máy thức). Lượt lỡ do máy ngủ thì **chạy bù một lần** khi thức dậy. Máy tắt thì không chạy; trạng thái trên GitHub vẫn đúng ([ADR 0003](0003-pr-watch.md)). Không có runner trên cloud.
@@ -112,4 +134,4 @@ Risk Engine chuyển sang TS dùng nguyên `default_policy.yaml` và `corpus.yam
 - Eval cũ, Auto/router, gateway, sandbox Windows, chế độ quyền Tự chủ, tool browser/procs của agent bị xoá cùng Engine Rust.
 - `.cursor/` (rule, `.cursorignore`) bị xoá; chỉ giữ `.claude/`. Script `check:rules` và workflow docs-check sửa theo.
 - `packages/protocol` trở thành kiểu của API lõi; không còn bản Rust.
-- PRD đã sửa mục Mục đích; các mục khác viết lại theo lộ trình.
+- PRD đã sửa mục Mục đích (2026-11-28: bỏ "không đuổi theo tính năng"); các mục khác viết lại theo lộ trình.
