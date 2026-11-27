@@ -125,3 +125,15 @@ Không có câu hỏi, trừ khi có Phát sinh chờ user chọn thêm vào Lat
 
 **Bạn chọn:** 1) Thêm cả 2) Thêm số … 3) Không thêm
 ```
+
+## 5. Dòng trạng thái — cuối mỗi lượt có làm việc
+
+Một dòng ở cuối tin; tin có câu hỏi **Bạn chọn** thì đặt dòng này ngay trước câu hỏi. Điều kiện từng loại: `CLAUDE.md` → **Kết thúc lượt**. Thẻ 4 đã mở bằng 🏁 thì không cần thêm dòng này.
+
+```
+🏁 Đã xong T-072: PR #97 đã merge.
+⏳ Đang dở T-072: 2/3 tiêu chí · bước kế: chờ CI của PR #97 rồi merge.
+⛔ Chờ bạn T-072: duyệt merge PR #97 (đụng CLAUDE.md)?
+```
+
+- `n/m` đếm ô đã tick trong **Tiêu chí xong** của file việc, không ước lượng.
