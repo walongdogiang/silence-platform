@@ -47,6 +47,17 @@ Cú pháp Claude Code: `Bash(npm test:*)` (tiền tố), `Bash(git status)` (đ�
 | project | `~/.silence/projects/<repo>/permissions.yaml` (thẻ hỏi lưu vào đây) | allow, ask, deny |
 | repo | `.claude/settings.json` → `permissions` | **chỉ ask, deny** (repo chỉ được thắt chặt) |
 
+**Đích (ADR 0004 Decision 6, quyết định 2026-11-28; code ở T-074, chưa đổi):** dùng chung luật với Claude trong terminal. Risk Engine đọc thêm hai nguồn:
+
+| Nguồn | File | Được dùng |
+| --- | --- | --- |
+| claude-user | `~/.claude/settings.json` → `permissions` | allow, ask, deny |
+| claude-local | `<workspace>/.claude/settings.local.json` → `permissions` | allow, ask, deny; **chỉ ask, deny** nếu file được git theo dõi (repo tự commit file này thì coi như repo) |
+
+- "Luôn cho phép" ghi vào `.claude/settings.local.json` thay cho `~/.silence/projects/<repo>/permissions.yaml`, để terminal cũng dùng được. Kho `~/.silence/*permissions.yaml` vẫn đọc, cho luật riêng 5ilence.
+- Chặn cứng vẫn thắng mọi luật allow, từ nguồn nào cũng vậy. Luật allow của Claude không cho phép được mức đỏ.
+- Hai file trên thêm vào mục tiêu `POLICY_TAMPER`: agent không được sửa; chỉ lõi ghi khi người dùng bấm "Luôn cho phép".
+
 Thứ tự: luật deny → (work mode Ask chặn tool không phải đọc) → chặn cứng / ngoại lệ Bypass → luật ask → luật allow (không áp cho đỏ) → chế độ. Deny thắng tất cả, kể cả Bypass. Với lệnh shell ghép, allow cần **mọi** đoạn khớp; ask/deny chỉ cần một đoạn. Không người trông: cái gì cần hỏi thì từ chối. Luật được đọc lại mỗi lượt. File luật là mục tiêu `POLICY_TAMPER`.
 
 ### Thẻ hỏi
