@@ -34,6 +34,7 @@ Mã tiếp theo: T-072
 - T-032 2.1c Lõi nhận lịch sử chat, session.context, rewind, fork · [chi tiết](tasks/T-032-core-history-context.md) · blocked-by: T-006
 - T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038
 - T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
+- T-071 Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
 
 ## Later
 
@@ -60,7 +61,6 @@ Mã tiếp theo: T-072
 - T-025 Phiên con dùng đúng mã phiên của chính nó · [chi tiết](tasks/T-025-side-session-id.md)
 - T-026 Sổ chủ worktree tự bỏ mục của worktree đã bị xoá · [chi tiết](tasks/T-026-stale-worktree-owner.md)
 - T-036 Chat mở lại (đổi model, mã phiên mới) vẫn được nhận là cùng chat chủ worktree · [chi tiết](tasks/T-036-chat-reopen-identity.md)
-- T-071 Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
 - T-028 Bật Dependabot alerts (báo lỗ hổng thư viện npm/cargo; user bật trong Settings → Advanced Security)
 - T-029 Ghim GitHub Actions theo SHA thay vì tag (`actions/checkout@v4`, `dorny/paths-filter@v3`, `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache@v2`) — repo public dễ bị nhắm; bỏ qua `dtolnay/rust-toolchain`, `Swatinem/rust-cache` nếu T-035 (xoá Rust) làm trước
 - T-030 `cache-cleanup.yml` bỏ qua PR từ fork (token chỉ đọc nên job đỏ)
