@@ -52,4 +52,8 @@ Mục đích user chốt (2026-11-27):
 - Thảo luận chốt mục đích: chat b112d5f5 (2026-11-22 → 2026-11-27).
 - Chạm `docs/security/` (kho luật quyền) và có thể cả `AGENTS.md`, nên cần user duyệt ở cổng duyệt.
 - Nên làm trước T-006, vì kiểm kê RPC (T-006) và phạm vi T-031/T-032 phụ thuộc các quyết định này.
+- Ý tưởng phát sinh từ T-003 (cột pane + tab Xem trước, PR #91) để bảng tính năng tính tới, chưa thành việc riêng:
+  - Thẻ dev server kiểu desktop app (chạy/dừng, nút Open vào Xem trước): làm trên lõi mới, sau T-034.
+  - Đưa Diff vào cột pane bên phải, giống desktop app.
+  - Chia đôi cột pane (trang + log dev server cùng lúc): phụ thuộc Ports/Output đang qua Engine, T-034 xoá Ports nên chỉ xét lại sau khi lõi có quản lý tiến trình.
 - Chưa kiểm: danh sách tool đầy đủ của bản CLI hiện tại; SDK xử lý `AskUserQuestion` thế nào; vòng kiểm chứng gửi lỗi cho Claude ra sao; sandbox trên Windows.
