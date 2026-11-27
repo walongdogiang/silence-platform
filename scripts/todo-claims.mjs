@@ -96,6 +96,15 @@ export function heldBy(book, session) {
   return Object.entries(book.claims).find(([, c]) => c.session === session)?.[0] ?? null;
 }
 
+/** Dòng nhắc mỗi tin nhắn (T-072): phiên đang giữ việc nào, tên lấy từ mục lục; không giữ việc → null. */
+export function holdingLine(book, session, readme = "") {
+  const task = heldBy(book, session);
+  if (!task) return null;
+  const row = readme.split(/\r?\n/).find((l) => l.startsWith(`- ${task} `));
+  const name = row ? row.slice(task.length + 3).split(" · ")[0].trim() : "";
+  return `[todo] Phiên này đang giữ ${task}${name ? `: ${name}` : ""}. Cuối lượt: dòng 🏁/⏳/⛔ (CLAUDE.md → Kết thúc lượt).`;
+}
+
 /**
  * Nhận việc. Trả { ok, msg }. Từ chối khi: việc do phiên khác giữ (trừ takeover), phiên này đang giữ việc khác,
  * hoặc đã đủ MAX_NOW việc.
@@ -380,6 +389,9 @@ function main(argv) {
         delete book.moved[session];
       }
       syncMain(book, evFile);
+      const readmeAt = path.join(input.cwd || root, "todo", "README.md");
+      const hold = holdingLine(book, session, existsSync(readmeAt) ? readFileSync(readmeAt, "utf8") : "");
+      if (hold) console.log(hold);
       for (const l of pullEvents(book, readEvents(evFile), session)) console.log(l);
       save(file, book);
       return 0;

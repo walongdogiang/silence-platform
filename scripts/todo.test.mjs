@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { brief, suggestModel, modelFor, modelHint } from "./todo-brief.mjs";
-import { emptyBook, touchSession, claim, release, doctor, transcriptTail, isStale, MAX_NOW } from "./todo-claims.mjs";
+import { emptyBook, touchSession, claim, release, doctor, transcriptTail, isStale, holdingLine, MAX_NOW } from "./todo-claims.mjs";
 
 const t0 = new Date("2026-11-25T10:00:00Z");
 const hours = (h) => new Date(t0.getTime() + h * 36e5);
@@ -430,4 +430,14 @@ import { strayLine } from "./todo-brief.mjs";
 test("strayLine: một dòng hỏi user, không có thì im", () => {
   assert.equal(strayLine([]), null);
   assert.match(strayLine([{ path: "D:/h/old", why: "không còn là worktree" }]), /old \(không còn là worktree\).*không tự xoá/);
+});
+
+test("holdingLine: nhắc việc phiên đang giữ kèm tên từ mục lục; không giữ việc thì null", () => {
+  const book = emptyBook();
+  assert.equal(holdingLine(book, "s1", ""), null);
+  assert.ok(claim(book, "T-072", "s1", { now: t0 }).ok);
+  const readme = "## Next\n\n- T-072 Dòng trạng thái cuối lượt · [chi tiết](tasks/T-072.md) · blocked-by: T-071\n";
+  assert.equal(holdingLine(book, "s1", readme), "[todo] Phiên này đang giữ T-072: Dòng trạng thái cuối lượt. Cuối lượt: dòng 🏁/⏳/⛔ (CLAUDE.md → Kết thúc lượt).");
+  assert.match(holdingLine(book, "s1", ""), /^\[todo\] Phiên này đang giữ T-072\. /);
+  assert.equal(holdingLine(book, "s2", readme), null);
 });

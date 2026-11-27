@@ -35,7 +35,6 @@ Mã tiếp theo: T-073
 - T-033 2.1d Bật lõi mặc định, bỏ công tắc SILENCE_CORE, dùng thử · [chi tiết](tasks/T-033-core-default-on.md) · blocked-by: T-031, T-032, T-038
 - T-023 Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
 - T-071 Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
-- T-072 Mỗi lượt kết thúc bằng một dòng trạng thái (🏁 xong / ⏳ dở / ⛔ chờ bạn), hook Stop bắt khi thiếu · [chi tiết](tasks/T-072-turn-status-line.md) · blocked-by: T-071
 
 ## Later
 
@@ -70,4 +69,5 @@ Mã tiếp theo: T-073
 
 <!-- Chưa chắc có làm. -->
 
+- Hook Stop chặn khi tin cuối thiếu dòng 🏁/⏳/⛔ hoặc báo 🏁 mà tiêu chí chưa tick / PR chưa merge (bỏ khỏi T-072 vì tốn usage; đọc `last_assistant_message`, chống lặp bằng `stop_hook_active`)
 - T-018 Giai đoạn 5: backend thứ hai (Codex `app-server` hoặc ACP) kèm bộ chuyển hồ sơ/skill
