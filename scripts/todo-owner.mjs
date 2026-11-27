@@ -288,11 +288,13 @@ export function worktreesHome(mainRoot) {
 }
 
 /**
- * Thư mục nên hỏi user có dọn không. dirs: thư mục con của worktreesHome (đường dẫn); listed: gốc worktree git biết.
+ * Thư mục nên hỏi user có dọn không. dirs: thư mục con của worktreesHome (đường dẫn); listed: gốc worktree git biết;
+ * mainRoot: thư mục chính của repo, không bao giờ tính là thừa (sổ vẫn ghi chủ cho nó khi chat chạy ở đó).
  * Trả [{ path, why }].
  */
-export function strayWorktrees({ dirs = [], listed = [], book, now = new Date() }) {
+export function strayWorktrees({ dirs = [], listed = [], book, mainRoot = null, now = new Date() }) {
   const known = new Set(listed.map(wtKey));
+  if (mainRoot) known.delete(wtKey(mainRoot));
   const out = [];
   for (const d of dirs) if (!known.has(wtKey(d))) out.push({ path: normPath(d), why: "không còn là worktree" });
   const claimed = new Set(Object.values(book.claims ?? {}).map((c) => wtKey(c.worktree)));

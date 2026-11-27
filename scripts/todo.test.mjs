@@ -355,6 +355,14 @@ test("strayWorktrees + worktreesHome: thư mục không còn là worktree, chủ
   assert.deepEqual(out.map((o) => o.path), ["D:/h/old", "D:/h/T-1"]);
 });
 
+test("strayWorktrees: thư mục chính có chủ im lâu vẫn không bị tính là thừa", () => {
+  const book = emptyBook();
+  book.worktrees = { "d:/vuhieu/5ilence": { path: "D:/vuhieu/5ilence", chat: "c1", lastSeen: t0.toISOString() } };
+  const args = { dirs: [], listed: ["D:/vuhieu/5ilence"], book, now: hours(37) };
+  assert.deepEqual(strayWorktrees(args).map((o) => o.path), ["D:/vuhieu/5ilence"]); // không truyền mainRoot: lỗi cũ
+  assert.deepEqual(strayWorktrees({ ...args, mainRoot: "D:\\vuhieu\\5ilence" }), []);
+});
+
 test("claim: cùng chat mở lại nhận lại việc không cần takeover; takeover từ chat khác còn hoạt động bị từ chối trừ --force", () => {
   const book = emptyBook();
   book.sessions = { A: { chat: "c1" }, A2: { chat: "c1" }, B: { chat: "c2" } };
