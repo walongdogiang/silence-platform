@@ -8,6 +8,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
+import { installPreview } from "./preview";
 import { isPngBytes } from "./clipboardImage";
 import { coreEnabled, startCore, type CoreHandle } from "./core";
 import { routeRpc, splitDelete } from "./coreRoute";
@@ -400,6 +401,8 @@ app.whenReady().then(async () => {
     else win.maximize();
   });
   ipcMain.handle("win-close", () => win?.close());
+  // Pane Xem trước: trang localhost trong WebContentsView riêng (sandbox, session riêng, chỉ loopback).
+  installPreview(ipcMain, () => win);
   credentials = openCredentials();
   // RPC errors travel as `{ error }` values, not rejections: Electron prints a stack trace for every
   // rejected handler, and expected errors (e.g. `unknown session` for a chat restored from the last

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAppNavigation, isSafeExternalUrl } from "./safeUrl";
+import { isAppNavigation, isLoopbackUrl, isSafeExternalUrl, normalizePreviewInput, previewNavDecision } from "./safeUrl";
 
 describe("isSafeExternalUrl", () => {
   it("cho http(s)", () => {
@@ -44,5 +44,62 @@ describe("isAppNavigation", () => {
     expect(isAppNavigation(`${cur}#x`, cur)).toBe(true);
     expect(isAppNavigation("file:///C:/secret.txt", cur)).toBe(false);
     expect(isAppNavigation("https://evil.example/", cur)).toBe(false);
+  });
+});
+
+describe("isLoopbackUrl", () => {
+  it("cho localhost, 127.0.0.1, [::1] qua http(s), mọi cổng", () => {
+    for (const u of [
+      "http://localhost:5173/",
+      "https://localhost/",
+      "http://LOCALHOST:3000/a?b=1",
+      "http://127.0.0.1:8080/x",
+      "http://[::1]:4000/",
+    ]) {
+      expect(isLoopbackUrl(u), u).toBe(true);
+    }
+  });
+
+  it("chặn host giả, host khác, scheme khác, user:pass", () => {
+    for (const u of [
+      "http://localhost.evil.com/",
+      "http://127.0.0.1.nip.io/",
+      "http://evil.com/?localhost",
+      "http://evil.com#127.0.0.1",
+      "http://0.0.0.0:3000/",
+      "http://192.168.1.10:3000/",
+      "http://user:pass@localhost:3000/",
+      "file:///C:/Windows/win.ini",
+      "javascript:alert(1)",
+      "ws://localhost:3000/",
+      "not a url",
+    ]) {
+      expect(isLoopbackUrl(u), u).toBe(false);
+    }
+  });
+});
+
+describe("previewNavDecision", () => {
+  it("loopback ở lại, http(s) khác ra ngoài, còn lại bỏ", () => {
+    expect(previewNavDecision("http://localhost:5173/login")).toBe("allow");
+    expect(previewNavDecision("https://github.com/")).toBe("external");
+    expect(previewNavDecision("http://localhost.evil.com/")).toBe("external");
+    expect(previewNavDecision("file:///C:/x")).toBe("deny");
+    expect(previewNavDecision("javascript:alert(1)")).toBe("deny");
+    expect(previewNavDecision("https://u:p@evil.example/")).toBe("deny");
+  });
+});
+
+describe("normalizePreviewInput", () => {
+  it("thêm http:// khi thiếu scheme", () => {
+    expect(normalizePreviewInput("localhost:5173")).toBe("http://localhost:5173/");
+    expect(normalizePreviewInput("  127.0.0.1:3000/a ")).toBe("http://127.0.0.1:3000/a");
+    expect(normalizePreviewInput("https://localhost/")).toBe("https://localhost/");
+  });
+
+  it("chuỗi rỗng hoặc hỏng thì null", () => {
+    expect(normalizePreviewInput("")).toBeNull();
+    expect(normalizePreviewInput("   ")).toBeNull();
+    expect(normalizePreviewInput("http://")).toBeNull();
   });
 });

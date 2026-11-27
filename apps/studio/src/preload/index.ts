@@ -34,6 +34,27 @@ contextBridge.exposeInMainWorld("silence", {
   },
   /** Show an eval result folder in the file manager (main allows evals/results only). */
   revealEval: (target: string) => ipcRenderer.invoke("silence-reveal-eval", target) as Promise<boolean>,
+  /** Preview pane (main owns the WebContentsView; it re-checks every URL). */
+  preview: {
+    open: (url: string) => ipcRenderer.invoke("silence-preview-open", url) as Promise<boolean>,
+    nav: (action: "back" | "forward" | "reload" | "stop" | "devtools") =>
+      ipcRenderer.invoke("silence-preview-nav", action) as Promise<boolean>,
+    layout: (rect: { x: number; y: number; width: number; height: number } | null, show: boolean) =>
+      ipcRenderer.invoke("silence-preview-layout", rect, show) as Promise<boolean>,
+    capture: () => ipcRenderer.invoke("silence-preview-capture") as Promise<string | null>,
+    state: () => ipcRenderer.invoke("silence-preview-state"),
+    onState: (cb: (state: unknown) => void) => {
+      const listener = (_: unknown, s: unknown) => cb(s);
+      ipcRenderer.on("silence-preview-state", listener);
+      return () => ipcRenderer.removeListener("silence-preview-state", listener);
+    },
+    /** App shortcuts pressed while the page had focus. */
+    onKey: (cb: (key: { code: string; ctrl: boolean; shift: boolean; alt: boolean }) => void) => {
+      const listener = (_: unknown, k: { code: string; ctrl: boolean; shift: boolean; alt: boolean }) => cb(k);
+      ipcRenderer.on("silence-preview-key", listener);
+      return () => ipcRenderer.removeListener("silence-preview-key", listener);
+    },
+  },
   window: {
     minimize: () => ipcRenderer.invoke("win-min"),
     maximize: () => ipcRenderer.invoke("win-max"),

@@ -682,6 +682,8 @@ export function ChatPane(props: {
   onRevisePlan?: () => void;
   /** Mở file trong workspace khi bấm chip `path:line` trong câu trả lời. */
   onOpenFile?: (path: string) => void;
+  /** Link localhost trong câu trả lời → pane Xem trước. */
+  onOpenPreview?: (url: string) => void;
   /** Mode hiện tại của composer: thẻ gợi ý chỉ hiện khi vẫn đang ở mode chỉ đọc. */
   mode?: SessionMode;
   /** Bấm "Chuyển sang Agent": đổi mode và gửi lại đúng prompt của lượt đó. */
@@ -1042,6 +1044,7 @@ export function ChatPane(props: {
                   <MarkdownMessage
                     text={turn.ai.text}
                     onOpenFile={props.onOpenFile}
+                    onOpenPreview={props.onOpenPreview}
                     workspace={props.workspace}
                     onOpenImage={openImages}
                     streaming={Boolean(turn.live)}

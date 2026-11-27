@@ -1,5 +1,5 @@
 ---
-description: Spec khung cửa sổ Studio — TitleBar, Chat Workspace, tab, lịch sử, DiffPane, grid, cờ shell trong localStorage.
+description: Spec khung cửa sổ Studio — TitleBar, Chat Workspace, tab, lịch sử, DiffPane, cột pane phải (Terminal, Output, Ports, Xem trước), grid, cờ shell trong localStorage.
 type: spec
 code:
   - apps/studio/src/renderer/App.tsx
@@ -7,6 +7,9 @@ code:
   - apps/studio/src/renderer/components/ChatTabBar.tsx
   - apps/studio/src/renderer/components/ChatHistoryPanel.tsx
   - apps/studio/src/renderer/components/DiffPane.tsx
+  - apps/studio/src/renderer/components/SidePanel.tsx
+  - apps/studio/src/renderer/components/PreviewPane.tsx
+  - apps/studio/src/main/preview.ts
   - apps/studio/src/renderer/components/settings/SettingsDialog.tsx
   - apps/studio/src/renderer/components/settings/ProfileSection.tsx
   - apps/studio/src/renderer/monaco.ts
@@ -19,18 +22,22 @@ Tham chiếu Cursor IDE (không phải Agents Window). Viewport desktop; không 
 
 ```mermaid
 flowchart LR
-  TB[TitleBar — panel / Chat / Evals / Số liệu / Settings]
+  TB[TitleBar — panel / Xem trước / Chat / Evals / Số liệu / Settings]
   subgraph chat [Chat Workspace]
     TAB[Tab ngang]
     WS[Hội thoại + composer]
     HZ[History]
   end
+  PANE[Cột pane: Terminal · Output · Ports · Xem trước · …]
   TB --> chat
+  chat --- PANE
 ```
 
-- **TitleBar** (`TitleBar.tsx`): full width, `-webkit-app-region: drag`. Logo, menu File…Help, ← →, tên folder, **Toggle Panel → Chat → Evals → Số liệu → Settings**, − □ ×. Icon **Số liệu** (`BarChart3`, chỉ khi lõi TS chạy) mở trang Số liệu thay khung chat (`MetricsPage.tsx`, roadmap 1.10): ô thống kê của 5ilence (lượt, báo xong sai, vòng sửa, nhắc lại, token, chi phí ước tính), báo cáo quota gần nhất, bảng **5ilence so với Claude trần** (chỉ những gì cả hai bên ghi lại; báo xong sai và vòng sửa chỉ có ở 5ilence), bảng theo project và theo ngày; chọn 7 / 30 / 90 ngày, nút Tải lại. Chỉ dùng token chữ, không có màu chuỗi. Icon Chat (sau panel) bật/tắt **cả** Chat Workspace. Icon Evals chỉ hiện ở checkout có `evals/`, mở trang Evals thay khung chat và hiện chip tiến độ khi đang chạy (`evals.md`). Nút panel (Ctrl+J) mở panel dưới: Terminal, Output, **Ports**, **Trình duyệt**; Problems / Debug Console = chưa gắn.
-- **Trình duyệt** (`BottomPanel.tsx` → `BrowserPane`, logic `renderer/browserView.ts`): chỉ xem, phản chiếu trình duyệt headless của agent (`browser_*`) ở chat đang mở. Thanh trên: URL (link mở trình duyệt ngoài, chỉ loopback), tiêu đề trang, badge "N lỗi console" (đỏ) và "N request lỗi" khi có. Dưới: ảnh JPEG nhỏ của viewport (1280×800) sau mỗi lần mở / bấm / đọc / chụp, `object-fit: contain`. Nguồn: event `browser` (không ghi log phiên); `url` rỗng = agent đã đóng → về trạng thái trống. Đổi chat thì xoá. Panel không tự mở khi agent dùng trình duyệt.
-- **Ports** (`BottomPanel.tsx` → `PortsList`, logic `renderer/procs.ts`): tiến trình nền agent mở bằng `proc_start` của chat đang mở. Mỗi hàng: chấm trạng thái (xanh = chạy, xám = đã dừng, đỏ = đã thoát), trạng thái (kèm mã thoát), lệnh (mono, cắt …), URL localhost (link mở trình duyệt ngoài qua `openExternal`, chỉ loopback), nút **Dừng** khi đang chạy. Đang chạy lên đầu, mới trước. Nguồn: `proc.list` khi đổi chat + event `proc` (mở, URL mới, thoát); mỗi event cũng ghi một dòng vào Output. Trống: "Chưa có tiến trình nền…".
+- **TitleBar** (`TitleBar.tsx`): full width, `-webkit-app-region: drag`. Logo, menu File…Help, ← →, tên folder, **Toggle Panel → Xem trước → Chat → Evals → Số liệu → Settings**, − □ ×. Icon **Số liệu** (`BarChart3`, chỉ khi lõi TS chạy) mở trang Số liệu thay khung chat (`MetricsPage.tsx`, roadmap 1.10): ô thống kê của 5ilence (lượt, báo xong sai, vòng sửa, nhắc lại, token, chi phí ước tính), báo cáo quota gần nhất, bảng **5ilence so với Claude trần** (chỉ những gì cả hai bên ghi lại; báo xong sai và vòng sửa chỉ có ở 5ilence), bảng theo project và theo ngày; chọn 7 / 30 / 90 ngày, nút Tải lại. Chỉ dùng token chữ, không có màu chuỗi. Icon Chat (sau panel) bật/tắt **cả** Chat Workspace. Icon Evals chỉ hiện ở checkout có `evals/`, mở trang Evals thay khung chat và hiện chip tiến độ khi đang chạy (`evals.md`). Nút panel (`PanelRight`, Ctrl+J) bật/tắt **cột pane**; icon **Xem trước** (`Globe`, Ctrl+Shift+B) mở cột ở tab Xem trước (đang ở tab đó thì đóng cột).
+- **Cột pane** (`SidePanel.tsx`): cột thứ ba của `.shell`, **ngoài cùng bên phải**, sau Chat Workspace (không chèn giữa chat và lịch sử), cao từ dưới TitleBar tới đáy. Không còn panel dưới. Tab (cuộn ngang khi hẹp): Terminal · Output · Ports · **Xem trước** · Trình duyệt agent · Problems · Debug Console (hai tab cuối chưa gắn). Bề rộng mặc định 520px, kéo mép trái để đổi (360px tới 70% cửa sổ), nhớ ở `silence.shell.paneWidth`. Đầu cột: nút **phóng to** (ẩn tạm Chat Workspace, bấm lại thì trả về; đóng cột thì thôi phóng to) và **đóng**. Ẩn Chat Workspace khi cột đang mở thì cột chiếm hết bề ngang. Tab đang chọn nhớ ở `silence.shell.panelTab` (chỉ giữ Xem trước, còn lại về Terminal). Terminal tự `fit` khi đổi bề rộng.
+- **Xem trước** (`PreviewPane.tsx`, main `main/preview.ts`): trang localhost thật trong một `WebContentsView` của cửa sổ, main vẽ đè đúng ô giữ chỗ (renderer gửi toạ độ qua `ResizeObserver`). Thanh trên: ← → ⟳ (đang tải thì ✕ Dừng), ô địa chỉ (Enter; thiếu scheme thì thêm `http://`), mở bằng trình duyệt ngoài, DevTools (F12 khi focus trong trang). Chỉ mở `localhost` / `127.0.0.1` / `[::1]`: gõ địa chỉ khác → dòng giải thích + nút "Mở bằng trình duyệt". Tải lỗi → "Không tải được … Dev server đã chạy chưa?" + Thử lại. Trống → gợi ý gõ `localhost:5173`. Nhớ URL gần nhất theo workspace (`silence.preview.urls`), mở lại khi tab hiện lần đầu. Đổi chat không xoá trang (pane theo cửa sổ). Link localhost trong câu trả lời và URL ở hàng Ports mở vào đây; **Ctrl+click** link thì ra trình duyệt ngoài. Lớp phủ DOM (hộp thoại, menu, toast, lightbox, menu TitleBar) chạm vùng trang → ẩn trang, hiện ảnh chụp mờ; hết lớp phủ thì hiện lại. Ctrl+J / Ctrl+Shift+B / Ctrl+Alt+U vẫn chạy khi focus trong trang (main chuyển phím về renderer).
+- **Trình duyệt agent** (`SidePanel.tsx` → `BrowserPane`, logic `renderer/browserView.ts`): chỉ xem, phản chiếu trình duyệt headless của agent (`browser_*`) ở chat đang mở. Thanh trên: URL (link mở vào Xem trước, chỉ loopback), tiêu đề trang, badge "N lỗi console" (đỏ) và "N request lỗi" khi có. Dưới: ảnh JPEG nhỏ của viewport (1280×800) sau mỗi lần mở / bấm / đọc / chụp, `object-fit: contain`. Nguồn: event `browser` (không ghi log phiên); `url` rỗng = agent đã đóng → về trạng thái trống. Đổi chat thì xoá. Panel không tự mở khi agent dùng trình duyệt.
+- **Ports** (`SidePanel.tsx` → `PortsList`, logic `renderer/procs.ts`): tiến trình nền agent mở bằng `proc_start` của chat đang mở. Mỗi hàng: chấm trạng thái (xanh = chạy, xám = đã dừng, đỏ = đã thoát), trạng thái (kèm mã thoát), lệnh (mono, cắt …), URL localhost (link mở vào Xem trước, chỉ loopback), nút **Dừng** khi đang chạy. Đang chạy lên đầu, mới trước. Nguồn: `proc.list` khi đổi chat + event `proc` (mở, URL mới, thoát); mỗi event cũng ghi một dòng vào Output. Trống: "Chưa có tiến trình nền…".
 - **Không** cột icon dọc trái. **Không** Explorer trong Chat Workspace (không cây file, không icon thư mục trên sidebar).
 - **Chat Workspace** (khi hiện): hàng tab ngang trên khung chat + hội thoại giữa + lịch sử phải. Tab không đè panel lịch sử.
 - **Thanh Agents** (panel lịch sử phải): nút góc trên phải ẩn/hiện panel — tooltip `Toggle Agents Side Bar (Ctrl+Alt+U)`. Khi ẩn, nút hiện lại ở cuối hàng tab. Không xóa lịch sử.
@@ -58,10 +65,11 @@ flowchart LR
 
 - Chat hiện: `1fr | history`
 - Chat ẩn: `1fr`
+- Cột pane mở (lớp `.pane-open`, `--pane-w` inline): thêm `var(--pane-w)` ở cuối: `1fr | history | pane`, ẩn lịch sử thì `1fr | pane`. Chat ẩn hoặc phóng to (`.pane-max`): chỉ còn cột pane, `1fr`.
 
 `overflow: hidden` trên workspace; composer `overflow: visible` để dropdown.
 
-Thanh cuộn dọc (chat / Agents / panel Terminal·Output): thumb ~4px bo tròn, gần ẩn — hiện rõ khi hover; cuộn hội thoại trên `.chat-pane` (`docs/frontend/tokens.md`).
+Thanh cuộn dọc (chat / Agents / cột pane Terminal·Output): thumb ~4px bo tròn, gần ẩn — hiện rõ khi hover; cuộn hội thoại trên `.chat-pane` (`docs/frontend/tokens.md`).
 
 ## Composer neo đáy
 
@@ -74,7 +82,10 @@ Trong `.chat-col`: `ChatPane` flex 1, `composer-stack` flex none, max-width 760p
 | `silence.shell.view` | `chat` (mặc định) hoặc `hidden` |
 | `silence.shell.openTabs` | JSON mảng id thread đang mở |
 | `silence.shell.history` | `1` = ẩn thanh Agents |
-| `silence.shell.panel` | `1` = hiện panel Terminal/Output |
+| `silence.shell.panel` | `1` = hiện cột pane |
+| `silence.shell.panelTab` | `preview` = mở lại ở tab Xem trước (khác thì Terminal) |
+| `silence.shell.paneWidth` | Bề rộng cột pane (px) |
+| `silence.preview.urls` | JSON workspace → URL Xem trước gần nhất (tối đa 30) |
 | `silence.shell.workspace` | path folder |
 | `silence.prefs.v1` | Tuỳ chọn Settings ngoài giao diện (`prefs.ts`): chat, code, thông báo, lịch sử |
 
