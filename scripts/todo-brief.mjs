@@ -12,11 +12,11 @@ import { ensureChat, mainRootOf, worktreesHome, strayWorktrees } from "./todo-ow
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Dòng hỏi dọn thư mục worktree thừa (T-020). Không tự xoá. */
+/** Dòng nhắc dọn thư mục worktree thừa (T-020): agent tự xoá thư mục đạt 3 điều kiện, hỏi phần còn lại. */
 export function strayLine(strays) {
   if (!strays.length) return null;
   const list = strays.slice(0, 4).map((s) => `${path.posix.basename(s.path)} (${s.why})`).join(", ");
-  return `[todo] Thư mục worktree có thể dọn: ${list}${strays.length > 4 ? ` +${strays.length - 4}` : ""}. Hỏi user từng cái; không tự xoá.`;
+  return `[todo] Thư mục worktree có thể dọn: ${list}${strays.length > 4 ? ` +${strays.length - 4}` : ""}. Tự xoá cái sạch, không commit ngoài origin/main, không chat khác giữ (skill todo → Dọn worktree); chỉ hỏi user cái không đạt.`;
 }
 
 function findStrays(book) {

@@ -43,6 +43,12 @@ Dạng dòng trong mục lục:
 - File task link tới docs/ADR/backlog, không chép lại nội dung.
 - Sửa `todo/` theo quy trình Git của repo. Thay đổi `todo/` của một việc (chuyển sang Now, tick, đóng) đi **trong PR của chính việc đó**; chỉ thêm/xếp việc (không làm ngay): chat đang làm một việc → gom vào PR của việc đó; chat không làm việc nào → PR `chore/todo-…` riêng, tự merge khi CI xanh, báo một dòng.
 - Trình bày cho user (việc tiếp theo, review đóng việc, dọn worktree, báo xong) theo **thẻ** trong [`cards.md`](cards.md): cùng khung, cùng thứ tự mục.
+- **Dọn worktree** (hook đầu phiên in "Thư mục worktree có thể dọn"): kiểm từng thư mục. Đạt **cả 3** thì tự xoá (`git worktree remove`, thư mục không còn là worktree thì xoá thư mục), không hỏi, rồi báo một dòng `Đã dọn: …`:
+  1. Sạch: `git status --porcelain` rỗng (file ignored không tính); thư mục không còn là worktree thì phải rỗng.
+  2. Không có commit ngoài `origin/main` (`git log origin/main..HEAD` rỗng, sau `git fetch`).
+  3. Không chat khác giữ (sổ chủ worktree, `todo-claims.mjs`).
+  Thư mục không đạt → thẻ **Dọn worktree** (`cards.md` → 3), chỉ liệt kê những thư mục đó. Không bao giờ tự xoá thư mục chính của repo.
+- **Ý tưởng sửa kit agent** (`CLAUDE.md`, `AGENTS.md`, skill, `scripts/todo-*.mjs`…) nảy ra khi làm việc: ghi thẳng một dòng `[kit]` vào Later (theo **Thêm việc**), không hỏi; báo một dòng.
 
 ## Bảng
 
@@ -222,7 +228,7 @@ Làm **trong PR của việc**, trước khi merge, khi mọi tiêu chí (trừ 
 1. Xoá dòng khỏi `todo/README.md`.
 2. Thêm lên đầu `todo/DONE.md`: `YYYY-MM-DD · T-xxx Tên việc · PR #n · [chi tiết](tasks/archive/…)`.
 3. Đặt `status: done`, chuyển file vào `todo/tasks/archive/`.
-4. **Phát sinh** có mục → đề xuất thêm vào Later, chờ user chọn (không tự thêm). User đã chọn trước merge → thêm ngay trong PR này; chọn sau merge → theo luật thêm/xếp việc ở **Nguyên tắc**.
+4. **Phát sinh** có mục → đề xuất thêm vào Later, chờ user chọn (không tự thêm; riêng mục `[kit]` thì ghi thẳng, xem **Nguyên tắc**). User đã chọn trước merge → thêm ngay trong PR này; chọn sau merge → theo luật thêm/xếp việc ở **Nguyên tắc**.
 5. Commit, push, PR, merge theo skill `task-git` (merge chỉ qua `scripts/pr-merge.mjs`); rồi `node scripts/todo-claims.mjs release T-xxx`.
 6. Tin cuối: thẻ **Báo xong** (`cards.md` → 4) — PR đã merge, việc user cần làm (kiểm `(user)`, pull thư mục chính khi hook/settings/skill đổi), việc vừa hết bị chặn, Phát sinh chờ chọn. **Bảng** chỉ khi user hỏi.
 

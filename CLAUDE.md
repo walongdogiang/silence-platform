@@ -12,7 +12,7 @@
   - `🏁 Đã xong T-xxx: …` chỉ khi: việc trong `todo/` có mọi tiêu chí (trừ `(user)`) đã tick kèm kết quả kiểm và PR đã merge; việc nhờ trong chat thì đã làm hết điều user nhờ và kiểm theo phạm vi đã xanh.
   - `⏳ Đang dở T-xxx: n/m tiêu chí · bước kế: …` khi thiếu bất kỳ điều kiện nào ở trên.
   - `⛔ Chờ bạn T-xxx: …` khi cần user trả lời hoặc tự làm gì đó.
-  - Sau dòng `🏁`, thêm **một dòng riêng** `➡️ **Tiếp:** …` (không gộp vào dòng 🏁) chỉ khi bước tiếp khác mặc định "xem `/todo`": nên làm tiếp ở chính chat này (vd sửa lỗi vừa tìm ra); việc kế có điều cần biết (vừa hết bị chặn, cần đổi model, cần user chuẩn bị). Không có gì đáng nói thì bỏ; có từ hai hướng khác nhau thì dùng ❓ thay cho ➡️.
+  - Sau dòng `🏁`, thêm **một dòng riêng** `➡️ **Tiếp:** …` (không gộp vào dòng 🏁) chỉ khi bước tiếp khác mặc định "xem `/todo`": nên làm tiếp ở chính chat này (vd sửa lỗi vừa tìm ra); việc kế có điều cần biết (vừa hết bị chặn, cần đổi model, cần user chuẩn bị). Dòng ➡️ luôn ghi nơi làm: `(chat này)` hoặc `(chat mới)`. Không có gì đáng nói thì bỏ; có từ hai hướng khác nhau thì dùng ❓ thay cho ➡️.
   - User báo đã làm xong bước 👉 cuối cùng → lượt sau tự kiểm, rồi báo `🏁` kèm kết quả kiểm.
   - Lượt chỉ hỏi đáp thì không cần dòng này; không có mã việc thì bỏ mã.
 - **Icon chú ý** (user đọc lướt đầu dòng). Mỗi dòng tối đa một icon, ở đầu dòng, theo sau là nhãn in đậm; không dùng icon trang trí chỗ khác:

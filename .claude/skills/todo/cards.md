@@ -100,23 +100,22 @@ Nên đóng: 8/8 tiêu chí đạt, không còn gì dở.
 
 ## 3. Dọn worktree — đầu phiên có thư mục thừa
 
-Kiểm từng thư mục trước khi đánh giá: git còn nhận là worktree không (`git worktree list`); có thay đổi chưa commit không (`git status --porcelain`); có commit chưa nằm trên `origin/main` không; có chat nào giữ không (sổ chủ worktree). Còn bất kỳ thứ gì chưa lên main → đánh giá **Giữ**, kèm lý do. Chỉ xoá đúng thư mục user chọn.
+Kiểm từng thư mục theo 3 điều kiện ở skill `todo` → **Nguyên tắc** → **Dọn worktree** (sạch; không commit ngoài `origin/main`; không chat khác giữ). Thư mục đạt cả 3 thì agent **tự xoá, không hỏi**, báo một dòng `Đã dọn: todo-owner-msg, 5ilence-wt2 (sạch, đã lên main).` Thẻ dưới chỉ dành cho thư mục **không đạt**, kèm lý do; chỉ xoá đúng thư mục user chọn.
 
 ```
-**🧹 Dọn worktree · 3 thư mục**
-2 thư mục xoá an toàn, 1 thư mục nên giữ.
+**🧹 Dọn worktree · 2 thư mục cần bạn xem**
+Đã tự dọn 2 thư mục sạch; 2 thư mục còn thứ chưa lên main.
 
 | # | Thư mục | Tình trạng | Đánh giá |
 |---|---|---|---|
-| 1 | `todo-owner-msg` | Rỗng; PR #81 đã merge | ✅ Xoá được |
-| 2 | `5ilence-wt2` | Sạch, commit đã có trên main | ✅ Xoá được |
-| 3 | `5ilence-wip` | 3 file chưa rõ nguồn | ⚠️ Giữ, user xem trước |
+| 1 | `5ilence-wip` | 3 file chưa commit, chưa rõ nguồn | ⚠️ Giữ, bạn xem trước |
+| 2 | `T-031` | 2 commit chưa lên main, không chat nào giữ | ⚠️ Giữ, hoặc mở PR / bỏ |
 
 **Agent sẽ làm**
-1. Xoá đúng các thư mục user chọn.
+1. Xoá đúng các thư mục bạn chọn.
 2. Kiểm lại `git worktree list`, báo kết quả.
 
-❓ **Bạn chọn:** 1) Xoá 1 và 2 2) Xoá số … 3) Giữ hết
+❓ **Bạn chọn:** 1) Giữ hết 2) Xoá số …
 ```
 
 ## 4. Báo xong — tin cuối mỗi việc
@@ -143,10 +142,10 @@ Một dòng ở cuối tin; tin có dòng ❓ **Bạn chọn** thì đặt dòng
 
 ```
 🏁 Đã xong T-072: PR #97 đã merge.
-➡️ **Tiếp:** mở chat mới cho T-039, chọn `/model opus` trước (việc thiết kế).
+➡️ **Tiếp:** (chat mới) T-039, chọn `/model opus` trước (việc thiết kế).
 ⏳ Đang dở T-072: 2/3 tiêu chí · bước kế: chờ CI của PR #97 rồi merge.
 ⛔ Chờ bạn T-072: duyệt merge PR #97 (đụng CLAUDE.md)?
 ```
 
-- Dòng `➡️ **Tiếp:**` luôn tách riêng, ngay sau 🏁, và chỉ có khi mang thông tin (`CLAUDE.md` → **Kết thúc lượt**).
+- Dòng `➡️ **Tiếp:**` luôn tách riêng, ngay sau 🏁, chỉ có khi mang thông tin (`CLAUDE.md` → **Kết thúc lượt**), và luôn ghi nơi làm: `(chat này)` hoặc `(chat mới)`.
 - `n/m` đếm ô đã tick trong **Tiêu chí xong** của file việc, không ước lượng.
