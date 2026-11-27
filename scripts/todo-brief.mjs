@@ -27,7 +27,7 @@ function findStrays(book) {
     .split(/\r?\n/)
     .filter((l) => l.startsWith("worktree "))
     .map((l) => l.slice(9));
-  return strayWorktrees({ dirs, listed, book });
+  return strayWorktrees({ dirs, listed, book, mainRoot: mainRootOf(root) });
 }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
