@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { LangContext } from "../i18n";
-import { MarkdownMessage, parsePathRef } from "./MarkdownMessage";
+import { linkTarget, MarkdownMessage, parsePathRef } from "./MarkdownMessage";
 
 // These tests assert Vietnamese UI strings, so they render in "vi" explicitly (the default is English).
 const inVi = (node: ReactNode) =>
@@ -199,5 +199,25 @@ describe("parsePathRef", () => {
     for (const s of ["/etc/passwd", "C:/Windows/x.dll", "../secret.txt", "src/../x.py", "https://a.b/c.d", "npm run studio", "foo", ""]) {
       expect(parsePathRef(s), s).toBeNull();
     }
+  });
+});
+
+describe("link localhost → Xem trước", () => {
+  it("loopback mở vào Xem trước, Ctrl+click và host khác ra trình duyệt ngoài", () => {
+    expect(linkTarget("http://localhost:5173/", true, false)).toBe("preview");
+    expect(linkTarget("http://127.0.0.1:3000/a", true, false)).toBe("preview");
+    expect(linkTarget("http://[::1]:8080/", true, false)).toBe("preview");
+    expect(linkTarget("http://localhost:5173/", true, true)).toBe("external");
+    expect(linkTarget("https://github.com/", true, false)).toBe("external");
+    expect(linkTarget("http://localhost.evil.com/", true, false)).toBe("external");
+    expect(linkTarget("http://localhost:5173/", false, false)).toBe("external");
+  });
+
+  it("link localhost có gợi ý Xem trước khi chat gắn pane; link ngoài thì không", () => {
+    const md = "[app](http://localhost:5173/) và [docs](https://example.com/)";
+    const withPane = inVi(<MarkdownMessage text={md} onOpenPreview={() => {}} />);
+    expect(withPane).toContain('href="http://localhost:5173/" rel="noreferrer noopener" title="Mở trong Xem trước');
+    expect(withPane).not.toMatch(/href="https:\/\/example\.com\/"[^>]*title=/);
+    expect(inVi(<MarkdownMessage text={md} />)).not.toContain("Xem trước");
   });
 });

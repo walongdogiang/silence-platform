@@ -121,6 +121,17 @@ body.soft-scroll-dragging {
 .app.view-hidden .shell {
   grid-template-columns: minmax(0, 1fr);
 }
+/* Pane column (outermost right). --pane-w is set inline from silence.shell.paneWidth. */
+.app.pane-open .shell { grid-template-columns: minmax(0, 1fr) var(--pane-w, 520px); }
+.app.view-chat.pane-open .shell { grid-template-columns: minmax(0, 1fr) var(--context-w) var(--pane-w, 520px); }
+.app.view-chat.no-history.pane-open .shell { grid-template-columns: minmax(0, 1fr) var(--pane-w, 520px); }
+/* Chat Workspace hidden or pane maximized: the pane takes the whole width. */
+.app.view-hidden.pane-open .shell,
+.app.view-chat.pane-open.pane-max .shell,
+.app.view-chat.no-history.pane-open.pane-max .shell { grid-template-columns: minmax(0, 1fr); }
+.app.view-hidden.pane-open .workspace,
+.app.pane-max .workspace,
+.app.pane-max .history-panel { display: none; }
 
 .app-chrome {
   display: flex;
@@ -2806,17 +2817,29 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 }
 .term-fill.hidden { display: none; }
 
-.bottom-panel {
-  flex: none;
-  height: 220px;
-  min-height: 140px;
+/* Pane column (SidePanel.tsx): outermost right column of .shell, after the Chat Workspace. */
+.side-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border-ui);
+  border-left: 1px solid var(--border-ui);
   background: var(--surface-1);
 }
-.bottom-panel.hidden { display: none; }
-.bottom-tabs {
+.side-panel.hidden { display: none; }
+/* Sits left of the column edge: the native Preview page covers everything right of it. */
+.side-resize {
+  position: absolute;
+  left: -7px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 2;
+}
+.side-resize:hover, .side-resize.on { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.side-tabs {
   display: flex;
   align-items: center;
   flex: none;
@@ -2825,21 +2848,31 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   gap: 2px;
   border-bottom: 1px solid var(--border-subtle);
 }
-.bottom-tabs > button:not(.bottom-tab-icon) {
+.side-tablist {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.side-tablist::-webkit-scrollbar { display: none; }
+.side-tablist > button {
+  flex: none;
+  white-space: nowrap;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--font-size-sm);
 }
-.bottom-tabs > button:not(.bottom-tab-icon).active {
+.side-tablist > button.active {
   color: var(--text-primary);
   border-bottom-color: var(--accent);
 }
-.bottom-tabs-spacer { flex: 1; min-width: 0; }
-.bottom-tab-icon {
+.side-tab-icon {
   width: 26px;
   height: 26px;
   display: grid;
@@ -2849,23 +2882,23 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   background: transparent;
   color: var(--text-muted);
 }
-.bottom-tab-icon:hover:not(:disabled) {
+.side-tab-icon:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
-.bottom-tab-icon:disabled { opacity: 0.4; cursor: default; }
-.bottom-body {
+.side-tab-icon:disabled { opacity: 0.4; cursor: default; }
+.side-body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--workspace);
 }
-.bottom-output-scroll {
+.side-output-scroll {
   flex: 1;
   min-height: 0;
 }
-.bottom-output {
+.side-output {
   margin: 0;
   padding: 10px 12px;
   font-family: var(--mono);
@@ -4308,7 +4341,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 .perm-esc-desc {
   margin: 4px 0 8px;
 }
-/* Ports tab (BottomPanel → PortsList): background processes the agent started. */
+/* Ports tab (SidePanel → PortsList): background processes the agent started. */
 .ports-list { list-style: none; margin: 0; padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; }
 .ports-row {
   display: grid;
@@ -4342,7 +4375,7 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
 }
 .ports-stop:hover { color: var(--error); border-color: var(--error); }
 
-/* Browser tab (BottomPanel → BrowserPane): what the agent's headless browser shows, read-only. */
+/* Agent browser tab (SidePanel → BrowserPane): what the agent's headless browser shows, read-only. */
 .browser-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .browser-bar {
   display: flex; align-items: center; gap: 10px;
@@ -4369,6 +4402,34 @@ pre { white-space: pre-wrap; margin: 0; font: var(--font-size-base)/var(--line-h
   max-width: 100%; max-height: 100%; object-fit: contain;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: #fff;
 }
+
+/* Preview tab (SidePanel → PreviewPane): the page itself is a native WebContentsView drawn by main over .preview-host. */
+.preview-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.preview-pane.hidden { display: none; }
+.preview-bar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px 6px; flex: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.preview-url {
+  flex: 1; min-width: 0; height: 24px; margin: 0 4px; padding: 0 8px;
+  border: 1px solid var(--border-ui); border-radius: var(--radius-sm);
+  background: var(--workspace); color: var(--text-primary);
+  font-family: var(--mono); font-size: var(--font-size-sm);
+}
+.preview-url:focus { outline: none; border-color: var(--accent); }
+.preview-host { position: relative; flex: 1; min-height: 0; background: var(--workspace); }
+.preview-host img.preview-shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; opacity: 0.55; pointer-events: none; }
+.preview-msg {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 24px; text-align: center; color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.6;
+}
+.preview-msg.error { color: var(--text-secondary); }
+.preview-msg button {
+  height: 26px; padding: 0 10px; border: 1px solid var(--border-ui); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-primary); font: inherit; cursor: pointer;
+}
+.preview-msg button:hover { background: var(--surface-hover); }
 
 /* App-wide tooltip (components/TooltipLayer.tsx) — replaces native `title` tooltips. */
 .app-tip {

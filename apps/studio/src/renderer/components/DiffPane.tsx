@@ -8,11 +8,10 @@ import type { Diff } from "../models";
 import { DiffStat, splitPath } from "./DiffCard";
 import { PlaceholderView } from "./PlaceholderView";
 
-const TAB_LABEL: Record<"changes" | "tests" | "logs" | "preview", MsgKey> = {
+const TAB_LABEL: Record<"changes" | "tests" | "logs", MsgKey> = {
   changes: "review.changes",
   tests: "review.tests",
   logs: "review.logs",
-  preview: "review.preview",
 };
 
 /** Font, size and minimap come from Settings → Appearance → Code & terminal. */
@@ -30,7 +29,7 @@ const baseOptions = {
   scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6, useShadows: false },
 };
 
-type ReviewTab = "changes" | "tests" | "logs" | "preview";
+type ReviewTab = "changes" | "tests" | "logs";
 
 export function DiffPane(props: {
   tree: string[];
@@ -85,7 +84,7 @@ export function DiffPane(props: {
   return (
     <div className="diff-pane">
       <div className="diff-subtabs">
-        {(["changes", "tests", "logs", "preview"] as const).map((id) => (
+        {(["changes", "tests", "logs"] as const).map((id) => (
           <button key={id} type="button" className={sub === id ? "active" : ""} onClick={() => pick(id)}>
             {t(TAB_LABEL[id])}
             {id === "changes" && props.diff ? <em> 1</em> : null}
@@ -201,9 +200,6 @@ export function DiffPane(props: {
       )}
       {sub === "logs" && (
         <PlaceholderView title={t("review.logs")} detail={t("review.logsStub")} />
-      )}
-      {sub === "preview" && (
-        <PlaceholderView title={t("review.preview")} detail={t("review.previewStub")} />
       )}
     </div>
   );

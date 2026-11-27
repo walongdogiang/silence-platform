@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, FlaskConical, MessageSquare, Minus, PanelBottom, Settings, Square, X, BarChart3 } from "lucide-react";
+import { ArrowLeft, ArrowRight, FlaskConical, Globe, MessageSquare, Minus, PanelRight, Settings, Square, X, BarChart3 } from "lucide-react";
 import { useEffect, useState } from "react";
 import logo from "../assets/logo.png";
 import { useT, type MsgKey } from "../i18n";
@@ -26,6 +26,9 @@ export function TitleBar(props: {
   onBack: () => void;
   onForward: () => void;
   onTogglePanel: () => void;
+  /** Preview tab showing in the pane column. */
+  previewOpen: boolean;
+  onTogglePreview: () => void;
   onOpenTerminal: () => void;
   onToggleChatWorkspace: () => void;
   onToggleHistory: () => void;
@@ -60,6 +63,7 @@ export function TitleBar(props: {
         { label: "Chat Workspace", run: props.onToggleChatWorkspace },
         { label: props.historyHidden ? t("shell.showAgents") : t("shell.hideAgents"), run: props.onToggleHistory, off: !chat },
         { label: t("shell.togglePanel"), run: props.onTogglePanel },
+        { label: t("shell.previewMenu"), run: props.onTogglePreview },
         ...(props.evals ? [{ label: t("evals.menu"), run: props.evals.onToggle }] : []),
       ];
     }
@@ -140,7 +144,16 @@ export function TitleBar(props: {
           title={t("shell.togglePanelKey")}
           onClick={props.onTogglePanel}
         >
-          <PanelBottom size={15} />
+          <PanelRight size={15} />
+        </button>
+        <button
+          type="button"
+          className={`chrome-icon ${props.previewOpen ? "on" : ""}`}
+          aria-pressed={props.previewOpen}
+          title={t("shell.preview")}
+          onClick={props.onTogglePreview}
+        >
+          <Globe size={15} />
         </button>
         <button
           type="button"

@@ -4,7 +4,9 @@ import "@xterm/xterm/css/xterm.css";
 import { History } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import mountains from "./assets/wallpapers/mountains.webp";
-import { BottomPanel, type PanelTab } from "./components/BottomPanel";
+import { SidePanel, type PanelTab } from "./components/SidePanel";
+import { PreviewPane } from "./components/PreviewPane";
+import { loadPaneWidth } from "./paneLayout";
 import {
   ChatHistoryPanel,
   HISTORY_KEY,
@@ -327,7 +329,32 @@ export function App() {
   /** Model row to scroll to + highlight when Settings → Models opens from the picker's Enable. */
   const [focusModel, setFocusModel] = useState<{ id: string; n: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem("silence.shell.panel") === "1");
-  const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
+  const [panelTab, setPanelTab] = useState<PanelTab>(() =>
+    localStorage.getItem("silence.shell.panelTab") === "preview" ? "preview" : "terminal",
+  );
+  /** Pane column width in px (`silence.shell.paneWidth`); maximize hides the Chat Workspace for a while. */
+  const [paneWidth, setPaneWidth] = useState(() => loadPaneWidth(localStorage.getItem("silence.shell.paneWidth"), window.innerWidth));
+  const [paneMax, setPaneMax] = useState(false);
+  /** URL to open in the Preview tab (chat link, Ports); `n` makes repeats count. */
+  const [previewReq, setPreviewReq] = useState<{ url: string; n: number } | null>(null);
+  const paneNow = useRef({ open: panelOpen, tab: panelTab });
+  paneNow.current = { open: panelOpen, tab: panelTab };
+  /** Ctrl+Shift+B / globe icon: show the Preview tab, or close the pane when it is already showing. */
+  function togglePreview() {
+    const { open, tab } = paneNow.current;
+    if (open && tab === "preview") {
+      setPanelOpen(false);
+      return;
+    }
+    setPanelTab("preview");
+    setPanelOpen(true);
+  }
+  /** Loopback link from chat or Ports → Preview tab (main checks the URL again). */
+  function openPreview(url: string) {
+    setPreviewReq((r) => ({ url, n: (r?.n ?? 0) + 1 }));
+    setPanelTab("preview");
+    setPanelOpen(true);
+  }
   const [outputLog, setOutputLog] = useState<string[]>([]);
   /** Background processes of the open chat's session (Ports tab). */
   const [procs, setProcs] = useState<ProcRow[]>([]);
@@ -500,7 +527,7 @@ export function App() {
   const [showChangesSignal, setShowChangesSignal] = useState(0);
   /** Panel Changes/file chỉ mở khi user chủ động (bấm card diff, chip file…), không tự bật khi có diff. */
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs" | "preview">("changes");
+  const [reviewSub, setReviewSub] = useState<"changes" | "tests" | "logs">("changes");
   const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
@@ -679,7 +706,26 @@ export function App() {
 
   useEffect(() => {
     localStorage.setItem("silence.shell.panel", panelOpen ? "1" : "0");
+    if (!panelOpen) setPaneMax(false);
   }, [panelOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("silence.shell.panelTab", panelTab);
+  }, [panelTab]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => localStorage.setItem("silence.shell.paneWidth", String(paneWidth)), 200);
+    return () => window.clearTimeout(id);
+  }, [paneWidth]);
+
+  // App shortcuts pressed while the Preview page had focus come back from main: replay them here.
+  useEffect(
+    () =>
+      window.silence?.preview?.onKey((k) => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { code: k.code, ctrlKey: k.ctrl, shiftKey: k.shift, altKey: k.alt, bubbles: true }));
+      }),
+    [],
+  );
 
   useEffect(() => {
     localStorage.setItem("silence.shell.history", historyHidden ? "1" : "0");
@@ -1206,7 +1252,7 @@ export function App() {
 
   useEffect(() => {
     if (panelOpen && panelTab === "terminal") fit.current?.fit();
-  }, [panelOpen, panelTab, reviewSub]);
+  }, [panelOpen, panelTab, reviewSub, paneWidth, paneMax, shellView, historyHidden]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1223,6 +1269,11 @@ export function App() {
       if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === "KeyJ") {
         e.preventDefault();
         setPanelOpen((v) => !v);
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyB") {
+        e.preventDefault();
+        togglePreview();
         return;
       }
       if (evalsAvailable && e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyE") {
@@ -2314,6 +2365,7 @@ export function App() {
           run={busyHere ? run : null}
           mode={mode}
           onOpenFile={(p) => void openFile(p)}
+          onOpenPreview={openPreview}
           onSwitchAndRun={(m, text) => {
             // Đổi mode rồi gửi lại đúng prompt cũ; vẫn qua xin quyền và diff như thường.
             setMode(m);
@@ -2429,10 +2481,12 @@ export function App() {
   return (
     <LangContext.Provider value={appearance.lang}>
     <div
-      className={`app view-${shellView}${!chatHidden && historyHidden ? " no-history" : ""}`}
+      className={`app view-${shellView}${!chatHidden && historyHidden ? " no-history" : ""}${panelOpen ? " pane-open" : ""}${
+        panelOpen && paneMax && !chatHidden ? " pane-max" : ""
+      }`}
       data-wp={appearance.wallpaper}
       data-blur={appearance.blur ? "on" : "off"}
-      style={wp ? ({ ["--wp" as string]: wp } as CSSProperties) : undefined}
+      style={{ ...(wp ? { ["--wp" as string]: wp } : {}), ["--pane-w" as string]: `${paneWidth}px` } as CSSProperties}
     >
       <TooltipLayer />
       {lightbox ? (
@@ -2454,6 +2508,8 @@ export function App() {
           if (t) selectThread(t.id);
         }}
         onTogglePanel={() => setPanelOpen((v) => !v)}
+        previewOpen={panelOpen && panelTab === "preview"}
+        onTogglePreview={togglePreview}
         onOpenTerminal={() => {
           setPanelTab("terminal");
           setPanelOpen(true);
@@ -2528,26 +2584,6 @@ export function App() {
               chatMain
             )}
           </div>
-          <BottomPanel
-            open={panelOpen}
-            tab={panelTab}
-            onTab={setPanelTab}
-            onClose={() => setPanelOpen(false)}
-            termRef={setTermEl}
-            output={outputLog}
-            procs={procs}
-            browser={browserView}
-            onStopProc={(id) => {
-              if (!sessionId) return;
-              void window.silence.rpc("proc.stop", { session_id: sessionId, id }).catch((e: unknown) => {
-                const message = e instanceof Error ? e.message : String(e);
-                setOutputLog((xs) => [...xs.slice(-199), `[error] proc.stop ${id}: ${message}`]);
-              });
-            }}
-            onOpenUrl={(url) => {
-              if (isLocalUrl(url)) void window.silence.openExternal(url);
-            }}
-          />
         </main>
 
         {confirmReq ? (
@@ -2602,6 +2638,30 @@ export function App() {
             onToggle={toggleHistory}
           />
         ) : null}
+        <SidePanel
+          open={panelOpen}
+          tab={panelTab}
+          onTab={setPanelTab}
+          onClose={() => setPanelOpen(false)}
+          maximized={paneMax && !chatHidden}
+          onToggleMax={() => setPaneMax((v) => !v)}
+          onResize={setPaneWidth}
+          termRef={setTermEl}
+          output={outputLog}
+          procs={procs}
+          browser={browserView}
+          onStopProc={(id) => {
+            if (!sessionId) return;
+            void window.silence.rpc("proc.stop", { session_id: sessionId, id }).catch((e: unknown) => {
+              const message = e instanceof Error ? e.message : String(e);
+              setOutputLog((xs) => [...xs.slice(-199), `[error] proc.stop ${id}: ${message}`]);
+            });
+          }}
+          onOpenUrl={(url) => {
+            if (isLocalUrl(url)) openPreview(url);
+          }}
+          preview={<PreviewPane active={panelOpen && panelTab === "preview"} workspace={workspace} request={previewReq} />}
+        />
       </div>
       {lessonFor ? (
         <LessonDialog workspace={workspace} user={lessonFor.user} answer={lessonFor.answer} onClose={() => setLessonFor(null)} />

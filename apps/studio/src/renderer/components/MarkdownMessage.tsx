@@ -9,6 +9,7 @@ import { WorkspaceImage } from "./WorkspaceImage";
 import { VisualBlock } from "./VisualBlock";
 import type { EditTarget } from "../imageActions";
 import { useT } from "../i18n";
+import { isLocalUrl } from "../procs";
 
 export { parsePathRef };
 
@@ -31,6 +32,11 @@ function textOf(node: ReactNode): string {
  *   chip đường dẫn; link khác chỉ hiện chữ.
  * Copy Message vẫn lấy chuỗi gốc `ai.text`, không lấy từ DOM.
  */
+/** Where a clicked http(s) link goes: loopback → Preview pane (unless Ctrl/⌘), everything else → system browser. */
+export function linkTarget(href: string, canPreview: boolean, modifier: boolean): "preview" | "external" {
+  return canPreview && !modifier && isLocalUrl(href) ? "preview" : "external";
+}
+
 export function MarkdownMessage(props: {
   text: string;
   onOpenFile?: (path: string) => void;
@@ -41,6 +47,8 @@ export function MarkdownMessage(props: {
   streaming?: boolean;
   /** Nút "Chỉnh sửa" khi hover ảnh (hình SVG, ảnh workspace): mở trình đánh dấu. */
   onEditImage?: (target: EditTarget) => void;
+  /** Link localhost/127.0.0.1/[::1] mở vào pane Xem trước; Ctrl+click vẫn ra trình duyệt ngoài. */
+  onOpenPreview?: (url: string) => void;
 }) {
   const { workspace, streaming } = props;
   const t = useT();
@@ -52,6 +60,11 @@ export function MarkdownMessage(props: {
   const hasOpenFile = Boolean(props.onOpenFile);
   const hasOpenImage = Boolean(props.onOpenImage);
   const hasEditImage = Boolean(props.onEditImage);
+  const hasOpenPreview = Boolean(props.onOpenPreview);
+  const onOpenPreview = useMemo(
+    () => (hasOpenPreview ? (url: string) => latest.current.onOpenPreview?.(url) : undefined),
+    [hasOpenPreview],
+  );
   const onOpenFile = useMemo(
     () => (hasOpenFile ? (path: string) => latest.current.onOpenFile?.(path) : undefined),
     [hasOpenFile],
@@ -76,13 +89,16 @@ export function MarkdownMessage(props: {
           );
         }
         if (!href || !isHttp(href)) return <span>{children}</span>;
+        const preview = onOpenPreview && isLocalUrl(href);
         return (
           <a
             href={href}
             rel="noreferrer noopener"
+            title={preview ? t("md.openPreview") : undefined}
             onClick={(e) => {
               e.preventDefault();
-              void window.silence?.openExternal(href);
+              if (onOpenPreview && linkTarget(href, true, e.ctrlKey || e.metaKey) === "preview") onOpenPreview(href);
+              else void window.silence?.openExternal(href);
             }}
           >
             {children}
@@ -146,7 +162,7 @@ export function MarkdownMessage(props: {
     }),
     // `t` changes with the UI language (new function each render): key the memo on its output.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onOpenFile, workspace, onOpenImage, streaming, onEditImage, t("md.imgBlocked")],
+    [onOpenFile, onOpenPreview, workspace, onOpenImage, streaming, onEditImage, t("md.imgBlocked")],
   );
 
   // Same element object → React skips the subtree; only the message whose text changed re-parses.

@@ -47,6 +47,16 @@ declare global {
       onEval?: (cb: (payload: unknown) => void) => () => void;
       /** Show an eval result folder (main allows `evals/results` only). */
       revealEval?: (target: string) => Promise<boolean>;
+      /** Pane Xem trước: main giữ WebContentsView và tự kiểm lại URL (chỉ loopback). */
+      preview?: {
+        open: (url: string) => Promise<boolean>;
+        nav: (action: "back" | "forward" | "reload" | "stop" | "devtools") => Promise<boolean>;
+        layout: (rect: { x: number; y: number; width: number; height: number } | null, show: boolean) => Promise<boolean>;
+        capture: () => Promise<string | null>;
+        state: () => Promise<unknown>;
+        onState: (cb: (state: unknown) => void) => () => void;
+        onKey: (cb: (key: { code: string; ctrl: boolean; shift: boolean; alt: boolean }) => void) => () => void;
+      };
       window: {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;
