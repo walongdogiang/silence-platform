@@ -48,7 +48,11 @@ Kit agent trong app: `templates/silence/` (copy thành `.silence/`). Không sử
 - Một việc, tối đa một lần hỏi về git; không gợi ý commit/push/PR khi việc đã được đồng ý. Trình bày cho user theo thẻ trong `.claude/skills/todo/cards.md`.
 - Cấm kể cả khi user bảo: push `main`, `--no-verify`, commit secrets/`.env`.
 - Không commit `.env`, secrets, `node_modules/`.
-- **Không tự chọn thay user, không đoán ý.** Khi đã đưa phương án (a/b/c) hoặc hỏi user, phải chờ user chọn rõ rồi mới làm. Câu hỏi bị ngắt, bị từ chối hay chưa có trả lời thì **không** được coi là đồng ý với phương án khuyến nghị: dừng lại và hỏi lại. Việc, phạm vi hay thay đổi user chưa chọn thì không tự động sửa.
+- **Tự quyết hay hỏi.**
+  - **Tự quyết, báo gộp một dòng** `Đã tự chọn: … — đổi thì nói` (cuối tin, trước dòng trạng thái): chi tiết trong phạm vi việc đã giao, hoàn tác được trước khi merge, không tốn thêm đáng kể. Ví dụ: tên hàm/biến/file, cách viết code, câu chữ docs nội bộ, thứ tự bước, cách test.
+  - **Hỏi, phương án khuyến nghị đứng đầu:** xoá dữ liệu; quyết định sản phẩm (UI, hành vi, chữ user thấy); đổi phạm vi hay tiêu chí; tốn đáng kể (eval, model đắt, việc lớn); bảo mật/quyền; các mục "Hỏi user trước" ở trên. Không chắc thuộc nhóm nào → hỏi.
+  - **Đánh giá ≠ làm:** user nhờ đánh giá / review / phản biện / đề xuất thì chỉ đề xuất (skill `phan-bien`); làm khi user nói rõ "làm / implement / áp dụng / duyệt".
+  - **Đã hỏi thì chờ:** câu hỏi bị ngắt, bị từ chối hay chưa có trả lời không phải là đồng ý; hỏi lại.
 - Chỉ commit, push, mở PR khi đã xong trọn một chức năng hoặc một việc (code + test + docs đã kiểm, mọi tiêu chí của việc trong `todo/` đạt); không commit lẻ tẻ giữa chừng.
 
 ## Quy trình Git
