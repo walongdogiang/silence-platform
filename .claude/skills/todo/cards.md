@@ -11,6 +11,7 @@ Dùng khi agent trình bày việc, review đóng việc, hỏi dọn worktree, 
 - **Không bịa**: thiếu thông tin thì ghi "chưa rõ"; mục không có nội dung thì bỏ hẳn.
 - **Từ thường trước, mã sau**: tên file, lệnh chỉ khi user cần dùng.
 - **Câu hỏi cuối có lựa chọn đánh số**, để user trả lời một chữ. Thẻ không chờ quyết định thì không có câu hỏi.
+- **Icon chú ý** theo `CLAUDE.md` → **Icon chú ý**: `⚠️ **Lưu ý**`, `👉 **Bạn làm**`, `❓ **Bạn chọn:**`. Biểu tượng ở tiêu đề thẻ (📋 ✅ 🧹 🏁) giữ nguyên.
 - Viết bằng Markdown thật (in đậm, gạch đầu dòng, bảng), không bọc trong khối code.
 
 ## Khung chung
@@ -23,7 +24,7 @@ Một dòng tóm tắt ý chính
 
 **Agent sẽ làm** (bước đánh số, tối đa 4)
 
-**Bạn chọn:** 1) … 2) …
+❓ **Bạn chọn:** 1) … 2) …
 ```
 
 ## 1. Thẻ việc — trình bày việc tiếp theo
@@ -54,7 +55,7 @@ Hỏi user trước khi một chat sửa file mà chat khác đang sửa dở.
 2. Lập kế hoạch và tiêu chí xong → hỏi ở cổng duyệt.
 3. User duyệt → tự làm tới merge, báo kết quả.
 
-**Bạn chọn:** 1) Bắt đầu 2) Để sau 3) Xem việc khác
+❓ **Bạn chọn:** 1) Bắt đầu 2) Để sau 3) Xem việc khác
 ```
 
 ## 2. Review đóng việc — khi user nói "xong" / "đóng"
@@ -72,7 +73,7 @@ Nên đóng: 8/8 tiêu chí đạt, không còn gì dở.
 **Còn dở**
 - Không.
 
-**Rủi ro nếu đóng**
+⚠️ **Lưu ý: rủi ro nếu đóng**
 - Chưa thử hook ở chế độ Bypass permissions.
 
 **Phát sinh (đề xuất thêm vào Later)**
@@ -84,7 +85,7 @@ Nên đóng: 8/8 tiêu chí đạt, không còn gì dở.
 2. Thêm các mục Phát sinh user chọn vào Later.
 3. Mở PR, merge khi CI xanh.
 
-**Bạn chọn:** 1) Đóng + thêm cả hai 2) Đóng, chỉ thêm số … 3) Chưa đóng
+❓ **Bạn chọn:** 1) Đóng + thêm cả hai 2) Đóng, chỉ thêm số … 3) Chưa đóng
 ```
 
 ## 3. Dọn worktree — đầu phiên có thư mục thừa
@@ -105,7 +106,7 @@ Kiểm từng thư mục trước khi đánh giá: git còn nhận là worktree 
 1. Xoá đúng các thư mục user chọn.
 2. Kiểm lại `git worktree list`, báo kết quả.
 
-**Bạn chọn:** 1) Xoá 1 và 2 2) Xoá số … 3) Giữ hết
+❓ **Bạn chọn:** 1) Xoá 1 và 2 2) Xoá số … 3) Giữ hết
 ```
 
 ## 4. Báo xong — tin cuối mỗi việc
@@ -116,19 +117,19 @@ Không có câu hỏi, trừ khi có Phát sinh chờ user chọn thêm vào Lat
 **🏁 Đã xong · T-xxx · Tên việc**
 Đã merge PR #n.
 
-**Bạn cần làm**
+👉 **Bạn làm**
 - Pull thư mục chính (hook / settings / skill vừa đổi): `git -C <thư mục chính> pull --ff-only`
 - Kiểm tay: …
 
 **Phát sinh (đề xuất thêm vào Later)**
 1. … — vì sao
 
-**Bạn chọn:** 1) Thêm cả 2) Thêm số … 3) Không thêm
+❓ **Bạn chọn:** 1) Thêm cả 2) Thêm số … 3) Không thêm
 ```
 
 ## 5. Dòng trạng thái — cuối mỗi lượt có làm việc
 
-Một dòng ở cuối tin; tin có câu hỏi **Bạn chọn** thì đặt dòng này ngay trước câu hỏi. Điều kiện từng loại: `CLAUDE.md` → **Kết thúc lượt**. Thẻ 4 đã mở bằng 🏁 thì không cần thêm dòng này.
+Một dòng ở cuối tin; tin có dòng ❓ **Bạn chọn** thì đặt dòng này ngay trước nó. Điều kiện từng loại: `CLAUDE.md` → **Kết thúc lượt**. Thẻ 4 đã mở bằng 🏁 thì không cần thêm dòng này.
 
 ```
 🏁 Đã xong T-072: PR #97 đã merge.
