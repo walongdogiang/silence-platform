@@ -427,9 +427,9 @@ test("hook: JSON hỏng / thiếu session → exit 0, không in gì", async () =
 
 import { strayLine } from "./todo-brief.mjs";
 
-test("strayLine: một dòng hỏi user, không có thì im", () => {
+test("strayLine: một dòng nhắc dọn (tự xoá cái đạt, hỏi cái không đạt), không có thì im", () => {
   assert.equal(strayLine([]), null);
-  assert.match(strayLine([{ path: "D:/h/old", why: "không còn là worktree" }]), /old \(không còn là worktree\).*không tự xoá/);
+  assert.match(strayLine([{ path: "D:/h/old", why: "không còn là worktree" }]), /old \(không còn là worktree\).*Tự xoá cái sạch.*chỉ hỏi user cái không đạt/);
 });
 
 test("holdingLine: nhắc việc phiên đang giữ kèm tên từ mục lục; không giữ việc thì null", () => {

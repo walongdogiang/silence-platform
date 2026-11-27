@@ -39,7 +39,6 @@ Mã tiếp theo: T-077
 - T-023 [kit] Chống các chat đụng nhau (phần 2): nhật ký sửa file, hỏi khi sửa trùng file · [chi tiết](tasks/T-023-file-activity-warn.md)
 - T-071 [kit] Phát hiện lẫn việc trong một chat, đề xuất tách chat (luật CLAUDE.md + hook ngoài vùng) · [chi tiết](tasks/T-071-task-scope-guard.md)
 - T-073 [kit] Làm gọn kit sau đóng băng: tách `todo/SKILL.md` thành lõi + file tham chiếu, chuyển phần CI/git của `AGENTS.md` sang skill `task-git`; đo trước bằng `/context`
-- T-075 [kit] Dòng `➡️ **Tiếp:**` luôn ghi nơi làm: `(chat này)` hoặc `(chat mới)` — luật hiện không bắt, agent ghi việc kế mà không nói mở chat mới (T-038, 2026-11-28)
 - T-076 [kit] Hook chặn git trong worktree của chat khác cần đường hợp lệ khi user xác nhận chat kia đã đóng (như `claim --force`), vd `todo-claims.mjs worktree-release <thư mục> --force`; giờ chỉ có đợi 2 giờ hoặc user tự chạy lệnh (2026-11-28, dọn `kit-freeze`)
 - T-004 Ngôn ngữ đợt 2: file agent đọc mỗi phiên sang tiếng Anh · [chi tiết](tasks/T-004-lang-batch-2.md)
 - T-001 Thử bước Apply của 1.9 (commit + push `~/.silence` thật — cần user đồng ý trước)

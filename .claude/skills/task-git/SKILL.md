@@ -32,7 +32,8 @@ Việc không có `T-xxx` (user nhờ trong chat):
 - Không đổi nhánh, pull hay stash ở thư mục chính của repo; nơi đó là của user.
 - **Mỗi việc một worktree mới**, tạo bằng `node scripts/todo-claims.mjs worktree <T-xxx|tên> --branch <type>/<T-xxx-slug> --session <id>` (việc con: tên `T-070.2`, nhánh `<type>/T-070.2-slug`): nằm ở thư mục chung `<repo chính>-worktrees\<tên>` (vd `D:\vuhieu\5ilence-worktrees\T-020`), từ `origin/main` mới fetch, không theo dõi `main`, chat này thành chủ. Rồi `npm install` nếu cần. Không dùng lại worktree có sẵn, không tự đặt chỗ khác.
 - Chủ worktree tính theo **chat** (T-020, ADR 0006). Hook chặn `commit`/`push`/`switch`/`checkout`/`reset`/`rebase`/`merge`/`stash`/`pull`/`worktree remove` trong worktree của chat khác còn hoạt động (< 2 giờ), và hỏi user khi chat đó im ≥ 2 giờ. Bị chặn → tạo worktree riêng; **không lách** (đổi thư mục, gọi git kiểu khác). Lệnh chỉ đọc không bị chặn.
-- Xong việc (sau merge): `git worktree remove <thư-mục>` rồi xoá nhánh cục bộ. Đầu phiên có dòng "Thư mục worktree có thể dọn" → kiểm từng thư mục rồi hỏi một lần bằng thẻ **Dọn worktree** (skill `todo` → `cards.md` → 3), kèm đánh giá vì sao xoá/giữ; chỉ xoá đúng thư mục user chọn.
+- Xong việc (sau merge): xoá worktree và nhánh của mình, không hỏi (mục **Sau merge**).
+- Đầu phiên có dòng "Thư mục worktree có thể dọn" → kiểm từng thư mục theo skill `todo` → **Dọn worktree**: thư mục đạt đủ điều kiện thì tự xoá và báo một dòng; chỉ hỏi bằng thẻ **Dọn worktree** (`cards.md` → 3) cho thư mục không đạt.
 
 ## Commit
 1. `git diff --stat`: chỉ file thuộc việc; không `.env`/secrets/`node_modules`.
@@ -44,7 +45,9 @@ Việc không có `T-xxx` (user nhờ trong chat):
 - `gh pr create --base main` (mô tả qua `--body-file`): tiêu đề Conventional Commits; mô tả gồm `T-xxx`, tiêu chí đã đạt, cách đã kiểm (lệnh + kết quả), phần chưa chạy.
 - Sau khi mở: `mcp__ccd_pr__get_status`, chưa gắn thì `bind_pr`. Không tự poll CI.
 - Ghi vào sổ chung (ADR 0006): `node scripts/todo-claims.mjs event pr_opened --pr <n> --session <id>`.
-- Không đề nghị bật Auto-fix: app chỉ đánh thức agent khi CI đỏ / xung đột / review comment, không khi CI xanh. Báo một dòng: "PR #n đang chờ CI; lần tới bạn nhắn, mình merge." User tự bật Auto-fix khi muốn agent tự sửa CI đỏ.
+- **Mở PR sớm trong lượt** (ngay khi commit đầu xong), rồi làm các bước còn lại (DONE, release, báo cáo, dọn) trong lúc CI chạy. **Không poll CI** (không `gh pr checks --watch`, không vòng chờ, không ScheduleWakeup).
+- **Cuối lượt thử `pr-merge.mjs` đúng một lần.** Exit 0 → làm **Sau merge**. Exit 1 vì CI chưa xanh → báo một dòng "PR #n đang chờ CI; lượt sau mình tự merge" và ở lượt kế (bất kể user nhắn gì) chạy lại trước khi làm việc khác. Không bắt user nhắn "merge đi".
+- Không đề nghị bật Auto-fix: app chỉ đánh thức agent khi CI đỏ / xung đột / review comment, không khi CI xanh. User tự bật Auto-fix khi muốn agent tự sửa CI đỏ.
 
 ## CI đỏ
 - Đọc log job hỏng, sửa trong phạm vi việc, commit + push cùng nhánh. Tối đa `maxCiFixAttempts` lần, quá thì **hỏi user** và ghi `event ci_red --pr <n>`.
@@ -57,7 +60,7 @@ Chỉ bằng `node scripts/pr-merge.mjs <số-PR> --session <id>` (thêm `--dry-
 - Script không biết phạm vi việc: tự rà `git diff --stat` trước đó.
 
 ## Sau merge
-- Worktree về `git switch --detach origin/main` (sau `git fetch`), xoá nhánh cục bộ.
+- Tự làm, không hỏi: **đứng ở thư mục khác** (vd thư mục chính, chỉ đọc; Claude Code chặn xoá thư mục đang là cwd), chạy `git worktree remove <thư-mục worktree>` rồi `git branch -D <nhánh>`. Nhánh remote đã do `pr-merge.mjs` xoá. Không `switch --detach` để giữ lại worktree.
 - `node scripts/todo-claims.mjs release T-xxx` (việc đã đóng trong PR, không sửa `todo/` sau merge).
 
 ## Khi nào nhắc user về git/GitHub
