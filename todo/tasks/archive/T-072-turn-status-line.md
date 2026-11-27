@@ -10,7 +10,7 @@ model: opus
 model-build: sonnet
 depends: []
 branch: feat/T-072-turn-status-line
-pr:
+pr: 97
 created: 2026-11-27
 updated: 2026-11-27
 ---
