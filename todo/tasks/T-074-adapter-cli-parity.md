@@ -15,6 +15,15 @@ created: 2026-11-28
 updated: 2026-11-28
 ---
 
+## Ý bạn
+
+- 👤 **Hỏi:** 5ilence chạy qua Claude CLI, có bù được những chỗ CLI yếu hơn desktop app không
+- 🤖 **Đề xuất:** bám CLI, chỉ cộng thêm harness, bù chỗ yếu bạn gặp hằng ngày
+- 👤 **Muốn:** 5ilence bù chỗ yếu của CLI, bám CLI + harness, và "Desktop app có gì thì 5ilence cũng clone về như vậy" — "đây là mục đích tôi làm app này"
+- 🤖 **Cảnh báo:** có 4 chỗ ngược mục đích cũ; trong đó adapter đang chạy khác Claude trong terminal ở 4 điểm
+- 👤 **Chọn:** theo đề xuất → chốt ở T-038 (ADR 0004); việc này là phần code
+- Nguồn: chat «App như harness của Claude CLI» (`local_18d3a694`) · 2026-11-27
+
 ## Mục tiêu
 
 Sửa code adapter Claude (`packages/core/src/backends/claude/`) theo 4 quyết định ở ADR 0004 (T-038) để Claude trong 5ilence chạy như Claude trong terminal, trước khi T-033 bật lõi mặc định. `model: opus` vì đụng quyền và bảo mật.
