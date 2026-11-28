@@ -39,22 +39,20 @@ Phần sửa kit còn lại sau PR #109, #110 (kit đóng băng tới khi T-033 
 
 ## Ví dụ mẫu dòng ➡️
 
+Khung: `➡️ **Tiếp (nơi làm, model):** việc bạn cần làm → mã việc: việc đó là gì bằng lời thường, vì sao làm.` Lối rẽ khác chỉ thêm khi thật sự có. Ghép từ mẫu ở `cards.md` → 5 (nơi làm trong nhãn in đậm, mở bằng hành động) và yêu cầu đọc là hiểu (2026-11-28).
+
 Việc kế bình thường:
 
-> 🏁 Đã xong T-031: lõi nhận fs.* và terminal
-> ➡️ **Tiếp:** T-032 Lõi nhận lịch sử chat (chat mới, gõ `/todo`)
+> 🏁 Đã xong T-031: lõi nhận fs.* và terminal> ➡️ **Tiếp (chat mới, Opus):** gõ `/todo` → T-032: chuyển lịch sử chat, quay lui, rẽ nhánh sang lõi mới, để bỏ được Engine Rust.
 
-Việc kế có điều cần biết:
+Việc kế có điều cần biết, có lối rẽ:
 
-> 🏁 Đã xong T-038: chốt ADR 0004
-> ➡️ **Tiếp:** T-074 vừa hết bị chặn, cần Opus (chat mới)
+> 🏁 Đã xong T-038: chốt cách Claude trong app chạy giống terminal> ➡️ **Tiếp (chat mới, Opus):** gõ `/todo` → T-006: liệt kê những gì app còn gọi qua Engine Rust cũ, để biết phần nào chuyển sang lõi mới. T-074 vừa hết bị chặn; muốn làm trước thì nói "làm T-074".
 
 Nên làm tiếp ngay ở chat này:
 
-> 🏁 Đã xong: tìm ra lỗi thẻ quyền không hiện
-> ➡️ **Tiếp:** sửa lỗi vừa tìm ra (chat này)
+> 🏁 Đã xong: tìm ra vì sao thẻ xin quyền không hiện> ➡️ **Tiếp (chat này):** nói "sửa đi" → sửa lỗi vừa tìm ra, khi còn nhớ rõ nguyên nhân.
 
 Hết việc trong Next:
 
-> 🏁 Đã xong T-035: xoá crates/
-> ➡️ **Tiếp:** Next trống — gõ `/todo` để chọn việc từ Later (chat mới)
+> 🏁 Đã xong T-035: xoá code Rust cũ> ➡️ **Tiếp (chat mới):** gõ `/todo` → Next đã trống; chọn việc từ Later để làm tiếp.
