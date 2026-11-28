@@ -57,7 +57,7 @@ Mã tiếp theo: T-078
 - T-015 4.2 Renderer chạy trên web, PWA cho điện thoại
 - T-016 4.3 Thông báo đẩy, duyệt lệnh rủi ro từ xa
 - T-017 4.4 Hướng dẫn `tailscale serve`
-- T-019 Bảng "Việc" trong Studio đọc `todo/` (Now/Next, tiến độ tiêu chí, PR/CI) — thay bảng chữ của `/todo`
+- T-019 Bảng "Việc" trong Studio đọc `todo/` (Now/Next, tiến độ tiêu chí, PR/CI) — thay bảng chữ của `/todo` · [chi tiết](tasks/T-019-studio-task-board.md)
 - T-024 [kit] Lời báo hook chủ worktree: chat chủ đang làm T-xxx nào + tên chat dễ nhận ra · [chi tiết](tasks/T-024-owner-msg-context.md)
 - T-025 [kit] Phiên con dùng đúng mã phiên của chính nó · [chi tiết](tasks/T-025-side-session-id.md)
 - T-026 [kit] Sổ chủ worktree tự bỏ mục của worktree đã bị xoá · [chi tiết](tasks/T-026-stale-worktree-owner.md)
