@@ -17,12 +17,28 @@ updated: YYYY-MM-DD
 
 <!--
 Chi tiết tăng dần (skill todo → "Chi tiết theo vòng đời"):
-- Lúc thêm: Mục tiêu + Phạm vi sơ bộ.
+- Lúc thêm: Ý bạn + Mục tiêu + Phạm vi sơ bộ.
 - Pha design: + Đọc trước, Bối cảnh, Tái hiện/Thiết kế (theo type), Câu hỏi mở.
 - Pha plan: + Kế hoạch, Tiêu chí xong → CỔNG DUYỆT (user duyệt một lần cả thiết kế, kế hoạch, tiêu chí).
 - Sau cổng duyệt: agent tự làm tới merge; ghi Phát sinh và Nhật ký.
 Xoá mục không dùng; không để mục rỗng.
 -->
+
+## Ý bạn
+
+<!--
+Vì sao user muốn việc này — để đọc lại là nhớ. Ghi lúc thêm việc, từ chính cuộc trao đổi; không đi tìm lại chat cũ.
+- Mỗi dòng: 👤 (user) hoặc 🤖 (agent) + **hành động** in đậm + nội dung.
+  Hành động 👤: Hỏi · Yêu cầu · Chọn · Bác · Muốn. Hành động 🤖: Trả lời · Đề xuất · Cảnh báo.
+- Ngoặc kép chỉ cho câu nguyên văn của user; ý tóm lại thì không ngoặc kép.
+- 3–6 dòng, đủ ý user đã nêu. Dòng cuối: chat gốc · ngày. Đổi ý sau này → thêm dòng mới có ngày, không sửa dòng cũ.
+- Việc agent gom từ lộ trình/backlog, user không tự nêu → một dòng link về quyết định gốc.
+-->
+
+👤 **Muốn:** "…"
+🤖 **Đề xuất:** …
+👤 **Chọn:** …
+Nguồn: [tên chat](#local_…) · YYYY-MM-DD
 
 ## Mục tiêu
 

@@ -17,6 +17,22 @@ Không có PR riêng, không claim. Mỗi việc con một file T-000.k-slug.md 
 Đóng cha trong PR của việc con cuối, khi tiêu chí chung đã đạt. Xoá mục không dùng.
 -->
 
+## Ý bạn
+
+<!--
+Vì sao user muốn việc này — để đọc lại là nhớ. Ghi lúc thêm việc, từ chính cuộc trao đổi; không đi tìm lại chat cũ.
+- Mỗi dòng: 👤 (user) hoặc 🤖 (agent) + **hành động** in đậm + nội dung.
+  Hành động 👤: Hỏi · Yêu cầu · Chọn · Bác · Muốn. Hành động 🤖: Trả lời · Đề xuất · Cảnh báo.
+- Ngoặc kép chỉ cho câu nguyên văn của user; ý tóm lại thì không ngoặc kép.
+- 3–6 dòng, đủ ý user đã nêu. Dòng cuối: chat gốc · ngày. Đổi ý sau này → thêm dòng mới có ngày, không sửa dòng cũ.
+- Việc agent gom từ lộ trình/backlog, user không tự nêu → một dòng link về quyết định gốc.
+-->
+
+👤 **Muốn:** "…"
+🤖 **Đề xuất:** …
+👤 **Chọn:** …
+Nguồn: [tên chat](#local_…) · YYYY-MM-DD
+
 ## Mục tiêu
 
 Vì sao làm, xong cả việc thì cái gì đúng (1–3 câu).
